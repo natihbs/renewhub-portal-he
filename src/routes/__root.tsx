@@ -20,6 +20,7 @@ import { CommsProvider } from "@/lib/comms-store";
 import { ListeningProvider } from "@/lib/listening-store";
 import { AppModeProvider } from "@/lib/app-mode";
 import { IdeasProvider } from "@/lib/ideas-store";
+import { AuthProvider } from "@/lib/auth";
 
 import { RepWorkspace } from "@/components/RepWorkspace";
 import { AppShell } from "@/components/layout/AppShell";
