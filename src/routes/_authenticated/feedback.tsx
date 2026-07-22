@@ -106,7 +106,7 @@ function avgScoreFor(feedback: Feedback[], repId?: string) {
 }
 
 // -------------------- Route --------------------
-export const Route = createFileRoute("/feedback")({
+export const Route = createFileRoute("/_authenticated/feedback")({
   head: () => ({
     meta: [
       { title: "מרכז האזנות חכם · RenewHub" },

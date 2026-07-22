@@ -18,7 +18,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export const Route = createFileRoute("/competitions")({
+export const Route = createFileRoute("/_authenticated/competitions")({
   head: () => ({
     meta: [
       { title: "תחרויות · RenewHub" },

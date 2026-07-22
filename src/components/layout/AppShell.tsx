@@ -1,8 +1,10 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare, LogOut, UserCircle2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useApp } from "@/lib/store";
 import { useUx } from "@/lib/ux-store";
+import { useAppMode } from "@/lib/app-mode";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import {
@@ -12,6 +14,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { CommandPalette, useCommandPalette } from "@/components/CommandPalette";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -20,16 +26,16 @@ import { AboutDialog } from "@/components/AboutDialog";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 
 
-type NavItem = { to: string; label: string; icon: typeof Home; managerOnly?: boolean };
+type NavItem = { to: string; label: string; icon: typeof Home; roles?: Array<"admin" | "manager" | "representative">; managerOnly?: boolean; adminOnly?: boolean };
 const NAV: NavItem[] = [
   { to: "/", label: "דף הבית", icon: Home },
   { to: "/performance", label: "ביצועים", icon: BarChart3 },
   { to: "/competitions", label: "תחרויות", icon: Trophy },
   { to: "/knowledge", label: "מרכז ידע", icon: BookOpen },
   { to: "/feedback", label: "האזנות ומשוב", icon: Headphones },
-  { to: "/data-import", label: "ייבוא נתונים", icon: Upload, managerOnly: true },
-  { to: "/communications", label: "מרכז תקשורת", icon: MessageSquare, managerOnly: true },
-  { to: "/admin", label: "ניהול המערכת", icon: Settings, managerOnly: true },
+  { to: "/data-import", label: "ייבוא נתונים", icon: Upload, managerOnly: true, roles: ["admin", "manager"] },
+  { to: "/communications", label: "מרכז תקשורת", icon: MessageSquare, managerOnly: true, roles: ["admin", "manager"] },
+  { to: "/admin", label: "ניהול המערכת", icon: Settings, managerOnly: true, adminOnly: true, roles: ["admin"] },
 ];
 
 
@@ -72,8 +78,16 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { state } = useApp();
   const { favorites } = useUx();
-  const isManager = state.role === "manager";
-  const visible = NAV.filter((n) => !n.managerOnly || isManager);
+  const { isDemo } = useAppMode();
+  const { roles } = useAuth();
+  // Demo mode falls back to the local role state; Live mode uses real roles from the DB.
+  const canManage = isDemo ? state.role === "manager" : (roles.includes("admin") || roles.includes("manager"));
+  const canAdmin = isDemo ? state.role === "manager" : roles.includes("admin");
+  const visible = NAV.filter((n) => {
+    if (n.adminOnly) return canAdmin;
+    if (n.managerOnly) return canManage;
+    return true;
+  });
   const pinned = visible.filter((n) => favorites.includes(n.to));
 
   return (
@@ -114,11 +128,14 @@ function Brand() {
 
 function RoleSwitcher() {
   const { state, setRole, setCurrentRep } = useApp();
+  const { isDemo } = useAppMode();
   const reps = state.reps;
+  // Demo-only. Never render the role switcher in Live Mode.
+  if (!isDemo) return null;
   return (
     <div className="flex items-center gap-2">
       <Select value={state.role} onValueChange={(v) => setRole(v as "manager" | "rep")}>
-        <SelectTrigger className="h-9 w-28">
+        <SelectTrigger className="h-9 w-28" aria-label="החלפת תפקיד (הדגמה בלבד)">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -144,6 +161,35 @@ function RoleSwitcher() {
   );
 }
 
+function UserMenu() {
+  const { user, profile, roles, signOut, loading } = useAuth();
+  const { isDemo } = useAppMode();
+  if (isDemo || !user) return null;
+  const label = profile?.full_name || user.email || "משתמש";
+  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-9 gap-2" disabled={loading}>
+          <UserCircle2 className="h-5 w-5" />
+          <span className="hidden md:inline max-w-32 truncate">{label}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="flex flex-col">
+          <span className="truncate">{label}</span>
+          <span className="text-xs font-normal text-muted-foreground">{roleLabel}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => void signOut()} className="text-destructive focus:text-destructive">
+          <LogOut className="h-4 w-4 me-2" />
+          התנתקות
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function SearchTrigger({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -159,9 +205,15 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
   );
 }
 
+const BARE_ROUTES = ["/auth", "/reset-password", "/access-denied"];
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const cmd = useCommandPalette();
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  if (BARE_ROUTES.includes(pathname)) {
+    return <div className="min-h-dvh bg-background">{children}</div>;
+  }
 
   return (
     <div className="min-h-dvh flex bg-background">
@@ -207,6 +259,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
             <NotificationBell />
             <RoleSwitcher />
+            <UserMenu />
           </div>
         </header>
 

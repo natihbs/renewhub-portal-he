@@ -20,6 +20,7 @@ import { CommsProvider } from "@/lib/comms-store";
 import { ListeningProvider } from "@/lib/listening-store";
 import { AppModeProvider } from "@/lib/app-mode";
 import { IdeasProvider } from "@/lib/ideas-store";
+import { AuthProvider } from "@/lib/auth";
 
 import { RepWorkspace } from "@/components/RepWorkspace";
 import { AppShell } from "@/components/layout/AppShell";
@@ -133,28 +134,30 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppModeProvider>
-        <AppProvider>
-          <UxProvider>
-            <IdeasProvider>
-              <ImportProvider>
-                <RepWorkspaceProvider>
-                  <MorningProvider>
-                    <CommsProvider>
-                      <ListeningProvider>
-                        <AppShell>
-                          <Outlet />
-                        </AppShell>
-                        <RepWorkspace />
-                        <IdeaFeedbackButton />
-                        <Toaster position="top-center" richColors />
-                      </ListeningProvider>
-                    </CommsProvider>
-                  </MorningProvider>
-                </RepWorkspaceProvider>
-              </ImportProvider>
-            </IdeasProvider>
-          </UxProvider>
-        </AppProvider>
+        <AuthProvider>
+          <AppProvider>
+            <UxProvider>
+              <IdeasProvider>
+                <ImportProvider>
+                  <RepWorkspaceProvider>
+                    <MorningProvider>
+                      <CommsProvider>
+                        <ListeningProvider>
+                          <AppShell>
+                            <Outlet />
+                          </AppShell>
+                          <RepWorkspace />
+                          <IdeaFeedbackButton />
+                          <Toaster position="top-center" richColors />
+                        </ListeningProvider>
+                      </CommsProvider>
+                    </MorningProvider>
+                  </RepWorkspaceProvider>
+                </ImportProvider>
+              </IdeasProvider>
+            </UxProvider>
+          </AppProvider>
+        </AuthProvider>
       </AppModeProvider>
     </QueryClientProvider>
   );

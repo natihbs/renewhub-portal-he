@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 
-export const Route = createFileRoute("/changelog")({
+export const Route = createFileRoute("/_authenticated/changelog")({
   head: () => ({
     meta: [
       { title: `יומן שינויים — ${APP_NAME}` },

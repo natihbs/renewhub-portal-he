@@ -19,7 +19,7 @@ import { ManagerOnly } from "@/components/ManagerOnly";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 
-export const Route = createFileRoute("/knowledge")({
+export const Route = createFileRoute("/_authenticated/knowledge")({
   head: () => ({
     meta: [
       { title: "מרכז ידע · RenewHub" },

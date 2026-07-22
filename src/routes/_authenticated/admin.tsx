@@ -15,7 +15,10 @@ import type { Announcement } from "@/lib/seed";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 
-export const Route = createFileRoute("/admin")({
+import { requireRole } from "@/lib/require-role";
+
+export const Route = createFileRoute("/_authenticated/admin")({
+  beforeLoad: () => requireRole(["admin"]),
   head: () => ({
     meta: [
       { title: "ניהול המערכת · RenewHub" },
