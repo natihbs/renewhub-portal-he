@@ -245,12 +245,11 @@ function AboutContentDialog({ open, onOpenChange }: { open: boolean; onOpenChang
 
 function UserMenu() {
   const { user, profile, roles, loading } = useAuth();
-  const { isDemo } = useAppMode();
   const navigate = useNavigate();
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-  if (isDemo || !user) return null;
+  if (!user) return null;
   const name = profile?.full_name || user.email || "משתמש";
   const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
   const initials = initialsOf(profile?.full_name, user.email);
