@@ -94,8 +94,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "RenewHub" },
       { name: "twitter:description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/e082c3e3-7434-4fd9-a840-da9206631be8" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/e082c3e3-7434-4fd9-a840-da9206631be8" },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
