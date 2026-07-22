@@ -134,28 +134,30 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppModeProvider>
-        <AppProvider>
-          <UxProvider>
-            <IdeasProvider>
-              <ImportProvider>
-                <RepWorkspaceProvider>
-                  <MorningProvider>
-                    <CommsProvider>
-                      <ListeningProvider>
-                        <AppShell>
-                          <Outlet />
-                        </AppShell>
-                        <RepWorkspace />
-                        <IdeaFeedbackButton />
-                        <Toaster position="top-center" richColors />
-                      </ListeningProvider>
-                    </CommsProvider>
-                  </MorningProvider>
-                </RepWorkspaceProvider>
-              </ImportProvider>
-            </IdeasProvider>
-          </UxProvider>
-        </AppProvider>
+        <AuthProvider>
+          <AppProvider>
+            <UxProvider>
+              <IdeasProvider>
+                <ImportProvider>
+                  <RepWorkspaceProvider>
+                    <MorningProvider>
+                      <CommsProvider>
+                        <ListeningProvider>
+                          <AppShell>
+                            <Outlet />
+                          </AppShell>
+                          <RepWorkspace />
+                          <IdeaFeedbackButton />
+                          <Toaster position="top-center" richColors />
+                        </ListeningProvider>
+                      </CommsProvider>
+                    </MorningProvider>
+                  </RepWorkspaceProvider>
+                </ImportProvider>
+              </IdeasProvider>
+            </UxProvider>
+          </AppProvider>
+        </AuthProvider>
       </AppModeProvider>
     </QueryClientProvider>
   );
