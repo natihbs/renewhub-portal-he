@@ -30,7 +30,7 @@ import { TEAM_LABEL, type Rep } from "@/lib/seed";
 import { formatDateIL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/data-import")({
+export const Route = createFileRoute("/_authenticated/data-import")({
   head: () => ({
     meta: [
       { title: "ייבוא נתונים · RenewHub" },

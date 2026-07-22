@@ -9,100 +9,102 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as PerformanceRouteImport } from './routes/performance'
-import { Route as KnowledgeRouteImport } from './routes/knowledge'
-import { Route as FeedbackRouteImport } from './routes/feedback'
-import { Route as DataImportRouteImport } from './routes/data-import'
-import { Route as CompetitionsRouteImport } from './routes/competitions'
-import { Route as CommunicationsRouteImport } from './routes/communications'
-import { Route as ChangelogRouteImport } from './routes/changelog'
-import { Route as AdminRouteImport } from './routes/admin'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
+import { Route as AuthenticatedKnowledgeRouteImport } from './routes/_authenticated/knowledge'
+import { Route as AuthenticatedFeedbackRouteImport } from './routes/_authenticated/feedback'
+import { Route as AuthenticatedDataImportRouteImport } from './routes/_authenticated/data-import'
+import { Route as AuthenticatedCompetitionsRouteImport } from './routes/_authenticated/competitions'
+import { Route as AuthenticatedCommunicationsRouteImport } from './routes/_authenticated/communications'
+import { Route as AuthenticatedChangelogRouteImport } from './routes/_authenticated/changelog'
+import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 
-const PerformanceRoute = PerformanceRouteImport.update({
-  id: '/performance',
-  path: '/performance',
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
+  id: '/_authenticated/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const KnowledgeRoute = KnowledgeRouteImport.update({
-  id: '/knowledge',
+const AuthenticatedPerformanceRoute =
+  AuthenticatedPerformanceRouteImport.update({
+    id: '/_authenticated/performance',
+    path: '/performance',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AuthenticatedKnowledgeRoute = AuthenticatedKnowledgeRouteImport.update({
+  id: '/_authenticated/knowledge',
   path: '/knowledge',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FeedbackRoute = FeedbackRouteImport.update({
-  id: '/feedback',
+const AuthenticatedFeedbackRoute = AuthenticatedFeedbackRouteImport.update({
+  id: '/_authenticated/feedback',
   path: '/feedback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DataImportRoute = DataImportRouteImport.update({
-  id: '/data-import',
+const AuthenticatedDataImportRoute = AuthenticatedDataImportRouteImport.update({
+  id: '/_authenticated/data-import',
   path: '/data-import',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CompetitionsRoute = CompetitionsRouteImport.update({
-  id: '/competitions',
-  path: '/competitions',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CommunicationsRoute = CommunicationsRouteImport.update({
-  id: '/communications',
-  path: '/communications',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChangelogRoute = ChangelogRouteImport.update({
-  id: '/changelog',
+const AuthenticatedCompetitionsRoute =
+  AuthenticatedCompetitionsRouteImport.update({
+    id: '/_authenticated/competitions',
+    path: '/competitions',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AuthenticatedCommunicationsRoute =
+  AuthenticatedCommunicationsRouteImport.update({
+    id: '/_authenticated/communications',
+    path: '/communications',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AuthenticatedChangelogRoute = AuthenticatedChangelogRouteImport.update({
+  id: '/_authenticated/changelog',
   path: '/changelog',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
+const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
+  id: '/_authenticated/admin',
   path: '/admin',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/changelog': typeof ChangelogRoute
-  '/communications': typeof CommunicationsRoute
-  '/competitions': typeof CompetitionsRoute
-  '/data-import': typeof DataImportRoute
-  '/feedback': typeof FeedbackRoute
-  '/knowledge': typeof KnowledgeRoute
-  '/performance': typeof PerformanceRoute
+  '/admin': typeof AuthenticatedAdminRoute
+  '/changelog': typeof AuthenticatedChangelogRoute
+  '/communications': typeof AuthenticatedCommunicationsRoute
+  '/competitions': typeof AuthenticatedCompetitionsRoute
+  '/data-import': typeof AuthenticatedDataImportRoute
+  '/feedback': typeof AuthenticatedFeedbackRoute
+  '/knowledge': typeof AuthenticatedKnowledgeRoute
+  '/performance': typeof AuthenticatedPerformanceRoute
+  '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/changelog': typeof ChangelogRoute
-  '/communications': typeof CommunicationsRoute
-  '/competitions': typeof CompetitionsRoute
-  '/data-import': typeof DataImportRoute
-  '/feedback': typeof FeedbackRoute
-  '/knowledge': typeof KnowledgeRoute
-  '/performance': typeof PerformanceRoute
+  '/admin': typeof AuthenticatedAdminRoute
+  '/changelog': typeof AuthenticatedChangelogRoute
+  '/communications': typeof AuthenticatedCommunicationsRoute
+  '/competitions': typeof AuthenticatedCompetitionsRoute
+  '/data-import': typeof AuthenticatedDataImportRoute
+  '/feedback': typeof AuthenticatedFeedbackRoute
+  '/knowledge': typeof AuthenticatedKnowledgeRoute
+  '/performance': typeof AuthenticatedPerformanceRoute
+  '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
-  '/changelog': typeof ChangelogRoute
-  '/communications': typeof CommunicationsRoute
-  '/competitions': typeof CompetitionsRoute
-  '/data-import': typeof DataImportRoute
-  '/feedback': typeof FeedbackRoute
-  '/knowledge': typeof KnowledgeRoute
-  '/performance': typeof PerformanceRoute
+  '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/_authenticated/changelog': typeof AuthenticatedChangelogRoute
+  '/_authenticated/communications': typeof AuthenticatedCommunicationsRoute
+  '/_authenticated/competitions': typeof AuthenticatedCompetitionsRoute
+  '/_authenticated/data-import': typeof AuthenticatedDataImportRoute
+  '/_authenticated/feedback': typeof AuthenticatedFeedbackRoute
+  '/_authenticated/knowledge': typeof AuthenticatedKnowledgeRoute
+  '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/admin'
     | '/changelog'
     | '/communications'
@@ -111,9 +113,9 @@ export interface FileRouteTypes {
     | '/feedback'
     | '/knowledge'
     | '/performance'
+    | '/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/admin'
     | '/changelog'
     | '/communications'
@@ -122,109 +124,110 @@ export interface FileRouteTypes {
     | '/feedback'
     | '/knowledge'
     | '/performance'
+    | '/'
   id:
     | '__root__'
-    | '/'
-    | '/admin'
-    | '/changelog'
-    | '/communications'
-    | '/competitions'
-    | '/data-import'
-    | '/feedback'
-    | '/knowledge'
-    | '/performance'
+    | '/_authenticated/admin'
+    | '/_authenticated/changelog'
+    | '/_authenticated/communications'
+    | '/_authenticated/competitions'
+    | '/_authenticated/data-import'
+    | '/_authenticated/feedback'
+    | '/_authenticated/knowledge'
+    | '/_authenticated/performance'
+    | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
-  ChangelogRoute: typeof ChangelogRoute
-  CommunicationsRoute: typeof CommunicationsRoute
-  CompetitionsRoute: typeof CompetitionsRoute
-  DataImportRoute: typeof DataImportRoute
-  FeedbackRoute: typeof FeedbackRoute
-  KnowledgeRoute: typeof KnowledgeRoute
-  PerformanceRoute: typeof PerformanceRoute
+  AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
+  AuthenticatedChangelogRoute: typeof AuthenticatedChangelogRoute
+  AuthenticatedCommunicationsRoute: typeof AuthenticatedCommunicationsRoute
+  AuthenticatedCompetitionsRoute: typeof AuthenticatedCompetitionsRoute
+  AuthenticatedDataImportRoute: typeof AuthenticatedDataImportRoute
+  AuthenticatedFeedbackRoute: typeof AuthenticatedFeedbackRoute
+  AuthenticatedKnowledgeRoute: typeof AuthenticatedKnowledgeRoute
+  AuthenticatedPerformanceRoute: typeof AuthenticatedPerformanceRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/performance': {
-      id: '/performance'
-      path: '/performance'
-      fullPath: '/performance'
-      preLoaderRoute: typeof PerformanceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/knowledge': {
-      id: '/knowledge'
-      path: '/knowledge'
-      fullPath: '/knowledge'
-      preLoaderRoute: typeof KnowledgeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/feedback': {
-      id: '/feedback'
-      path: '/feedback'
-      fullPath: '/feedback'
-      preLoaderRoute: typeof FeedbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/data-import': {
-      id: '/data-import'
-      path: '/data-import'
-      fullPath: '/data-import'
-      preLoaderRoute: typeof DataImportRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/competitions': {
-      id: '/competitions'
-      path: '/competitions'
-      fullPath: '/competitions'
-      preLoaderRoute: typeof CompetitionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/communications': {
-      id: '/communications'
-      path: '/communications'
-      fullPath: '/communications'
-      preLoaderRoute: typeof CommunicationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/changelog': {
-      id: '/changelog'
-      path: '/changelog'
-      fullPath: '/changelog'
-      preLoaderRoute: typeof ChangelogRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/performance': {
+      id: '/_authenticated/performance'
+      path: '/performance'
+      fullPath: '/performance'
+      preLoaderRoute: typeof AuthenticatedPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/knowledge': {
+      id: '/_authenticated/knowledge'
+      path: '/knowledge'
+      fullPath: '/knowledge'
+      preLoaderRoute: typeof AuthenticatedKnowledgeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/feedback': {
+      id: '/_authenticated/feedback'
+      path: '/feedback'
+      fullPath: '/feedback'
+      preLoaderRoute: typeof AuthenticatedFeedbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/data-import': {
+      id: '/_authenticated/data-import'
+      path: '/data-import'
+      fullPath: '/data-import'
+      preLoaderRoute: typeof AuthenticatedDataImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/competitions': {
+      id: '/_authenticated/competitions'
+      path: '/competitions'
+      fullPath: '/competitions'
+      preLoaderRoute: typeof AuthenticatedCompetitionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/communications': {
+      id: '/_authenticated/communications'
+      path: '/communications'
+      fullPath: '/communications'
+      preLoaderRoute: typeof AuthenticatedCommunicationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/changelog': {
+      id: '/_authenticated/changelog'
+      path: '/changelog'
+      fullPath: '/changelog'
+      preLoaderRoute: typeof AuthenticatedChangelogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/admin': {
+      id: '/_authenticated/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
-  ChangelogRoute: ChangelogRoute,
-  CommunicationsRoute: CommunicationsRoute,
-  CompetitionsRoute: CompetitionsRoute,
-  DataImportRoute: DataImportRoute,
-  FeedbackRoute: FeedbackRoute,
-  KnowledgeRoute: KnowledgeRoute,
-  PerformanceRoute: PerformanceRoute,
+  AuthenticatedAdminRoute: AuthenticatedAdminRoute,
+  AuthenticatedChangelogRoute: AuthenticatedChangelogRoute,
+  AuthenticatedCommunicationsRoute: AuthenticatedCommunicationsRoute,
+  AuthenticatedCompetitionsRoute: AuthenticatedCompetitionsRoute,
+  AuthenticatedDataImportRoute: AuthenticatedDataImportRoute,
+  AuthenticatedFeedbackRoute: AuthenticatedFeedbackRoute,
+  AuthenticatedKnowledgeRoute: AuthenticatedKnowledgeRoute,
+  AuthenticatedPerformanceRoute: AuthenticatedPerformanceRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

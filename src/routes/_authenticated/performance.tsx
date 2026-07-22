@@ -28,7 +28,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
-export const Route = createFileRoute("/performance")({
+export const Route = createFileRoute("/_authenticated/performance")({
   head: () => ({
     meta: [
       { title: "ביצועים · RenewHub" },

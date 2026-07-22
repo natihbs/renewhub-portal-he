@@ -15,7 +15,7 @@ import type { Announcement } from "@/lib/seed";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 
-export const Route = createFileRoute("/admin")({
+export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({
     meta: [
       { title: "ניהול המערכת · RenewHub" },

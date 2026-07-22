@@ -23,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/communications")({
+export const Route = createFileRoute("/_authenticated/communications")({
   head: () => ({
     meta: [
       { title: "מרכז תקשורת · RenewHub" },
