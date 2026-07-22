@@ -159,7 +159,14 @@ export const updateUser = createServerFn({ method: "POST" })
       }
     }
 
-    const profileUpdate: Record<string, unknown> = {};
+    const profileUpdate: {
+      full_name?: string | null;
+      team_id?: string | null;
+      manager_id?: string | null;
+      representative_id?: string | null;
+      active?: boolean;
+      must_change_password?: boolean;
+    } = {};
     if (data.full_name !== undefined) profileUpdate.full_name = data.full_name;
     if (data.team_id !== undefined) profileUpdate.team_id = data.team_id;
     if (data.manager_id !== undefined) profileUpdate.manager_id = data.manager_id;
