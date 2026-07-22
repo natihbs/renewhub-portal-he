@@ -205,9 +205,15 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
   );
 }
 
+const BARE_ROUTES = ["/auth", "/reset-password", "/access-denied"];
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const cmd = useCommandPalette();
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  if (BARE_ROUTES.includes(pathname)) {
+    return <div className="min-h-dvh bg-background">{children}</div>;
+  }
 
   return (
     <div className="min-h-dvh flex bg-background">
