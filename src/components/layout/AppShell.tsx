@@ -253,6 +253,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
             <NotificationBell />
             <RoleSwitcher />
+            <UserMenu />
           </div>
         </header>
 
