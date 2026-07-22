@@ -23,7 +23,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
+import { requireRole } from "@/lib/require-role";
+
 export const Route = createFileRoute("/_authenticated/communications")({
+  beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
       { title: "מרכז תקשורת · RenewHub" },

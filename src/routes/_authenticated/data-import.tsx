@@ -30,7 +30,10 @@ import { TEAM_LABEL, type Rep } from "@/lib/seed";
 import { formatDateIL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
+import { requireRole } from "@/lib/require-role";
+
 export const Route = createFileRoute("/_authenticated/data-import")({
+  beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
       { title: "ייבוא נתונים · RenewHub" },
