@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_log: {
+        Row: {
+          action: string
+          actor_email: string | null
+          actor_id: string | null
+          created_at: string
+          details: Json
+          id: string
+          target_email: string | null
+          target_user_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_email?: string | null
+          actor_id?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          target_email?: string | null
+          target_user_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_email?: string | null
+          actor_id?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          target_email?: string | null
+          target_user_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           active: boolean
@@ -23,6 +56,7 @@ export type Database = {
           id: string
           last_login_at: string | null
           manager_id: string | null
+          must_change_password: boolean
           representative_id: string | null
           team_id: string | null
           updated_at: string
@@ -35,6 +69,7 @@ export type Database = {
           id: string
           last_login_at?: string | null
           manager_id?: string | null
+          must_change_password?: boolean
           representative_id?: string | null
           team_id?: string | null
           updated_at?: string
@@ -47,6 +82,7 @@ export type Database = {
           id?: string
           last_login_at?: string | null
           manager_id?: string | null
+          must_change_password?: boolean
           representative_id?: string | null
           team_id?: string | null
           updated_at?: string

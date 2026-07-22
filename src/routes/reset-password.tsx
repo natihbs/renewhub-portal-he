@@ -43,6 +43,12 @@ function ResetPasswordPage() {
     if (password !== confirm) return toast.error("הסיסמאות אינן תואמות.");
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
+    if (!error) {
+      const { data: u } = await supabase.auth.getUser();
+      if (u.user) {
+        await supabase.from("profiles").update({ must_change_password: false }).eq("id", u.user.id);
+      }
+    }
     setLoading(false);
     if (error) return toast.error(hebrewAuthError(error.message));
     toast.success("הסיסמה עודכנה בהצלחה.");
