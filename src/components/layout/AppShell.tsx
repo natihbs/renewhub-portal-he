@@ -1,12 +1,15 @@
-import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare, LogOut, UserCircle2, Users2 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare, LogOut, Users2, User as UserIcon, KeyRound, Info } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { useApp } from "@/lib/store";
 import { useUx } from "@/lib/ux-store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -18,12 +21,14 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { CommandPalette, useCommandPalette } from "@/components/CommandPalette";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ModeToggle } from "@/components/ModeToggle";
 import { AboutDialog } from "@/components/AboutDialog";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
+import { APP_NAME, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_DATE } from "@/lib/app-meta";
 
 
 type NavItem = { to: string; label: string; icon: typeof Home; roles?: Array<"admin" | "manager" | "representative">; managerOnly?: boolean; adminOnly?: boolean };
@@ -162,32 +167,166 @@ function RoleSwitcher() {
   );
 }
 
-function UserMenu() {
-  const { user, profile, roles, signOut, loading } = useAuth();
-  const { isDemo } = useAppMode();
-  if (isDemo || !user) return null;
-  const label = profile?.full_name || user.email || "משתמש";
+function initialsOf(name: string | null | undefined, email: string | null | undefined): string {
+  const src = (name || email || "").trim();
+  if (!src) return "?";
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
+}
+
+function ProfileDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const { user, profile, roles } = useAuth();
   const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-9 gap-2" disabled={loading}>
-          <UserCircle2 className="h-5 w-5" />
-          <span className="hidden md:inline max-w-32 truncate">{label}</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="flex flex-col">
-          <span className="truncate">{label}</span>
-          <span className="text-xs font-normal text-muted-foreground">{roleLabel}</span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void signOut()} className="text-destructive focus:text-destructive">
-          <LogOut className="h-4 w-4 me-2" />
-          התנתקות
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>הפרופיל שלי</DialogTitle>
+          <DialogDescription>פרטי החשבון המחובר</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-3 pb-2">
+          <Avatar className="h-14 w-14">
+            <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
+              {initialsOf(profile?.full_name, user?.email)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <div className="font-semibold truncate">{profile?.full_name || "—"}</div>
+            <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm border-t pt-3">
+          <span className="text-muted-foreground">תפקיד</span>
+          <span className="font-medium">{roleLabel}</span>
+          <span className="text-muted-foreground">סטטוס</span>
+          <span className="font-medium">{profile?.active === false ? "לא פעיל" : "פעיל"}</span>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>הגדרות</DialogTitle>
+          <DialogDescription>מסך ההגדרות האישיות יהיה זמין בקרוב.</DialogDescription>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">בגרסה הבאה: העדפות תצוגה, שפה, התראות ואינטגרציות אישיות.</p>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>סגירה</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AboutContentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>אודות {APP_NAME}</DialogTitle>
+          <DialogDescription>פורטל חידושים פנימי לצוותי חידושי רכב ודירה.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+          <span className="text-muted-foreground">שלב</span><span className="font-medium">{APP_STAGE}</span>
+          <span className="text-muted-foreground">גרסה</span><span className="font-mono">{APP_VERSION}</span>
+          <span className="text-muted-foreground">מספר בילד</span><span className="font-mono">{BUILD_NUMBER}</span>
+          <span className="text-muted-foreground">תאריך בילד</span><span className="font-mono">{BUILD_DATE}</span>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserMenu() {
+  const { user, profile, roles, loading } = useAuth();
+  const { isDemo } = useAppMode();
+  const navigate = useNavigate();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  if (isDemo || !user) return null;
+  const name = profile?.full_name || user.email || "משתמש";
+  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
+  const initials = initialsOf(profile?.full_name, user.email);
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
+      toast.success("התנתקת בהצלחה");
+      await navigate({ to: "/auth" });
+    } catch {
+      toast.error("שגיאה בהתנתקות. נסה שוב.");
+    }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={loading}
+            aria-label="תפריט משתמש"
+            className="flex items-center gap-2 h-10 rounded-full ps-1 pe-2 md:pe-3 hover:bg-accent transition-colors disabled:opacity-50"
+          >
+            <Avatar className="h-8 w-8">
+              <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="hidden md:flex flex-col items-end leading-tight min-w-0">
+              <span className="text-sm font-medium truncate max-w-32">{name}</span>
+              <span className="text-[11px] text-muted-foreground truncate max-w-32">{roleLabel}</span>
+            </div>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuLabel className="flex items-center gap-3 py-3">
+            <Avatar className="h-10 w-10">
+              <AvatarFallback className="bg-primary text-primary-foreground text-sm font-semibold">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col min-w-0">
+              <span className="truncate font-semibold">{name}</span>
+              <span className="text-xs font-normal text-muted-foreground truncate">{roleLabel}</span>
+            </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
+            <UserIcon className="h-4 w-4 me-2" />
+            הפרופיל שלי
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void navigate({ to: "/reset-password" })}>
+            <KeyRound className="h-4 w-4 me-2" />
+            החלפת סיסמה
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+            <Settings className="h-4 w-4 me-2" />
+            הגדרות
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setAboutOpen(true)}>
+            <Info className="h-4 w-4 me-2" />
+            אודות RenewHub
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => void handleSignOut()} className="text-destructive focus:text-destructive">
+            <LogOut className="h-4 w-4 me-2" />
+            התנתק
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <AboutContentDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+    </>
   );
 }
 
