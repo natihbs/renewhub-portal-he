@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
 
 export type Notification = {
   id: string;
@@ -17,36 +18,25 @@ export type Activity = {
   date: string;
 };
 
-type UxState = {
-  favorites: string[]; // route paths pinned
+type NotificationRow = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  href: string | null;
+  read: boolean;
+  created_at: string;
+};
+type ActivityRow = { id: string; kind: string; text: string; created_at: string };
+
+/** UI preference only — favorites are a per-browser convenience, not business data. */
+const FAVORITES_KEY = "renewhub_favorites";
+const DEFAULT_FAVORITES = ["/performance", "/feedback"];
+
+type Ctx = {
+  favorites: string[];
   notifications: Notification[];
   activity: Activity[];
-};
-
-const KEY = "renewhub_ux_v1";
-const uid = () => Math.random().toString(36).slice(2, 10);
-const today = () => new Date().toISOString();
-
-const SEED: UxState = {
-  favorites: ["/performance", "/feedback"],
-  notifications: [
-    { id: uid(), kind: "performance", title: "רן ביטון חצה את היעד", body: "עמידה של 108% בביצועי החודש.", date: today(), read: false, href: "/performance" },
-    { id: uid(), kind: "feedback", title: "האזנה חדשה נוצרה", body: "האזנה חדשה עבור נועה כהן - ציון 87.", date: today(), read: false, href: "/feedback" },
-    { id: uid(), kind: "competition", title: "עדכון תחרות", body: "מונדיאל החידושים - סבב חדש נפתח.", date: today(), read: false, href: "/competitions" },
-    { id: uid(), kind: "knowledge", title: "מאמר חדש במרכז הידע", body: "פורסם: 'טיפול בהתנגדות מחיר בחידושי דירה'.", date: today(), read: true, href: "/knowledge" },
-    { id: uid(), kind: "performance", title: "3 נציגים מתחת לקצב", body: "מומלץ לפתוח האזנה השבוע.", date: today(), read: true, href: "/performance" },
-  ],
-  activity: [
-    { id: uid(), kind: "performance", text: "רן ביטון עבר את היעד החודשי.", date: today() },
-    { id: uid(), kind: "feedback", text: "נוצרה האזנה חדשה עבור נועה כהן.", date: today() },
-    { id: uid(), kind: "competition", text: "נוספה תחרות חדשה: מונדיאל החידושים.", date: today() },
-    { id: uid(), kind: "knowledge", text: "עודכן מאמר במרכז הידע: תסריטי שיחה.", date: today() },
-    { id: uid(), kind: "rep", text: "עודכן יעד חודשי לנציג מיכל אברהם.", date: today() },
-    { id: uid(), kind: "feedback", text: "הוזן משוב מנהל עבור יוסי לוי.", date: today() },
-  ],
-};
-
-type Ctx = UxState & {
   toggleFavorite: (path: string) => void;
   isFavorite: (path: string) => boolean;
   markNotificationRead: (id: string) => void;
@@ -57,36 +47,70 @@ type Ctx = UxState & {
 const UxCtx = createContext<Ctx | null>(null);
 
 export function UxProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<UxState>(SEED);
+  const [favorites, setFavorites] = useState<string[]>(DEFAULT_FAVORITES);
   const [hydrated, setHydrated] = useState(false);
+
+  const notifs = useCloudCollection<NotificationRow>("notifications", {
+    order: { column: "created_at" },
+    limit: 50,
+  });
+  const activityCloud = useCloudCollection<ActivityRow>("activity_events", {
+    order: { column: "created_at" },
+    limit: 30,
+  });
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setState({ ...SEED, ...JSON.parse(raw) });
+      const raw = localStorage.getItem(FAVORITES_KEY);
+      if (raw) setFavorites(JSON.parse(raw));
     } catch {}
     setHydrated(true);
   }, []);
   useEffect(() => {
     if (!hydrated) return;
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
-  }, [state, hydrated]);
+    try {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    } catch {}
+  }, [favorites, hydrated]);
 
-  const value = useMemo<Ctx>(() => ({
-    ...state,
-    toggleFavorite: (path) => setState((s) => ({
-      ...s,
-      favorites: s.favorites.includes(path) ? s.favorites.filter((p) => p !== path) : [...s.favorites, path],
-    })),
-    isFavorite: (path) => state.favorites.includes(path),
-    markNotificationRead: (id) => setState((s) => ({
-      ...s, notifications: s.notifications.map((n) => n.id === id ? { ...n, read: true } : n),
-    })),
-    markAllRead: () => setState((s) => ({ ...s, notifications: s.notifications.map((n) => ({ ...n, read: true })) })),
-    pushActivity: (a) => setState((s) => ({
-      ...s, activity: [{ ...a, id: uid(), date: today() }, ...s.activity].slice(0, 30),
-    })),
-  }), [state]);
+  const value = useMemo<Ctx>(() => {
+    const notifications: Notification[] = notifs.rows.map((n) => ({
+      id: n.id,
+      kind: n.kind as Notification["kind"],
+      title: n.title,
+      body: n.body,
+      date: n.created_at,
+      read: n.read,
+      href: n.href ?? undefined,
+    }));
+    const activity: Activity[] = activityCloud.rows.map((a) => ({
+      id: a.id,
+      kind: a.kind as Activity["kind"],
+      text: a.text,
+      date: a.created_at,
+    }));
+
+    return {
+      favorites,
+      notifications,
+      activity,
+      toggleFavorite: (path) =>
+        setFavorites((f) => (f.includes(path) ? f.filter((p) => p !== path) : [...f, path])),
+      isFavorite: (path) => favorites.includes(path),
+      markNotificationRead: (id) => {
+        if (!notifs.live) return;
+        void notifs.update(id, { read: true });
+      },
+      markAllRead: () => {
+        if (!notifs.live) return;
+        for (const n of notifications.filter((x) => !x.read)) void notifs.update(n.id, { read: true });
+      },
+      pushActivity: (a) => {
+        if (!activityCloud.live) return;
+        void activityCloud.insert({ kind: a.kind, text: a.text }, "actor_id");
+      },
+    };
+  }, [favorites, notifs, activityCloud]);
 
   return <UxCtx.Provider value={value}>{children}</UxCtx.Provider>;
 }
