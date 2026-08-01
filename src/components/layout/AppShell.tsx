@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare, LogOut, Users2, User as UserIcon, KeyRound, Info } from "lucide-react";
+import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare, LogOut, Users2, UsersRound, User as UserIcon, KeyRound, Info } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/store";
@@ -40,6 +40,7 @@ const NAV: NavItem[] = [
   { to: "/feedback", label: "האזנות ומשוב", icon: Headphones },
   { to: "/data-import", label: "ייבוא נתונים", icon: Upload, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/communications", label: "מרכז תקשורת", icon: MessageSquare, managerOnly: true, roles: ["admin", "manager"] },
+  { to: "/teams", label: "ניהול צוותים", icon: UsersRound, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/users", label: "ניהול משתמשים", icon: Users2, managerOnly: true, adminOnly: true, roles: ["admin"] },
   { to: "/admin", label: "ניהול המערכת", icon: Settings, managerOnly: true, adminOnly: true, roles: ["admin"] },
 ];
