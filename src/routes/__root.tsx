@@ -133,9 +133,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppModeProvider>
-        <AuthProvider>
+      <AuthProvider>
+        <AppModeProvider>
           <AppProvider>
+
             <UxProvider>
               <IdeasProvider>
                 <ImportProvider>
