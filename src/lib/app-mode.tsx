@@ -26,9 +26,8 @@ function purgeLegacyModeState() {
 }
 
 export function AppModeProvider({ children }: { children: ReactNode }) {
-  const { user, loading, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const [demoRequested, setDemoRequested] = useState(false);
-  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     purgeLegacyModeState();
@@ -46,7 +45,6 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
     setDemoRequested(requested);
-    setReady(true);
   }, []);
 
   const value = useMemo<Ctx>(() => {
@@ -64,7 +62,7 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
         setDemoRequested(false);
       },
     };
-  }, [demoRequested, isAdmin, user, ready, loading]);
+  }, [demoRequested, isAdmin]);
 
   return <ModeCtx.Provider value={value}>{children}</ModeCtx.Provider>;
 }
