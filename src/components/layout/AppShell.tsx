@@ -358,6 +358,8 @@ const PAGE_TITLES: Record<string, string> = {
   "/feedback": "האזנות ומשוב",
   "/data-import": "ייבוא נתונים",
   "/communications": "מרכז תקשורת",
+  "/teams": "ניהול צוותים",
+  "/representatives": "ניהול נציגים",
   "/users": "ניהול משתמשים",
   "/admin": "ניהול המערכת",
   "/changelog": "יומן שינויים",
