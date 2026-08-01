@@ -41,6 +41,7 @@ const NAV: NavItem[] = [
   { to: "/data-import", label: "ייבוא נתונים", icon: Upload, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/communications", label: "מרכז תקשורת", icon: MessageSquare, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/teams", label: "ניהול צוותים", icon: UsersRound, managerOnly: true, roles: ["admin", "manager"] },
+  { to: "/representatives", label: "ניהול נציגים", icon: Users2, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/users", label: "ניהול משתמשים", icon: Users2, managerOnly: true, adminOnly: true, roles: ["admin"] },
   { to: "/admin", label: "ניהול המערכת", icon: Settings, managerOnly: true, adminOnly: true, roles: ["admin"] },
 ];
