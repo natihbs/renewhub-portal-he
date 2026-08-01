@@ -259,8 +259,8 @@ export const setUserTeam = createServerFn({ method: "POST" })
       const { data: team } = await supabaseAdmin.from("teams").select("manager_id").eq("id", data.team_id).maybeSingle();
       managerId = team?.manager_id ?? null;
     }
-    const update: Record<string, unknown> = { team_id: data.team_id };
-    if (managerId !== undefined) update['manager_id'] = managerId;
+    const update: { team_id: string | null; manager_id?: string | null } = { team_id: data.team_id };
+    if (managerId !== undefined) update.manager_id = managerId;
 
     const { error } = await supabaseAdmin.from("profiles").update(update).eq("id", data.user_id);
     if (error) throw new Error(error.message);
