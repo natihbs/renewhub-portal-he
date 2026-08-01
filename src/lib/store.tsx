@@ -1,7 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { SEED, type AppState, type Rep, type Announcement, type Competition, type CompetitionCategory, type Article, type Feedback, type Role, type Team, CRITERIA, type CriterionValue } from "./seed";
-
-const STORAGE_KEY = "renewhub_state_v1";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  SEED,
+  type AppState,
+  type Rep,
+  type Announcement,
+  type Competition,
+  type CompetitionCategory,
+  type Article,
+  type ArticleCategory,
+  type Feedback,
+  type Role,
+  type Team,
+  CRITERIA,
+  type CriterionValue,
+} from "./seed";
+import { useCloudCollection } from "@/lib/cloud-hooks";
 
 type Ctx = {
   state: AppState;
@@ -33,123 +46,319 @@ type Ctx = {
   resetAll: () => void;
 };
 
+type AnnouncementRow = { id: string; title: string; body: string; published_on: string };
+type ArticleRow = {
+  id: string;
+  title: string;
+  category: string;
+  summary: string;
+  body: string;
+  read_minutes: number;
+  important: boolean;
+  updated_at: string;
+};
+type CompetitionRow = {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  rules: string;
+  prize: string;
+  active: boolean;
+};
+type CompetitionCategoryRow = { id: string; competition_id: string; label: string; points: number };
+type CompetitionScoreRow = {
+  id: string;
+  competition_id: string;
+  category_id: string;
+  representative_id: string;
+  count: number;
+};
+type FeedbackRow = {
+  id: string;
+  representative_id: string;
+  team_key: string;
+  feedback_date: string;
+  call_id: string;
+  call_type: string;
+  listener: string;
+  criteria: Record<string, CriterionValue>;
+  score: number;
+  keep_doing: string;
+  improve: string;
+  manager_summary: string;
+  next_task: string;
+};
+
 const AppCtx = createContext<Ctx | null>(null);
 const uid = () => Math.random().toString(36).slice(2, 10);
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Business data lives in the cloud. Local state only holds ephemeral UI
+ * selection (active role view / selected representative) plus the cloud
+ * representatives mirror written by CloudRepsSync.
+ */
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AppState>(SEED);
-  const [hydrated, setHydrated] = useState(false);
+  const [role, setRoleState] = useState<Role>("manager");
+  const [currentRepId, setCurrentRepId] = useState<string>("");
+  const [reps, setReps] = useState<Rep[]>([]);
+  const [demo, setDemo] = useState<AppState>(SEED);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setState(JSON.parse(raw));
-    } catch {}
-    setHydrated(true);
-  }, []);
+  const announcements = useCloudCollection<AnnouncementRow>("announcements", {
+    order: { column: "published_on" },
+  });
+  const articles = useCloudCollection<ArticleRow>("articles", { order: { column: "updated_at" } });
+  const competitions = useCloudCollection<CompetitionRow>("competitions", {
+    order: { column: "start_date" },
+  });
+  const compCategories = useCloudCollection<CompetitionCategoryRow>("competition_categories", {
+    order: { column: "created_at", ascending: true },
+  });
+  const compScores = useCloudCollection<CompetitionScoreRow>("competition_scores", {});
+  const feedback = useCloudCollection<FeedbackRow>("feedback", { order: { column: "feedback_date" } });
 
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
-  }, [state, hydrated]);
+  const live = announcements.live;
 
-  const patch = useCallback((p: Partial<AppState> | ((s: AppState) => AppState)) => {
-    setState((s) => (typeof p === "function" ? p(s) : { ...s, ...p }));
-  }, []);
+  const replaceReps = useCallback((next: Rep[]) => setReps(next), []);
 
-  const value: Ctx = useMemo(
-    () => ({
+  const state: AppState = useMemo(() => {
+    if (!live) return { ...demo, role, currentRepId: currentRepId || demo.currentRepId };
+    return {
+      role,
+      currentRepId,
+      reps,
+      announcements: announcements.rows.map((a) => ({
+        id: a.id,
+        title: a.title,
+        body: a.body,
+        date: a.published_on,
+      })),
+      articles: articles.rows.map((a) => ({
+        id: a.id,
+        title: a.title,
+        category: a.category as ArticleCategory,
+        summary: a.summary,
+        body: a.body,
+        readMinutes: a.read_minutes,
+        important: a.important,
+        updatedAt: a.updated_at.slice(0, 10),
+      })),
+      competitions: competitions.rows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        startDate: c.start_date,
+        endDate: c.end_date,
+        rules: c.rules,
+        prize: c.prize,
+        active: c.active,
+        categories: compCategories.rows
+          .filter((k) => k.competition_id === c.id)
+          .map((k) => ({ id: k.id, label: k.label, points: k.points })),
+        scores: compScores.rows
+          .filter((s) => s.competition_id === c.id)
+          .map((s) => ({ repId: s.representative_id, categoryId: s.category_id, count: s.count })),
+      })),
+      feedback: feedback.rows.map((f) => ({
+        id: f.id,
+        team: (f.team_key === "home" ? "home" : "car") as Team,
+        repId: f.representative_id,
+        date: f.feedback_date,
+        callId: f.call_id,
+        callType: f.call_type,
+        listener: f.listener,
+        criteria: f.criteria ?? {},
+        score: f.score,
+        keep: f.keep_doing,
+        improve: f.improve,
+        managerSummary: f.manager_summary,
+        nextTask: f.next_task,
+      })),
+    };
+  }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows]);
+
+  const value: Ctx = useMemo(() => {
+    const shared = {
       state,
-      setRole: (role) => patch({ role }),
-      setCurrentRep: (currentRepId) => patch({ currentRepId }),
-      addRep: (r) => patch((s) => ({ ...s, reps: [...s.reps, { ...r, id: uid() }] })),
-      updateRep: (id, p) =>
-        patch((s) => ({ ...s, reps: s.reps.map((r) => (r.id === id ? { ...r, ...p } : r)) })),
-      replaceReps: (reps) => patch((s) => ({ ...s, reps })),
+      setRole: (r: Role) => setRoleState(r),
+      setCurrentRep: (id: string) => setCurrentRepId(id),
+      replaceReps,
+    };
 
-      removeRep: (id) => patch((s) => ({ ...s, reps: s.reps.filter((r) => r.id !== id) })),
+    if (!live) {
+      const patch = (fn: (s: AppState) => AppState) => setDemo(fn);
+      return {
+        ...shared,
+        addRep: (r) => patch((s) => ({ ...s, reps: [...s.reps, { ...r, id: uid() }] })),
+        updateRep: (id, p) => patch((s) => ({ ...s, reps: s.reps.map((x) => (x.id === id ? { ...x, ...p } : x)) })),
+        removeRep: (id) => patch((s) => ({ ...s, reps: s.reps.filter((x) => x.id !== id) })),
+        addAnnouncement: (a) =>
+          patch((s) => ({ ...s, announcements: [{ ...a, id: uid(), date: todayIso() }, ...s.announcements] })),
+        updateAnnouncement: (id, p) =>
+          patch((s) => ({ ...s, announcements: s.announcements.map((a) => (a.id === id ? { ...a, ...p } : a)) })),
+        removeAnnouncement: (id) =>
+          patch((s) => ({ ...s, announcements: s.announcements.filter((a) => a.id !== id) })),
+        addCompetition: (c) =>
+          patch((s) => ({
+            ...s,
+            competitions: [...s.competitions, { ...c, id: uid(), scores: [], active: c.active ?? true }],
+          })),
+        updateCompetition: (id, p) =>
+          patch((s) => ({ ...s, competitions: s.competitions.map((c) => (c.id === id ? { ...c, ...p } : c)) })),
+        addCompetitionCategory: (compId, cat) =>
+          patch((s) => ({
+            ...s,
+            competitions: s.competitions.map((c) =>
+              c.id === compId ? { ...c, categories: [...c.categories, { ...cat, id: uid() }] } : c,
+            ),
+          })),
+        removeCompetitionCategory: (compId, catId) =>
+          patch((s) => ({
+            ...s,
+            competitions: s.competitions.map((c) =>
+              c.id === compId
+                ? {
+                    ...c,
+                    categories: c.categories.filter((k) => k.id !== catId),
+                    scores: c.scores.filter((sc) => sc.categoryId !== catId),
+                  }
+                : c,
+            ),
+          })),
+        setCompetitionScore: (compId, repId, catId, count) =>
+          patch((s) => ({
+            ...s,
+            competitions: s.competitions.map((c) => {
+              if (c.id !== compId) return c;
+              const idx = c.scores.findIndex((sc) => sc.repId === repId && sc.categoryId === catId);
+              const scores = [...c.scores];
+              if (idx >= 0) scores[idx] = { ...scores[idx], count };
+              else scores.push({ repId, categoryId: catId, count });
+              return { ...c, scores };
+            }),
+          })),
+        closeCompetition: (id) =>
+          patch((s) => ({
+            ...s,
+            competitions: s.competitions.map((c) => (c.id === id ? { ...c, active: false } : c)),
+          })),
+        addArticle: (a) =>
+          patch((s) => ({ ...s, articles: [{ ...a, id: uid(), updatedAt: todayIso() }, ...s.articles] })),
+        updateArticle: (id, p) =>
+          patch((s) => ({
+            ...s,
+            articles: s.articles.map((a) => (a.id === id ? { ...a, ...p, updatedAt: todayIso() } : a)),
+          })),
+        removeArticle: (id) => patch((s) => ({ ...s, articles: s.articles.filter((a) => a.id !== id) })),
+        addFeedback: (f) => {
+          const score = f.score ?? computeScore(f.criteria);
+          patch((s) => ({ ...s, feedback: [{ ...f, id: uid(), score }, ...s.feedback] }));
+        },
+        resetAll: () => setDemo(SEED),
+      };
+    }
+
+    return {
+      ...shared,
+      // Representatives are managed through the dedicated cloud module.
+      addRep: () => {},
+      updateRep: () => {},
+      removeRep: () => {},
       addAnnouncement: (a) =>
-        patch((s) => ({
-          ...s,
-          announcements: [{ ...a, id: uid(), date: new Date().toISOString().slice(0, 10) }, ...s.announcements],
-        })),
-      updateAnnouncement: (id, p) =>
-        patch((s) => ({
-          ...s,
-          announcements: s.announcements.map((a) => (a.id === id ? { ...a, ...p } : a)),
-        })),
-      removeAnnouncement: (id) =>
-        patch((s) => ({ ...s, announcements: s.announcements.filter((a) => a.id !== id) })),
-      addCompetition: (c) =>
-        patch((s) => ({
-          ...s,
-          competitions: [...s.competitions, { ...c, id: uid(), scores: [], active: c.active ?? true }],
-        })),
-      updateCompetition: (id, p) =>
-        patch((s) => ({
-          ...s,
-          competitions: s.competitions.map((c) => (c.id === id ? { ...c, ...p } : c)),
-        })),
-      addCompetitionCategory: (compId, cat) =>
-        patch((s) => ({
-          ...s,
-          competitions: s.competitions.map((c) =>
-            c.id === compId ? { ...c, categories: [...c.categories, { ...cat, id: uid() }] } : c
-          ),
-        })),
-      removeCompetitionCategory: (compId, catId) =>
-        patch((s) => ({
-          ...s,
-          competitions: s.competitions.map((c) =>
-            c.id === compId
-              ? {
-                  ...c,
-                  categories: c.categories.filter((k) => k.id !== catId),
-                  scores: c.scores.filter((sc) => sc.categoryId !== catId),
-                }
-              : c
-          ),
-        })),
-      setCompetitionScore: (compId, repId, catId, count) =>
-        patch((s) => ({
-          ...s,
-          competitions: s.competitions.map((c) => {
-            if (c.id !== compId) return c;
-            const idx = c.scores.findIndex((sc) => sc.repId === repId && sc.categoryId === catId);
-            const scores = [...c.scores];
-            if (idx >= 0) scores[idx] = { ...scores[idx], count };
-            else scores.push({ repId, categoryId: catId, count });
-            return { ...c, scores };
-          }),
-        })),
-      closeCompetition: (id) =>
-        patch((s) => ({
-          ...s,
-          competitions: s.competitions.map((c) => (c.id === id ? { ...c, active: false } : c)),
-        })),
-      addArticle: (a) =>
-        patch((s) => ({
-          ...s,
-          articles: [{ ...a, id: uid(), updatedAt: new Date().toISOString().slice(0, 10) }, ...s.articles],
-        })),
-      updateArticle: (id, p) =>
-        patch((s) => ({
-          ...s,
-          articles: s.articles.map((a) =>
-            a.id === id ? { ...a, ...p, updatedAt: new Date().toISOString().slice(0, 10) } : a
-          ),
-        })),
-      removeArticle: (id) => patch((s) => ({ ...s, articles: s.articles.filter((a) => a.id !== id) })),
-      addFeedback: (f) => {
-        const score = f.score ?? computeScore(f.criteria);
-        patch((s) => ({ ...s, feedback: [{ ...f, id: uid(), score }, ...s.feedback] }));
+        void announcements.insert({ title: a.title, body: a.body, published_on: todayIso() }, "created_by"),
+      updateAnnouncement: (id, p) => {
+        const row: Record<string, string> = {};
+        if (p.title !== undefined) row.title = p.title;
+        if (p.body !== undefined) row.body = p.body;
+        if (p.date !== undefined) row.published_on = p.date;
+        void announcements.update(id, row);
       },
-      resetAll: () => setState(SEED),
-    }),
-    [state, patch]
-  );
+      removeAnnouncement: (id) => void announcements.remove(id),
+      addCompetition: (c) =>
+        void competitions
+          .insert(
+            {
+              name: c.name,
+              start_date: c.startDate,
+              end_date: c.endDate,
+              rules: c.rules,
+              prize: c.prize,
+              active: c.active ?? true,
+            },
+            "created_by",
+          )
+          .then((row) => {
+            for (const cat of c.categories ?? []) {
+              void compCategories.insert({
+                competition_id: row.id,
+                label: cat.label,
+                points: cat.points,
+              });
+            }
+          }),
+      updateCompetition: (id, p) => {
+        const row: Record<string, string | boolean> = {};
+        if (p.name !== undefined) row.name = p.name;
+        if (p.startDate !== undefined) row.start_date = p.startDate;
+        if (p.endDate !== undefined) row.end_date = p.endDate;
+        if (p.rules !== undefined) row.rules = p.rules;
+        if (p.prize !== undefined) row.prize = p.prize;
+        if (p.active !== undefined) row.active = p.active;
+        void competitions.update(id, row);
+      },
+      addCompetitionCategory: (compId, cat) =>
+        void compCategories.insert({ competition_id: compId, label: cat.label, points: cat.points }),
+      removeCompetitionCategory: (_compId, catId) => void compCategories.remove(catId),
+      setCompetitionScore: (compId, repId, catId, count) =>
+        void compScores.upsert(
+          { competition_id: compId, category_id: catId, representative_id: repId, count },
+          "competition_id,category_id,representative_id",
+        ),
+      closeCompetition: (id) => void competitions.update(id, { active: false }),
+      addArticle: (a) =>
+        void articles.insert(
+          {
+            title: a.title,
+            category: a.category,
+            summary: a.summary,
+            body: a.body,
+            read_minutes: a.readMinutes,
+            important: a.important,
+          },
+          "created_by",
+        ),
+      updateArticle: (id, p) => {
+        const row: Record<string, string | number | boolean> = {};
+        if (p.title !== undefined) row.title = p.title;
+        if (p.category !== undefined) row.category = p.category;
+        if (p.summary !== undefined) row.summary = p.summary;
+        if (p.body !== undefined) row.body = p.body;
+        if (p.readMinutes !== undefined) row.read_minutes = p.readMinutes;
+        if (p.important !== undefined) row.important = p.important;
+        void articles.update(id, row);
+      },
+      removeArticle: (id) => void articles.remove(id),
+      addFeedback: (f) =>
+        void feedback.insert(
+          {
+            representative_id: f.repId,
+            team_key: f.team,
+            feedback_date: f.date,
+            call_id: f.callId,
+            call_type: f.callType,
+            listener: f.listener,
+            criteria: f.criteria as never,
+            score: f.score ?? computeScore(f.criteria),
+            keep_doing: f.keep,
+            improve: f.improve,
+            manager_summary: f.managerSummary,
+            next_task: f.nextTask,
+          },
+          "created_by",
+        ),
+      resetAll: () => {},
+    };
+  }, [state, live, replaceReps, announcements, articles, competitions, compCategories, compScores, feedback]);
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
