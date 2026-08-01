@@ -1,3 +1,4 @@
+import { useMorning } from "@/lib/morning-store";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +31,6 @@ export const Route = createFileRoute("/_authenticated/")({
   component: HomePage,
 });
 
-const TASKS_KEY = "renewhub_home_tasks_v1";
 const DEFAULT_TASKS = [
   "ביצוע 3 האזנות",
   "עדכון תוצאות יומיות",
