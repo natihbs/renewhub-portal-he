@@ -14,6 +14,99 @@ export type Database = {
   }
   public: {
     Tables: {
+      activity_events: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          text: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          text: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          text?: string
+        }
+        Relationships: []
+      }
+      announcements: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          published_on: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          published_on?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          published_on?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      articles: {
+        Row: {
+          body: string
+          category: string
+          created_at: string
+          created_by: string | null
+          id: string
+          important: boolean
+          read_minutes: number
+          summary: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          body?: string
+          category: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          important?: boolean
+          read_minutes?: number
+          summary?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          important?: boolean
+          read_minutes?: number
+          summary?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
@@ -44,6 +137,558 @@ export type Database = {
           id?: string
           target_email?: string | null
           target_user_id?: string | null
+        }
+        Relationships: []
+      }
+      comms_messages: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      comms_templates: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      competition_categories: {
+        Row: {
+          competition_id: string
+          created_at: string
+          id: string
+          label: string
+          points: number
+          updated_at: string
+        }
+        Insert: {
+          competition_id: string
+          created_at?: string
+          id?: string
+          label: string
+          points?: number
+          updated_at?: string
+        }
+        Update: {
+          competition_id?: string
+          created_at?: string
+          id?: string
+          label?: string
+          points?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competition_categories_competition_id_fkey"
+            columns: ["competition_id"]
+            isOneToOne: false
+            referencedRelation: "competitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competition_scores: {
+        Row: {
+          category_id: string
+          competition_id: string
+          count: number
+          created_at: string
+          id: string
+          representative_id: string
+          updated_at: string
+        }
+        Insert: {
+          category_id: string
+          competition_id: string
+          count?: number
+          created_at?: string
+          id?: string
+          representative_id: string
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string
+          competition_id?: string
+          count?: number
+          created_at?: string
+          id?: string
+          representative_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competition_scores_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "competition_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competition_scores_competition_id_fkey"
+            columns: ["competition_id"]
+            isOneToOne: false
+            referencedRelation: "competitions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competition_scores_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitions: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          end_date: string
+          id: string
+          name: string
+          prize: string
+          rules: string
+          start_date: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          end_date?: string
+          id?: string
+          name: string
+          prize?: string
+          rules?: string
+          start_date?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          end_date?: string
+          id?: string
+          name?: string
+          prize?: string
+          rules?: string
+          start_date?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      feedback: {
+        Row: {
+          call_id: string
+          call_type: string
+          created_at: string
+          created_by: string | null
+          criteria: Json
+          feedback_date: string
+          id: string
+          improve: string
+          keep_doing: string
+          listener: string
+          manager_summary: string
+          next_task: string
+          representative_id: string
+          score: number
+          team_key: string
+          updated_at: string
+        }
+        Insert: {
+          call_id?: string
+          call_type?: string
+          created_at?: string
+          created_by?: string | null
+          criteria?: Json
+          feedback_date?: string
+          id?: string
+          improve?: string
+          keep_doing?: string
+          listener?: string
+          manager_summary?: string
+          next_task?: string
+          representative_id: string
+          score?: number
+          team_key?: string
+          updated_at?: string
+        }
+        Update: {
+          call_id?: string
+          call_type?: string
+          created_at?: string
+          created_by?: string | null
+          criteria?: Json
+          feedback_date?: string
+          id?: string
+          improve?: string
+          keep_doing?: string
+          listener?: string
+          manager_summary?: string
+          next_task?: string
+          representative_id?: string
+          score?: number
+          team_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ideas: {
+        Row: {
+          category: string
+          created_at: string
+          created_by: string | null
+          id: string
+          text: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          text: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          text?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      import_history: {
+        Row: {
+          created_at: string
+          error_report: Json | null
+          errors: number
+          file_name: string
+          id: string
+          imported_by: string | null
+          imported_by_name: string
+          rows_created: number
+          rows_processed: number
+          rows_skipped: number
+          rows_updated: number
+          snapshot: Json | null
+          status: string
+          updated_at: string
+          warnings: number
+        }
+        Insert: {
+          created_at?: string
+          error_report?: Json | null
+          errors?: number
+          file_name: string
+          id?: string
+          imported_by?: string | null
+          imported_by_name?: string
+          rows_created?: number
+          rows_processed?: number
+          rows_skipped?: number
+          rows_updated?: number
+          snapshot?: Json | null
+          status?: string
+          updated_at?: string
+          warnings?: number
+        }
+        Update: {
+          created_at?: string
+          error_report?: Json | null
+          errors?: number
+          file_name?: string
+          id?: string
+          imported_by?: string | null
+          imported_by_name?: string
+          rows_created?: number
+          rows_processed?: number
+          rows_skipped?: number
+          rows_updated?: number
+          snapshot?: Json | null
+          status?: string
+          updated_at?: string
+          warnings?: number
+        }
+        Relationships: []
+      }
+      import_templates: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          mapping: Json
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mapping?: Json
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mapping?: Json
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      listening_schedules: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          representative_id: string
+          scheduled_on: string
+          scheduled_time: string
+          status: string
+          topic: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          representative_id: string
+          scheduled_on?: string
+          scheduled_time?: string
+          status?: string
+          topic?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          representative_id?: string
+          scheduled_on?: string
+          scheduled_time?: string
+          status?: string
+          topic?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "listening_schedules_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      manager_calls: {
+        Row: {
+          created_at: string
+          follow_up_at: string | null
+          id: string
+          owner_id: string
+          representative_id: string | null
+          scheduled_at: string
+          status: string
+          subject: string
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          follow_up_at?: string | null
+          id?: string
+          owner_id: string
+          representative_id?: string | null
+          scheduled_at?: string
+          status?: string
+          subject: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          follow_up_at?: string | null
+          id?: string
+          owner_id?: string
+          representative_id?: string | null
+          scheduled_at?: string
+          status?: string
+          subject?: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_calls_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      morning_checklist: {
+        Row: {
+          checked: boolean
+          checklist_date: string
+          created_at: string
+          id: string
+          task_key: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          checked?: boolean
+          checklist_date?: string
+          created_at?: string
+          id?: string
+          task_key: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          checked?: boolean
+          checklist_date?: string
+          created_at?: string
+          id?: string
+          task_key?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      morning_settings: {
+        Row: {
+          created_at: string
+          data_as_of: string | null
+          last_refresh_at: string | null
+          monthly_avg_renewal_pct: number
+          refresh_status: string
+          saved_update_template: string | null
+          updated_at: string
+          user_id: string
+          yesterday_renewal_pct: number
+        }
+        Insert: {
+          created_at?: string
+          data_as_of?: string | null
+          last_refresh_at?: string | null
+          monthly_avg_renewal_pct?: number
+          refresh_status?: string
+          saved_update_template?: string | null
+          updated_at?: string
+          user_id: string
+          yesterday_renewal_pct?: number
+        }
+        Update: {
+          created_at?: string
+          data_as_of?: string | null
+          last_refresh_at?: string | null
+          monthly_avg_renewal_pct?: number
+          refresh_status?: string
+          saved_update_template?: string | null
+          updated_at?: string
+          user_id?: string
+          yesterday_renewal_pct?: number
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          body: string
+          created_at: string
+          href: string | null
+          id: string
+          kind: string
+          read: boolean
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          href?: string | null
+          id?: string
+          kind: string
+          read?: boolean
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          href?: string | null
+          id?: string
+          kind?: string
+          read?: boolean
+          title?: string
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -93,6 +738,91 @@ export type Database = {
             columns: ["team_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rep_notes: {
+        Row: {
+          author_id: string | null
+          author_name: string
+          created_at: string
+          id: string
+          is_private: boolean
+          representative_id: string
+          text: string
+          updated_at: string
+        }
+        Insert: {
+          author_id?: string | null
+          author_name?: string
+          created_at?: string
+          id?: string
+          is_private?: boolean
+          representative_id: string
+          text: string
+          updated_at?: string
+        }
+        Update: {
+          author_id?: string | null
+          author_name?: string
+          created_at?: string
+          id?: string
+          is_private?: boolean
+          representative_id?: string
+          text?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rep_notes_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rep_tasks: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          done: boolean
+          due_on: string | null
+          id: string
+          priority: string
+          representative_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          done?: boolean
+          due_on?: string | null
+          id?: string
+          priority?: string
+          representative_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          done?: boolean
+          due_on?: string | null
+          id?: string
+          priority?: string
+          representative_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rep_tasks_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
             referencedColumns: ["id"]
           },
         ]
@@ -182,6 +912,56 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      underwriting_issues: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          due_on: string | null
+          id: string
+          opened_on: string
+          owner: string
+          priority: string
+          representative_id: string | null
+          status: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          due_on?: string | null
+          id?: string
+          opened_on?: string
+          owner?: string
+          priority?: string
+          representative_id?: string | null
+          status?: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          due_on?: string | null
+          id?: string
+          opened_on?: string
+          owner?: string
+          priority?: string
+          representative_id?: string | null
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "underwriting_issues_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
