@@ -296,7 +296,6 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
               <RiskBadge level={risk.level} />
             </SheetDescription>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="סגירה"><X className="h-4 w-4" /></Button>
         </div>
       </SheetHeader>
 
