@@ -879,7 +879,7 @@ function RepDetailsSheet({
               <div className="h-40">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={history} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>
-                    <XAxis dataKey="month" reversed tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="month" reversed tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={10} tickLine={false} axisLine={false} />
                     <YAxis hide />
                     <Tooltip
                       contentStyle={{ fontSize: 12, borderRadius: 8 }}

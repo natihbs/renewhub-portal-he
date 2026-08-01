@@ -303,8 +303,8 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={weeklyTrend}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={12} tickMargin={6} />
+                  <YAxis domain={[0, 100]} width={30} tick={{ fontSize: 10 }} />
                   <Tooltip />
                   <Line type="monotone" dataKey="avg" stroke="hsl(var(--primary))" strokeWidth={2} dot />
                 </LineChart>
@@ -550,8 +550,8 @@ function AnalysisTab() {
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart data={sectionAverages}>
                     <PolarGrid />
-                    <PolarAngleAxis dataKey="section" tick={{ fontSize: 10 }} />
-                    <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+                    <PolarAngleAxis dataKey="section" tick={{ fontSize: 9 }} />
+                    <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 9 }} />
                     <RRadar dataKey="avg" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.3} />
                     <Tooltip />
                   </RadarChart>
@@ -850,8 +850,8 @@ function QualityHistoryChart({ list }: { list: Feedback[] }) {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={12} tickMargin={6} />
+              <YAxis domain={[0, 100]} width={30} tick={{ fontSize: 10 }} />
               <Tooltip />
               <Bar dataKey="ציון" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
             </BarChart>
