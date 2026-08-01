@@ -60,6 +60,9 @@ export type Article = {
 };
 
 export type CriterionValue = "done" | "partial" | "not_done" | "na";
+// Must stay a superset of every criteriaKeys entry in feedback.tsx's SECTIONS —
+// a key present in the form but missing here is silently excluded from the
+// score (it's captured in the criteria jsonb but never counted).
 export const CRITERIA: { key: string; label: string }[] = [
   { key: "opening", label: "פתיחת שיחה ברורה ומקצועית" },
   { key: "needs", label: "אימות צורכי הלקוח" },
@@ -71,6 +74,8 @@ export const CRITERIA: { key: string; label: string }[] = [
   { key: "regulation", label: "עמידה ברגולציה" },
   { key: "service", label: "שירותיות" },
   { key: "closing", label: "הנעה לסגירה" },
+  { key: "knowledge", label: "ידע מקצועי" },
+  { key: "impression", label: "התרשמות מנהל" },
 ];
 
 export type Feedback = {
@@ -86,6 +91,8 @@ export type Feedback = {
   improve: string;
   managerSummary: string;
   nextTask: string;
+  published: boolean;
+  scheduleId: string | null;
 };
 
 export type Role = "manager" | "rep";
@@ -256,6 +263,8 @@ export const SEED: AppState = {
       improve: "יש לחזק את שלב הצעת השדרוג ולסגור בצורה החלטית.",
       managerSummary: "שיחה טובה, יש פוטנציאל לשיפור בסגירה.",
       nextTask: "לצפות בהדרכת שדרוג ולבצע 5 שיחות עם דגש על סגירה.",
+      published: true,
+      scheduleId: null,
     },
     {
       id: "f2",
@@ -274,6 +283,8 @@ export const SEED: AppState = {
       improve: "-",
       managerSummary: "שיחה מצטיינת, לשמש כדוגמה בהדרכה הבאה.",
       nextTask: "להקליט שיחה נוספת לשיתוף בצוות.",
+      published: true,
+      scheduleId: null,
     },
     {
       id: "f3",
@@ -292,6 +303,8 @@ export const SEED: AppState = {
       improve: "טיפול בהתנגדויות ושאלות בירור צרכים.",
       managerSummary: "יש לחזק את שלב הבירור והתמודדות עם התנגדויות.",
       nextTask: "לתרגל 3 תרחישי התנגדות בסדנה השבוע.",
+      published: true,
+      scheduleId: null,
     },
     {
       id: "f4",
@@ -310,6 +323,8 @@ export const SEED: AppState = {
       improve: "מבנה שיחה, בירור צרכים ושלב הסגירה.",
       managerSummary: "נדרש ליווי צמוד השבוע.",
       nextTask: "פגישת 1:1 עם ראש צוות + צפייה ב-2 הדרכות.",
+      published: true,
+      scheduleId: null,
     },
     {
       id: "f5",
@@ -328,6 +343,8 @@ export const SEED: AppState = {
       improve: "להעמיק בהצעת שדרוג תכולה.",
       managerSummary: "ביצועים מעולים, המשך כך.",
       nextTask: "לשתף טיפ מהשיחה במפגש הצוות.",
+      published: true,
+      scheduleId: null,
     },
   ],
 };

@@ -329,6 +329,21 @@ async function collectBlockers(admin: any, repId: string): Promise<DeleteBlocker
       .eq("representative_id", rep.external_ref);
     if (count && count > 0) blockers.push({ label: "פרופילי משתמשים עם מזהה נציג זהה", count });
   }
+
+  // feedback/listening_schedules/rep_notes/rep_tasks all cascade-delete with the
+  // representative — surface them as blockers so an admin can't silently wipe a
+  // rep's entire quality-review history with a single delete.
+  const [feedbackCount, scheduleCount, notesCount, tasksCount] = await Promise.all([
+    admin.from("feedback").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("listening_schedules").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("rep_notes").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("rep_tasks").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+  ]);
+  if (feedbackCount.count && feedbackCount.count > 0) blockers.push({ label: "רשומות משוב והאזנה", count: feedbackCount.count });
+  if (scheduleCount.count && scheduleCount.count > 0) blockers.push({ label: "האזנות מתוזמנות", count: scheduleCount.count });
+  if (notesCount.count && notesCount.count > 0) blockers.push({ label: "הערות מנהל", count: notesCount.count });
+  if (tasksCount.count && tasksCount.count > 0) blockers.push({ label: "משימות פתוחות וסגורות", count: tasksCount.count });
+
   return blockers;
 }
 

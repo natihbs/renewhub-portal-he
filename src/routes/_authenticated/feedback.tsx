@@ -1,9 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { useApp, useIsManager, computeScore, teamsFromReps } from "@/lib/store";
+import { useEffect, useMemo, useState } from "react";
+import { useApp, useIsManager, computeScore, teamsFromReps, visibleFeedback } from "@/lib/store";
 import { CRITERIA, type CriterionValue, type Feedback, type Rep } from "@/lib/seed";
 import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
+import { useAuth } from "@/lib/auth";
+import { useAppMode } from "@/lib/app-mode";
+import { useServerFn } from "@tanstack/react-start";
+import { previewUnpublishedFeedback, publishFeedbackBulk, toBulkPublishFilters, BULK_PUBLISH_NONE } from "@/lib/feedback-admin.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +16,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -25,7 +33,7 @@ import { cn } from "@/lib/utils";
 import {
   Plus, Eye, Headphones, Calendar as CalendarIcon, Flame, TrendingUp, TrendingDown,
   Award, Sparkles, AlertTriangle, Trash2, CheckCircle2, BookOpen, Target,
-  Users, Trophy, ShieldCheck, Radar as RadarIcon, Grid3x3, Clock,
+  Users, Trophy, ShieldCheck, Radar as RadarIcon, Grid3x3, Clock, Upload,
 } from "lucide-react";
 import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar as RRadar, PolarRadiusAxis,
@@ -119,19 +127,44 @@ export const Route = createFileRoute("/_authenticated/feedback")({
 });
 
 function ListeningCenter() {
-  const { state } = useApp();
+  const { state, updateFeedback } = useApp();
   const isManager = useIsManager();
+  const { isAdmin } = useAuth();
+  const { isDemo } = useAppMode();
   const [openForm, setOpenForm] = useState(false);
   const [openSchedule, setOpenSchedule] = useState(false);
+  const [openBulkPublish, setOpenBulkPublish] = useState(false);
   const [view, setView] = useState<string | null>(null);
   const [prefRepId, setPrefRepId] = useState<string | undefined>(undefined);
+  const [prefScheduleId, setPrefScheduleId] = useState<string | undefined>(undefined);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const feedbackList = isManager ? state.feedback : state.feedback.filter((f) => f.repId === state.currentRepId);
+  // Reps only ever see their own published feedback — enforced by RLS and the cloud
+  // query scope in store.tsx; this filter is a harmless extra safety net, not the
+  // real boundary.
+  const feedbackList = visibleFeedback(state.feedback, isManager, state.currentRepId);
   const viewed = view ? state.feedback.find((f) => f.id === view) : null;
+  const editing = editingId ? state.feedback.find((f) => f.id === editingId) ?? null : null;
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
   const teamNameOf = (id: string) => state.reps.find((r) => r.id === id)?.teamName ?? "ללא צוות";
 
-  const openNewFor = (repId?: string) => { setPrefRepId(repId); setOpenForm(true); };
+  const openNewFor = (repId?: string, scheduleId?: string) => {
+    setEditingId(null);
+    setPrefRepId(repId);
+    setPrefScheduleId(scheduleId);
+    setOpenForm(true);
+  };
+  const openEditFor = (id: string) => {
+    setEditingId(id);
+    setPrefRepId(undefined);
+    setPrefScheduleId(undefined);
+    setView(null);
+    setOpenForm(true);
+  };
+  const publish = (id: string) => {
+    updateFeedback(id, { published: true });
+    toast.success("המשוב פורסם לנציג");
+  };
 
   return (
     <div className="space-y-6">
@@ -141,16 +174,24 @@ function ListeningCenter() {
           ? "ניהול איכות שיחות: תור עדיפויות, ניתוח מגמות, מפת חום צוותית ותוכניות אימון"
           : "צפייה בהיסטוריית ההאזנות והמשוב האישי שלך"}
         actions={
-          <ManagerOnly>
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
+            <ManagerOnly>
               <Button variant="outline" onClick={() => setOpenSchedule(true)}>
                 <CalendarIcon className="ms-1 h-4 w-4" />תזמון האזנה
               </Button>
               <Button onClick={() => openNewFor()}>
                 <Plus className="ms-1 h-4 w-4" />האזנה חדשה
               </Button>
-            </div>
-          </ManagerOnly>
+            </ManagerOnly>
+            {/* Bulk-publishing historical drafts is a deliberately narrower, audited
+                action than day-to-day feedback management — admin-only, and only
+                meaningful against real cloud data. */}
+            {isAdmin && !isDemo && (
+              <Button variant="outline" onClick={() => setOpenBulkPublish(true)}>
+                <Upload className="ms-1 h-4 w-4" />פרסום משובים קיימים
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -194,15 +235,32 @@ function ListeningCenter() {
 
       {isManager && (
         <>
-          <FeedbackFormDialog open={openForm} onOpenChange={setOpenForm} defaultRepId={prefRepId} />
+          <FeedbackFormDialog
+            open={openForm}
+            onOpenChange={setOpenForm}
+            defaultRepId={prefRepId}
+            defaultScheduleId={prefScheduleId}
+            editing={editing}
+          />
           <ScheduleDialog open={openSchedule} onOpenChange={setOpenSchedule} />
         </>
+      )}
+
+      {isAdmin && !isDemo && (
+        <AdminBulkPublishDialog open={openBulkPublish} onOpenChange={setOpenBulkPublish} />
       )}
 
       <Dialog open={!!viewed} onOpenChange={(v) => !v && setView(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>פירוט משוב — {viewed ? nameOf(viewed.repId) : ""}</DialogTitle></DialogHeader>
-          {viewed && <FeedbackView f={viewed} />}
+          {viewed && (
+            <FeedbackView
+              f={viewed}
+              isManager={isManager}
+              onEdit={() => openEditFor(viewed.id)}
+              onPublish={() => publish(viewed.id)}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -907,9 +965,9 @@ function RepBadges({ list, currentAvg }: { list: Feedback[]; currentAvg: number 
 }
 
 // -------------------- Calendar tab --------------------
-function CalendarTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
+function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?: string) => void }) {
   const { state } = useApp();
-  const { schedules, updateSchedule, removeSchedule, completeSchedule } = useListening();
+  const { schedules, updateSchedule, removeSchedule } = useListening();
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
 
   const grouped = useMemo(() => {
@@ -952,18 +1010,52 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                       <div className="flex items-center gap-1">
                         {s.status === "planned" && (
                           <>
-                            <Button size="sm" variant="outline" onClick={() => { openNewFor(s.repId); completeSchedule(s.id); }}>
+                            <Button size="sm" variant="outline" onClick={() => openNewFor(s.repId, s.id)}>
                               <CheckCircle2 className="ms-1 h-3.5 w-3.5" />בצע
                             </Button>
-                            <Button size="icon" variant="ghost" onClick={() => updateSchedule(s.id, { status: "cancelled" })}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button size="icon" variant="ghost" aria-label={`ביטול ההאזנה עם ${nameOf(s.repId)}`}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent dir="rtl">
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>ביטול האזנה מתוכננת?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    ההאזנה המתוכננת עם {nameOf(s.repId)} בתאריך {formatDateIL(s.date)} תסומן כמבוטלת. ניתן יהיה למחוק את הרשומה בהמשך.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>חזרה</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => updateSchedule(s.id, { status: "cancelled" })}>
+                                    ביטול ההאזנה
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </>
                         )}
                         {s.status !== "planned" && (
-                          <Button size="icon" variant="ghost" onClick={() => removeSchedule(s.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="icon" variant="ghost" aria-label={`מחיקת רשומת ההאזנה עם ${nameOf(s.repId)}`}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent dir="rtl">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>מחיקת רשומת ההאזנה?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  הפעולה תמחק לצמיתות את רשומת ההאזנה עם {nameOf(s.repId)} מתאריך {formatDateIL(s.date)}. לא ניתן לשחזר לאחר המחיקה.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>ביטול</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => removeSchedule(s.id)}>מחיקה</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         )}
                       </div>
                     </div>
@@ -1004,6 +1096,7 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
                 <TableHead>נקודת חוזק</TableHead>
                 <TableHead>לשיפור</TableHead>
                 <TableHead>ציון</TableHead>
+                <TableHead>סטטוס</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -1024,6 +1117,11 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
                     )}>{f.score}</span>
                   </TableCell>
                   <TableCell>
+                    {f.published
+                      ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
+                      : <Badge variant="outline">טיוטה</Badge>}
+                  </TableCell>
+                  <TableCell>
                     <Button size="icon" variant="ghost" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
@@ -1037,9 +1135,25 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
 }
 
 // -------------------- Feedback view (read-only) --------------------
-function FeedbackView({ f }: { f: Feedback }) {
+function FeedbackView({ f, isManager, onEdit, onPublish }: {
+  f: Feedback; isManager?: boolean; onEdit?: () => void; onPublish?: () => void;
+}) {
   return (
     <div className="space-y-4">
+      {isManager && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">סטטוס:</span>
+            {f.published
+              ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
+              : <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>}
+          </div>
+          <div className="flex gap-2">
+            {!f.published && onPublish && <Button size="sm" onClick={onPublish}>פרסום לנציג</Button>}
+            {onEdit && <Button size="sm" variant="outline" onClick={onEdit}>עריכה</Button>}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
         <Info label="תאריך" value={formatDateIL(f.date)} />
         <Info label="מזהה שיחה" value={f.callId} />
@@ -1114,76 +1228,117 @@ function MiniKpi({ icon: Icon, label, value, sub, tone }: {
 }
 
 // -------------------- Feedback form dialog (sectioned) --------------------
-function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
+function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleId, editing }: {
   open: boolean; onOpenChange: (v: boolean) => void; defaultRepId?: string;
+  defaultScheduleId?: string; editing?: Feedback | null;
 }) {
-  const { state, addFeedback } = useApp();
+  const { state, addFeedback, updateFeedback } = useApp();
+  const { completeSchedule } = useListening();
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
-  const initialRep = state.reps.find((r) => r.id === defaultRepId);
+  const initialRep = state.reps.find((r) => r.id === (editing?.repId ?? defaultRepId));
   const [teamId, setTeamId] = useState<string>(initialRep?.teamId ?? teamOptions[0]?.teamId ?? "");
-  const [repId, setRepId] = useState<string>(defaultRepId ?? "");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [callId, setCallId] = useState("");
-  const [callType, setCallType] = useState("חידוש");
-  const [listener, setListener] = useState("");
+  const [repId, setRepId] = useState<string>(editing?.repId ?? defaultRepId ?? "");
+  const [date, setDate] = useState(editing?.date ?? new Date().toISOString().slice(0, 10));
+  const [callId, setCallId] = useState(editing?.callId ?? "");
+  const [callType, setCallType] = useState(editing?.callType ?? "חידוש");
+  const [listener, setListener] = useState(editing?.listener ?? "");
   const allKeys = SECTIONS.flatMap((s) => s.criteriaKeys);
   const [criteria, setCriteria] = useState<Record<string, CriterionValue>>(
-    Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>
+    editing?.criteria ?? (Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>)
   );
-  const [keep, setKeep] = useState("");
-  const [improve, setImprove] = useState("");
-  const [managerSummary, setManagerSummary] = useState("");
-  const [nextTask, setNextTask] = useState("");
+  const [keep, setKeep] = useState(editing?.keep ?? "");
+  const [improve, setImprove] = useState(editing?.improve ?? "");
+  const [managerSummary, setManagerSummary] = useState(editing?.managerSummary ?? "");
+  const [nextTask, setNextTask] = useState(editing?.nextTask ?? "");
 
   const score = computeScore(criteria);
   const teamReps = state.reps.filter((r) => r.teamId === teamId);
 
-  // sync when defaultRepId changes
-  useMemo(() => {
-    if (defaultRepId && open) {
+  // Reload the form whenever a different feedback record is opened for editing, or a
+  // new "create for this rep" request comes in.
+  useEffect(() => {
+    if (!open) return;
+    if (editing) {
+      setRepId(editing.repId);
+      const r = state.reps.find((x) => x.id === editing.repId);
+      if (r?.teamId) setTeamId(r.teamId);
+      setDate(editing.date);
+      setCallId(editing.callId);
+      setCallType(editing.callType);
+      setListener(editing.listener);
+      setCriteria(editing.criteria);
+      setKeep(editing.keep);
+      setImprove(editing.improve);
+      setManagerSummary(editing.managerSummary);
+      setNextTask(editing.nextTask);
+    } else if (defaultRepId) {
       setRepId(defaultRepId);
       const r = state.reps.find((x) => x.id === defaultRepId);
       if (r?.teamId) setTeamId(r.teamId);
     }
-  }, [defaultRepId, open, state.reps]);
+  }, [editing, defaultRepId, open, state.reps]);
 
   const labelForCriterion = (k: string) => CRITERIA.find((c) => c.key === k)?.label ?? k;
+
+  const resetForm = () => {
+    setCallId(""); setListener(""); setKeep(""); setImprove(""); setManagerSummary(""); setNextTask("");
+    setCriteria(Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>);
+  };
 
   const submit = () => {
     if (!repId) return toast.error("יש לבחור נציג");
     if (!callId.trim()) return toast.error("יש להזין מזהה שיחה");
     if (!listener.trim()) return toast.error("יש להזין שם מאזין");
-    addFeedback({
-      repId, date, callId: callId.trim(), callType,
-      listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
-    });
-    toast.success(`ההאזנה נשמרה. ציון: ${score}`);
+    if (editing) {
+      // Reassigning feedback to a different representative isn't supported here —
+      // the rep/team pickers are locked during edit (see JSX below).
+      updateFeedback(editing.id, {
+        date, callId: callId.trim(), callType,
+        listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
+      });
+      toast.success(`המשוב עודכן. ציון: ${score}`);
+    } else {
+      addFeedback({
+        repId, date, callId: callId.trim(), callType,
+        listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
+        scheduleId: defaultScheduleId ?? null,
+      });
+      if (defaultScheduleId) completeSchedule(defaultScheduleId);
+      toast.success(`ההאזנה נשמרה כטיוטה (ציון: ${score}). יש לפרסם אותה כדי שתוצג לנציג.`);
+    }
     onOpenChange(false);
-    setCallId(""); setListener(""); setKeep(""); setImprove(""); setManagerSummary(""); setNextTask("");
-    setCriteria(Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>);
+    resetForm();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>טופס האזנה חכם</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{editing ? "עריכת משוב" : "טופס האזנה חכם"}</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1"><Label>צוות</Label>
-              <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(""); }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {editing ? (
+                <Input disabled value={teamOptions.find((t) => t.teamId === teamId)?.teamName ?? "—"} />
+              ) : (
+                <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(""); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1"><Label>שם הנציג</Label>
-              <Select value={repId} onValueChange={setRepId}>
-                <SelectTrigger><SelectValue placeholder="בחר נציג" /></SelectTrigger>
-                <SelectContent>
-                  {teamReps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {editing ? (
+                <Input disabled value={state.reps.find((r) => r.id === repId)?.name ?? "—"} />
+              ) : (
+                <Select value={repId} onValueChange={setRepId}>
+                  <SelectTrigger><SelectValue placeholder="בחר נציג" /></SelectTrigger>
+                  <SelectContent>
+                    {teamReps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1"><Label>תאריך ההאזנה</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
             <div className="space-y-1"><Label>מזהה שיחה פנימי</Label><Input value={callId} onChange={(e) => setCallId(e.target.value)} placeholder="למשל: CAR-1234" /></div>
@@ -1244,9 +1399,149 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>ביטול</Button>
-            <Button onClick={submit}>שמירת האזנה</Button>
+            <Button onClick={submit}>{editing ? "עדכון משוב" : "שמירת האזנה"}</Button>
           </div>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// -------------------- Admin: bulk-publish existing feedback --------------------
+/**
+ * Historical feedback created before the draft/publish workflow existed defaults to
+ * published=false for safety (a rep must never suddenly see feedback they weren't
+ * meant to yet). This is the admin-only, filtered, confirmed, audited action to make
+ * that history visible on purpose — never automatic.
+ */
+function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { state } = useApp();
+  const preview = useServerFn(previewUnpublishedFeedback);
+  const bulkPublish = useServerFn(publishFeedbackBulk);
+  const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
+
+  const [teamId, setTeamId] = useState(BULK_PUBLISH_NONE);
+  const [repId, setRepId] = useState(BULK_PUBLISH_NONE);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [count, setCount] = useState<number | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [step, setStep] = useState<"filter" | "confirm">("filter");
+  const [publishing, setPublishing] = useState(false);
+
+  const teamReps = teamId === BULK_PUBLISH_NONE ? state.reps : state.reps.filter((r) => r.teamId === teamId);
+  const filters = toBulkPublishFilters({ teamId, repId, from, to });
+
+  const reset = () => {
+    setTeamId(BULK_PUBLISH_NONE); setRepId(BULK_PUBLISH_NONE); setFrom(""); setTo("");
+    setCount(null); setStep("filter");
+  };
+
+  const close = (v: boolean) => {
+    if (!v) reset();
+    onOpenChange(v);
+  };
+
+  const runPreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const res = await preview({ data: filters });
+      setCount(res.count);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const confirmPublish = async () => {
+    setPublishing(true);
+    try {
+      const res = await bulkPublish({ data: filters });
+      toast.success(`פורסמו ${res.updated} רשומות משוב ליעדים שנבחרו.`);
+      close(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent dir="rtl">
+        <DialogHeader><DialogTitle>פרסום משובים קיימים</DialogTitle></DialogHeader>
+
+        {step === "filter" ? (
+          <div className="space-y-4 text-sm">
+            <p className="text-muted-foreground">
+              משוב שנשמר כטיוטה אינו גלוי לנציג עד לפרסום מפורש. ניתן לפרסם משובים קיימים לפי סינון —
+              הפעולה תשפיע רק על רשומות בטיוטה שתואמות את הסינון שנבחר.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>צוות</Label>
+                <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(BULK_PUBLISH_NONE); setCount(null); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={BULK_PUBLISH_NONE}>כל הצוותים</SelectItem>
+                    {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>נציג</Label>
+                <Select value={repId} onValueChange={(v) => { setRepId(v); setCount(null); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={BULK_PUBLISH_NONE}>כל הנציגים{teamId !== BULK_PUBLISH_NONE ? " בצוות" : ""}</SelectItem>
+                    {teamReps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>מתאריך</Label>
+                <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setCount(null); }} />
+              </div>
+              <div className="space-y-1">
+                <Label>עד תאריך</Label>
+                <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setCount(null); }} />
+              </div>
+            </div>
+
+            <Button variant="outline" onClick={runPreview} disabled={loadingPreview}>
+              {loadingPreview ? "בודק..." : "בדיקת כמות רשומות"}
+            </Button>
+
+            {count !== null && (
+              <div className="rounded-lg border p-3 bg-muted/30">
+                {count === 0
+                  ? "לא נמצאו משובים בטיוטה התואמים לסינון שנבחר."
+                  : `${count} רשומות משוב בטיוטה יפורסמו ויהפכו גלויות לנציגים המתאימים.`}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => close(false)}>סגירה</Button>
+              <Button disabled={!count} onClick={() => setStep("confirm")}>המשך לאישור</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+              <p className="font-semibold">לאשר פרסום של {count} רשומות משוב?</p>
+              <p className="text-muted-foreground mt-1">
+                הרשומות התואמות לסינון שנבחר יהפכו גלויות לנציגים המתאימים. הפעולה תתועד ביומן הביקורת.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setStep("filter")} disabled={publishing}>חזרה</Button>
+              <Button onClick={confirmPublish} disabled={publishing}>
+                {publishing ? "מפרסם..." : "אישור פרסום"}
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
