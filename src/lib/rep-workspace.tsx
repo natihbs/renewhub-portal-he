@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
+import { useAuth } from "@/lib/auth";
 
 export type WorkspaceNote = { id: string; author: string; date: string; text: string };
 export type WorkspaceTask = {
@@ -9,21 +11,21 @@ export type WorkspaceTask = {
   done: boolean;
 };
 
-type Store = {
-  notes: Record<string, WorkspaceNote[]>;
-  tasks: Record<string, WorkspaceTask[]>;
+type NoteRow = {
+  id: string;
+  representative_id: string;
+  author_name: string;
+  text: string;
+  created_at: string;
 };
-
-const KEY = "renewhub_workspace_v1";
-const uid = () => Math.random().toString(36).slice(2, 10);
-
-function loadStore(): Store {
-  try {
-    const raw = typeof window !== "undefined" ? localStorage.getItem(KEY) : null;
-    if (raw) return { notes: {}, tasks: {}, ...JSON.parse(raw) };
-  } catch {}
-  return { notes: {}, tasks: {} };
-}
+type TaskRow = {
+  id: string;
+  representative_id: string;
+  title: string;
+  due_on: string | null;
+  priority: string;
+  done: boolean;
+};
 
 type Ctx = {
   openRepId: string | null;
@@ -40,49 +42,119 @@ type Ctx = {
 };
 
 const RepWorkspaceCtx = createContext<Ctx | null>(null);
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+type DemoStore = { notes: Record<string, WorkspaceNote[]>; tasks: Record<string, WorkspaceTask[]> };
 
 export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
   const [openRepId, setOpenRepId] = useState<string | null>(null);
-  const [store, setStore] = useState<Store>({ notes: {}, tasks: {} });
-  const [hydrated, setHydrated] = useState(false);
+  const [demo, setDemo] = useState<DemoStore>({ notes: {}, tasks: {} });
+  const { profile } = useAuth();
 
-  useEffect(() => { setStore(loadStore()); setHydrated(true); }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(KEY, JSON.stringify(store)); } catch {}
-  }, [store, hydrated]);
+  const notes = useCloudCollection<NoteRow>("rep_notes", { order: { column: "created_at" } });
+  const tasks = useCloudCollection<TaskRow>("rep_tasks", { order: { column: "created_at" } });
 
-  const value = useMemo<Ctx>(() => ({
-    openRepId,
-    open: (id) => setOpenRepId(id),
-    close: () => setOpenRepId(null),
-    getNotes: (repId) => store.notes[repId] ?? [],
-    addNote: (repId, text, author = "מנהל") => setStore((s) => ({
-      ...s,
-      notes: { ...s.notes, [repId]: [{ id: uid(), author, date: new Date().toISOString().slice(0, 10), text }, ...(s.notes[repId] ?? [])] },
-    })),
-    updateNote: (repId, noteId, text) => setStore((s) => ({
-      ...s,
-      notes: { ...s.notes, [repId]: (s.notes[repId] ?? []).map((n) => n.id === noteId ? { ...n, text } : n) },
-    })),
-    deleteNote: (repId, noteId) => setStore((s) => ({
-      ...s,
-      notes: { ...s.notes, [repId]: (s.notes[repId] ?? []).filter((n) => n.id !== noteId) },
-    })),
-    getTasks: (repId) => store.tasks[repId] ?? [],
-    addTask: (repId, t) => setStore((s) => ({
-      ...s,
-      tasks: { ...s.tasks, [repId]: [...(s.tasks[repId] ?? []), { ...t, id: uid(), done: false }] },
-    })),
-    toggleTask: (repId, taskId) => setStore((s) => ({
-      ...s,
-      tasks: { ...s.tasks, [repId]: (s.tasks[repId] ?? []).map((t) => t.id === taskId ? { ...t, done: !t.done } : t) },
-    })),
-    deleteTask: (repId, taskId) => setStore((s) => ({
-      ...s,
-      tasks: { ...s.tasks, [repId]: (s.tasks[repId] ?? []).filter((t) => t.id !== taskId) },
-    })),
-  }), [openRepId, store]);
+  const value = useMemo<Ctx>(() => {
+    const base = { openRepId, open: (id: string) => setOpenRepId(id), close: () => setOpenRepId(null) };
+
+    if (!notes.live) {
+      return {
+        ...base,
+        getNotes: (repId) => demo.notes[repId] ?? [],
+        addNote: (repId, text, author = "מנהל") =>
+          setDemo((s) => ({
+            ...s,
+            notes: {
+              ...s.notes,
+              [repId]: [
+                { id: uid(), author, date: new Date().toISOString().slice(0, 10), text },
+                ...(s.notes[repId] ?? []),
+              ],
+            },
+          })),
+        updateNote: (repId, noteId, text) =>
+          setDemo((s) => ({
+            ...s,
+            notes: { ...s.notes, [repId]: (s.notes[repId] ?? []).map((n) => (n.id === noteId ? { ...n, text } : n)) },
+          })),
+        deleteNote: (repId, noteId) =>
+          setDemo((s) => ({
+            ...s,
+            notes: { ...s.notes, [repId]: (s.notes[repId] ?? []).filter((n) => n.id !== noteId) },
+          })),
+        getTasks: (repId) => demo.tasks[repId] ?? [],
+        addTask: (repId, t) =>
+          setDemo((s) => ({
+            ...s,
+            tasks: { ...s.tasks, [repId]: [...(s.tasks[repId] ?? []), { ...t, id: uid(), done: false }] },
+          })),
+        toggleTask: (repId, taskId) =>
+          setDemo((s) => ({
+            ...s,
+            tasks: {
+              ...s.tasks,
+              [repId]: (s.tasks[repId] ?? []).map((t) => (t.id === taskId ? { ...t, done: !t.done } : t)),
+            },
+          })),
+        deleteTask: (repId, taskId) =>
+          setDemo((s) => ({
+            ...s,
+            tasks: { ...s.tasks, [repId]: (s.tasks[repId] ?? []).filter((t) => t.id !== taskId) },
+          })),
+      };
+    }
+
+    return {
+      ...base,
+      getNotes: (repId) =>
+        notes.rows
+          .filter((n) => n.representative_id === repId)
+          .map((n) => ({
+            id: n.id,
+            author: n.author_name || "מנהל",
+            date: n.created_at.slice(0, 10),
+            text: n.text,
+          })),
+      addNote: (repId, text, author) =>
+        void notes.insert(
+          {
+            representative_id: repId,
+            text,
+            author_name: author ?? profile?.full_name ?? "מנהל",
+            is_private: true,
+          },
+          "author_id",
+        ),
+      updateNote: (_repId, noteId, text) => void notes.update(noteId, { text }),
+      deleteNote: (_repId, noteId) => void notes.remove(noteId),
+      getTasks: (repId) =>
+        tasks.rows
+          .filter((t) => t.representative_id === repId)
+          .map((t) => ({
+            id: t.id,
+            title: t.title,
+            due: t.due_on ?? "",
+            priority: (t.priority as WorkspaceTask["priority"]) ?? "medium",
+            done: t.done,
+          })),
+      addTask: (repId, t) =>
+        void tasks.insert(
+          {
+            representative_id: repId,
+            title: t.title,
+            due_on: t.due || null,
+            priority: t.priority,
+            done: false,
+          },
+          "created_by",
+        ),
+      toggleTask: (_repId, taskId) => {
+        const current = tasks.rows.find((t) => t.id === taskId);
+        void tasks.update(taskId, { done: !current?.done });
+      },
+      deleteTask: (_repId, taskId) => void tasks.remove(taskId),
+    };
+  }, [openRepId, demo, notes, tasks, profile]);
 
   return <RepWorkspaceCtx.Provider value={value}>{children}</RepWorkspaceCtx.Provider>;
 }
