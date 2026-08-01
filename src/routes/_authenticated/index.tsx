@@ -422,22 +422,8 @@ function StatBlock({ label, value, sub, tone }: { label: string; value: string; 
 }
 
 function TodayTasks() {
-  const [done, setDone] = useState<Record<string, boolean>>({});
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(TASKS_KEY);
-      if (raw) setDone(JSON.parse(raw));
-    } catch {}
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(TASKS_KEY, JSON.stringify(done)); } catch {}
-  }, [done, hydrated]);
-
-  const completed = DEFAULT_TASKS.filter((t) => done[t]).length;
+  const { isChecked, toggleChecklist } = useMorning();
+  const completed = DEFAULT_TASKS.filter((t) => isChecked(t)).length;
 
   return (
     <Card>
@@ -454,15 +440,16 @@ function TodayTasks() {
             key={t}
             className={cn(
               "flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-accent/40",
-              done[t] && "bg-accent/30"
+              isChecked(t) && "bg-accent/30"
             )}
           >
             <Checkbox
-              checked={!!done[t]}
-              onCheckedChange={(v) => setDone((s) => ({ ...s, [t]: !!v }))}
+              checked={isChecked(t)}
+              onCheckedChange={() => toggleChecklist(t)}
               aria-label={t}
             />
-            <span className={cn("text-sm", done[t] && "line-through text-muted-foreground")}>{t}</span>
+            <span className={cn("text-sm", isChecked(t) && "line-through text-muted-foreground")}>{t}</span>
+
           </label>
         ))}
       </CardContent>
