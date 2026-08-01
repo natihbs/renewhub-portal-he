@@ -153,10 +153,10 @@ function AnnouncementRow({ a }: { a: Announcement }) {
         <p className="text-sm mt-1 text-foreground/80">{a.body}</p>
       </div>
       <div className="flex gap-1">
-        <AnnouncementDialog announcement={a} trigger={<Button size="icon" variant="ghost"><Pencil className="h-4 w-4" /></Button>} />
+        <AnnouncementDialog announcement={a} trigger={<Button size="icon" variant="ghost" aria-label={`עריכת ההודעה ${a.title}`}><Pencil className="h-4 w-4" /></Button>} />
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button size="icon" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
+            <Button size="icon" variant="ghost" aria-label={`מחיקת ההודעה ${a.title}`}><Trash2 className="h-4 w-4" /></Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>

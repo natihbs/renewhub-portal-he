@@ -309,7 +309,7 @@ function UserTableRow({
           <ResetPasswordDialog user={user} onDone={onDone} />
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button size="icon" variant="ghost" title={user.active ? "השבתה" : "הפעלה"} disabled={isSelf || (user.active && isLastActiveAdmin)}>
+              <Button size="icon" variant="ghost" aria-label={`${user.active ? "השבתת" : "הפעלת"} ${user.full_name || user.email}`} title={user.active ? "השבתה" : "הפעלה"} disabled={isSelf || (user.active && isLastActiveAdmin)}>
                 {user.active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
               </Button>
             </AlertDialogTrigger>
@@ -536,7 +536,7 @@ function EditUserDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button size="icon" variant="ghost" title="עריכה"><Pencil className="h-4 w-4" /></Button></DialogTrigger>
+      <DialogTrigger asChild><Button size="icon" variant="ghost" aria-label={`עריכת ${user.full_name || user.email}`} title="עריכה"><Pencil className="h-4 w-4" /></Button></DialogTrigger>
       <DialogContent dir="rtl" className="max-w-lg">
         <DialogHeader><DialogTitle>עריכת משתמש</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="space-y-3">
@@ -628,7 +628,7 @@ function ResetPasswordDialog({ user, onDone }: { user: UserRow; onDone: () => vo
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button size="icon" variant="ghost" title="איפוס סיסמה"><KeyRound className="h-4 w-4" /></Button></DialogTrigger>
+      <DialogTrigger asChild><Button size="icon" variant="ghost" aria-label={`איפוס סיסמה ל${user.full_name || user.email}`} title="איפוס סיסמה"><KeyRound className="h-4 w-4" /></Button></DialogTrigger>
       <DialogContent dir="rtl">
         <DialogHeader><DialogTitle>איפוס סיסמה</DialogTitle></DialogHeader>
         <div className="space-y-3">

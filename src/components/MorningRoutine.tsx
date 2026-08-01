@@ -554,7 +554,13 @@ function UnderwritingCard({ reps }: { reps: Rep[] }) {
           <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="ms-1 h-4 w-4" />הוסף</Button>
         </div>
       </div>
-      <div className="overflow-x-auto -mx-2">
+      {/* Phones get a stacked card list; the table returns from md: up. */}
+      <div className="space-y-2 md:hidden">
+        {m.underwriting.length === 0 ? (
+          <p className="text-center text-sm text-muted-foreground py-6">אין נושאי חיתום פתוחים</p>
+        ) : m.underwriting.map((u) => <UwCard key={u.id} u={u} reps={reps} />)}
+      </div>
+      <div className="hidden md:block scroll-x-touch -mx-2">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-muted-foreground">
@@ -582,11 +588,44 @@ function UnderwritingCard({ reps }: { reps: Rep[] }) {
   );
 }
 
-function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
-  const m = useMorning();
+function useUwMeta(u: UnderwritingIssue, reps: Rep[]) {
   const rep = reps.find((r) => r.id === u.repId);
   const priorityCls = u.priority === "high" ? "bg-primary/10 text-primary" : u.priority === "medium" ? "bg-[color:var(--warning)]/10 text-[color:var(--warning)]" : "bg-accent text-foreground";
   const priorityLabel = UW_PRIORITIES.find((p) => p.value === u.priority)?.label;
+  return { rep, priorityCls, priorityLabel };
+}
+
+function UwCard({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
+  const m = useMorning();
+  const { rep, priorityCls, priorityLabel } = useUwMeta(u, reps);
+  return (
+    <div className="rounded-lg border p-3 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium truncate">{rep?.name ?? "—"}</div>
+          <div className="text-sm text-foreground/80">{u.subject}</div>
+        </div>
+        <Badge variant="secondary" className={cn("shrink-0", priorityCls)}>{priorityLabel}</Badge>
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>נפתח: {formatDateIL(u.openedAt)}</span>
+        <span>יעד: {formatDateIL(u.dueAt)}</span>
+        <span>אחראי: {u.owner}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Select value={u.status} onValueChange={(v) => m.updateUnderwriting(u.id, { status: v as UnderwritingStatus })}>
+          <SelectTrigger className="flex-1 text-sm" aria-label={`סטטוס עבור ${u.subject}`}><SelectValue /></SelectTrigger>
+          <SelectContent>{UW_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+        </Select>
+        <Button size="sm" variant="ghost" onClick={() => { m.removeUnderwriting(u.id); toast.success("נמחק"); }}>מחק</Button>
+      </div>
+    </div>
+  );
+}
+
+function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
+  const m = useMorning();
+  const { rep, priorityCls, priorityLabel } = useUwMeta(u, reps);
   return (
     <tr className="border-t">
       <td className="p-2">{rep?.name ?? "—"}</td>
@@ -595,7 +634,7 @@ function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
       <td className="p-2 text-xs text-muted-foreground">{formatDateIL(u.openedAt)}</td>
       <td className="p-2">
         <Select value={u.status} onValueChange={(v) => m.updateUnderwriting(u.id, { status: v as UnderwritingStatus })}>
-          <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[130px] text-xs" aria-label={`סטטוס עבור ${u.subject}`}><SelectValue /></SelectTrigger>
           <SelectContent>{UW_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
         </Select>
       </td>
@@ -607,6 +646,7 @@ function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
     </tr>
   );
 }
+
 
 function AddUwDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChange: (o: boolean) => void; reps: Rep[] }) {
   const m = useMorning();
@@ -765,7 +805,7 @@ function ChecklistCard() {
           return (
             <li key={t}>
               <label className={cn("flex items-center gap-3 rounded-lg border p-2.5 cursor-pointer text-sm transition-colors hover:bg-accent/40", checked && "bg-accent/30")}>
-                <Checkbox checked={checked} onCheckedChange={() => m.toggleChecklist(t)} />
+                <Checkbox checked={checked} onCheckedChange={() => m.toggleChecklist(t)} aria-label={t} />
                 <span className={cn(checked && "line-through text-muted-foreground")}>{t}</span>
               </label>
             </li>
