@@ -603,7 +603,7 @@ function ChartAndSummary({ data, avgPct, tp, target }: { data: ReturnType<typeof
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} vertical={false} />
-            <XAxis dataKey="month" reversed tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+            <XAxis dataKey="month" reversed tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={10} tickLine={false} axisLine={false} />
             <YAxis hide />
             <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} formatter={(v: number) => [formatNum(v), "ביצוע"]} labelFormatter={(l) => `חודש ${l}`} />
             <ReferenceLine y={target} stroke="var(--muted-foreground)" strokeDasharray="4 4" opacity={0.6} />
