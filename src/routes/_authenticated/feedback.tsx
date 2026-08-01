@@ -4,6 +4,10 @@ import { useApp, useIsManager, computeScore, teamsFromReps, visibleFeedback } fr
 import { CRITERIA, type CriterionValue, type Feedback, type Rep } from "@/lib/seed";
 import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
+import { useAuth } from "@/lib/auth";
+import { useAppMode } from "@/lib/app-mode";
+import { useServerFn } from "@tanstack/react-start";
+import { previewUnpublishedFeedback, publishFeedbackBulk, toBulkPublishFilters, BULK_PUBLISH_NONE } from "@/lib/feedback-admin.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +16,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -25,7 +33,7 @@ import { cn } from "@/lib/utils";
 import {
   Plus, Eye, Headphones, Calendar as CalendarIcon, Flame, TrendingUp, TrendingDown,
   Award, Sparkles, AlertTriangle, Trash2, CheckCircle2, BookOpen, Target,
-  Users, Trophy, ShieldCheck, Radar as RadarIcon, Grid3x3, Clock,
+  Users, Trophy, ShieldCheck, Radar as RadarIcon, Grid3x3, Clock, Upload,
 } from "lucide-react";
 import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar as RRadar, PolarRadiusAxis,
@@ -121,8 +129,11 @@ export const Route = createFileRoute("/_authenticated/feedback")({
 function ListeningCenter() {
   const { state, updateFeedback } = useApp();
   const isManager = useIsManager();
+  const { isAdmin } = useAuth();
+  const { isDemo } = useAppMode();
   const [openForm, setOpenForm] = useState(false);
   const [openSchedule, setOpenSchedule] = useState(false);
+  const [openBulkPublish, setOpenBulkPublish] = useState(false);
   const [view, setView] = useState<string | null>(null);
   const [prefRepId, setPrefRepId] = useState<string | undefined>(undefined);
   const [prefScheduleId, setPrefScheduleId] = useState<string | undefined>(undefined);
@@ -163,16 +174,24 @@ function ListeningCenter() {
           ? "ניהול איכות שיחות: תור עדיפויות, ניתוח מגמות, מפת חום צוותית ותוכניות אימון"
           : "צפייה בהיסטוריית ההאזנות והמשוב האישי שלך"}
         actions={
-          <ManagerOnly>
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
+            <ManagerOnly>
               <Button variant="outline" onClick={() => setOpenSchedule(true)}>
                 <CalendarIcon className="ms-1 h-4 w-4" />תזמון האזנה
               </Button>
               <Button onClick={() => openNewFor()}>
                 <Plus className="ms-1 h-4 w-4" />האזנה חדשה
               </Button>
-            </div>
-          </ManagerOnly>
+            </ManagerOnly>
+            {/* Bulk-publishing historical drafts is a deliberately narrower, audited
+                action than day-to-day feedback management — admin-only, and only
+                meaningful against real cloud data. */}
+            {isAdmin && !isDemo && (
+              <Button variant="outline" onClick={() => setOpenBulkPublish(true)}>
+                <Upload className="ms-1 h-4 w-4" />פרסום משובים קיימים
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -225,6 +244,10 @@ function ListeningCenter() {
           />
           <ScheduleDialog open={openSchedule} onOpenChange={setOpenSchedule} />
         </>
+      )}
+
+      {isAdmin && !isDemo && (
+        <AdminBulkPublishDialog open={openBulkPublish} onOpenChange={setOpenBulkPublish} />
       )}
 
       <Dialog open={!!viewed} onOpenChange={(v) => !v && setView(null)}>
@@ -990,15 +1013,49 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
                             <Button size="sm" variant="outline" onClick={() => openNewFor(s.repId, s.id)}>
                               <CheckCircle2 className="ms-1 h-3.5 w-3.5" />בצע
                             </Button>
-                            <Button size="icon" variant="ghost" onClick={() => updateSchedule(s.id, { status: "cancelled" })}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button size="icon" variant="ghost" aria-label={`ביטול ההאזנה עם ${nameOf(s.repId)}`}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent dir="rtl">
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>ביטול האזנה מתוכננת?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    ההאזנה המתוכננת עם {nameOf(s.repId)} בתאריך {formatDateIL(s.date)} תסומן כמבוטלת. ניתן יהיה למחוק את הרשומה בהמשך.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>חזרה</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => updateSchedule(s.id, { status: "cancelled" })}>
+                                    ביטול ההאזנה
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </>
                         )}
                         {s.status !== "planned" && (
-                          <Button size="icon" variant="ghost" onClick={() => removeSchedule(s.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="icon" variant="ghost" aria-label={`מחיקת רשומת ההאזנה עם ${nameOf(s.repId)}`}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent dir="rtl">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>מחיקת רשומת ההאזנה?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  הפעולה תמחק לצמיתות את רשומת ההאזנה עם {nameOf(s.repId)} מתאריך {formatDateIL(s.date)}. לא ניתן לשחזר לאחר המחיקה.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>ביטול</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => removeSchedule(s.id)}>מחיקה</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         )}
                       </div>
                     </div>
@@ -1345,6 +1402,146 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
             <Button onClick={submit}>{editing ? "עדכון משוב" : "שמירת האזנה"}</Button>
           </div>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// -------------------- Admin: bulk-publish existing feedback --------------------
+/**
+ * Historical feedback created before the draft/publish workflow existed defaults to
+ * published=false for safety (a rep must never suddenly see feedback they weren't
+ * meant to yet). This is the admin-only, filtered, confirmed, audited action to make
+ * that history visible on purpose — never automatic.
+ */
+function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { state } = useApp();
+  const preview = useServerFn(previewUnpublishedFeedback);
+  const bulkPublish = useServerFn(publishFeedbackBulk);
+  const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
+
+  const [teamId, setTeamId] = useState(BULK_PUBLISH_NONE);
+  const [repId, setRepId] = useState(BULK_PUBLISH_NONE);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [count, setCount] = useState<number | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [step, setStep] = useState<"filter" | "confirm">("filter");
+  const [publishing, setPublishing] = useState(false);
+
+  const teamReps = teamId === BULK_PUBLISH_NONE ? state.reps : state.reps.filter((r) => r.teamId === teamId);
+  const filters = toBulkPublishFilters({ teamId, repId, from, to });
+
+  const reset = () => {
+    setTeamId(BULK_PUBLISH_NONE); setRepId(BULK_PUBLISH_NONE); setFrom(""); setTo("");
+    setCount(null); setStep("filter");
+  };
+
+  const close = (v: boolean) => {
+    if (!v) reset();
+    onOpenChange(v);
+  };
+
+  const runPreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const res = await preview({ data: filters });
+      setCount(res.count);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const confirmPublish = async () => {
+    setPublishing(true);
+    try {
+      const res = await bulkPublish({ data: filters });
+      toast.success(`פורסמו ${res.updated} רשומות משוב ליעדים שנבחרו.`);
+      close(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent dir="rtl">
+        <DialogHeader><DialogTitle>פרסום משובים קיימים</DialogTitle></DialogHeader>
+
+        {step === "filter" ? (
+          <div className="space-y-4 text-sm">
+            <p className="text-muted-foreground">
+              משוב שנשמר כטיוטה אינו גלוי לנציג עד לפרסום מפורש. ניתן לפרסם משובים קיימים לפי סינון —
+              הפעולה תשפיע רק על רשומות בטיוטה שתואמות את הסינון שנבחר.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>צוות</Label>
+                <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(BULK_PUBLISH_NONE); setCount(null); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={BULK_PUBLISH_NONE}>כל הצוותים</SelectItem>
+                    {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>נציג</Label>
+                <Select value={repId} onValueChange={(v) => { setRepId(v); setCount(null); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={BULK_PUBLISH_NONE}>כל הנציגים{teamId !== BULK_PUBLISH_NONE ? " בצוות" : ""}</SelectItem>
+                    {teamReps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>מתאריך</Label>
+                <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setCount(null); }} />
+              </div>
+              <div className="space-y-1">
+                <Label>עד תאריך</Label>
+                <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setCount(null); }} />
+              </div>
+            </div>
+
+            <Button variant="outline" onClick={runPreview} disabled={loadingPreview}>
+              {loadingPreview ? "בודק..." : "בדיקת כמות רשומות"}
+            </Button>
+
+            {count !== null && (
+              <div className="rounded-lg border p-3 bg-muted/30">
+                {count === 0
+                  ? "לא נמצאו משובים בטיוטה התואמים לסינון שנבחר."
+                  : `${count} רשומות משוב בטיוטה יפורסמו ויהפכו גלויות לנציגים המתאימים.`}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => close(false)}>סגירה</Button>
+              <Button disabled={!count} onClick={() => setStep("confirm")}>המשך לאישור</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+              <p className="font-semibold">לאשר פרסום של {count} רשומות משוב?</p>
+              <p className="text-muted-foreground mt-1">
+                הרשומות התואמות לסינון שנבחר יהפכו גלויות לנציגים המתאימים. הפעולה תתועד ביומן הביקורת.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setStep("filter")} disabled={publishing}>חזרה</Button>
+              <Button onClick={confirmPublish} disabled={publishing}>
+                {publishing ? "מפרסם..." : "אישור פרסום"}
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

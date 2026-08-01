@@ -1,13 +1,19 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 
+// Single source of truth for supported statuses — must stay in sync with the
+// listening_schedules_status_check CHECK constraint added in
+// supabase/migrations/20260801221500_feedback_score_and_schedule_status_constraints.sql.
+export const SCHEDULE_STATUSES = ["planned", "completed", "cancelled"] as const;
+export type ScheduleStatus = (typeof SCHEDULE_STATUSES)[number];
+
 export type Schedule = {
   id: string;
   repId: string;
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
   topic: string;
-  status: "planned" | "completed" | "cancelled";
+  status: ScheduleStatus;
 };
 
 type ScheduleRow = {
