@@ -21,9 +21,9 @@ export const Route = createFileRoute("/_authenticated/admin")({
   beforeLoad: () => requireRole(["admin"]),
   head: () => ({
     meta: [
-      { title: "ניהול המערכת · RenewHub" },
+      { title: "ניהול המערכת · Pulse" },
       { name: "description", content: "עמוד ניהול פנימי למנהלי המערכת" },
-      { property: "og:title", content: "ניהול המערכת · RenewHub" },
+      { property: "og:title", content: "ניהול המערכת · Pulse" },
       { property: "og:description", content: "עמוד ניהול פנימי למנהלי המערכת" },
     ],
   }),

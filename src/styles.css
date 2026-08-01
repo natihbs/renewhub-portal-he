@@ -6,6 +6,7 @@
 
 @theme inline {
   --font-sans: "Heebo", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Rubik", "Heebo", ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -47,81 +48,121 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-primary-light: var(--brand-primary-light);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-success: var(--brand-success);
+  --color-brand-warning: var(--brand-warning);
+  --color-brand-danger: var(--brand-danger);
+  --color-brand-background: var(--brand-background);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-text: var(--brand-text);
+  --color-brand-muted: var(--brand-muted);
+  --color-brand-border: var(--brand-border);
   --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.04), 0 4px 16px oklch(0 0 0 / 0.05);
   --shadow-card: 0 1px 3px oklch(0 0 0 / 0.05), 0 8px 24px -8px oklch(0 0 0 / 0.08);
 }
 
+/*
+ * Pulse brand tokens — the single source of truth for brand color.
+ * Everything below (shadcn + sidebar variables) maps onto these; components
+ * should reach for the mapped semantic variables (--primary, --sidebar, etc.)
+ * rather than these --brand-* values or raw hex directly, except in the few
+ * places (charts, the login visual panel) that need the brand palette itself.
+ */
+:root {
+  --brand-primary: #4b1d6d;
+  --brand-primary-light: #6d28d9;
+  --brand-accent: #ffc107;
+  --brand-success: #22c55e;
+  --brand-warning: #f59e0b;
+  --brand-danger: #ef4444;
+  --brand-background: #f7f8fc;
+  --brand-surface: #ffffff;
+  --brand-text: #1f2937;
+  --brand-muted: #667085;
+  --brand-border: #e5e7eb;
+}
+
 :root {
   --radius: 0.875rem;
-  --background: oklch(0.985 0.003 250);
-  --foreground: oklch(0.18 0.02 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 260);
-  --primary: oklch(0.58 0.22 27);
-  --primary-foreground: oklch(0.99 0.003 250);
-  --secondary: oklch(0.965 0.008 250);
-  --secondary-foreground: oklch(0.22 0.02 260);
-  --muted: oklch(0.965 0.008 250);
-  --muted-foreground: oklch(0.5 0.02 260);
-  --accent: oklch(0.955 0.02 27);
-  --accent-foreground: oklch(0.4 0.18 27);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.99 0.003 250);
-  --success: oklch(0.62 0.16 155);
-  --warning: oklch(0.75 0.15 75);
-  --border: oklch(0.92 0.008 250);
-  --input: oklch(0.92 0.008 250);
-  --ring: oklch(0.58 0.22 27);
-  --chart-1: oklch(0.58 0.22 27);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.62 0.16 155);
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.22 0.02 260);
-  --sidebar-primary: oklch(0.58 0.22 27);
-  --sidebar-primary-foreground: oklch(0.99 0.003 250);
-  --sidebar-accent: oklch(0.965 0.02 27);
-  --sidebar-accent-foreground: oklch(0.4 0.18 27);
-  --sidebar-border: oklch(0.92 0.008 250);
-  --sidebar-ring: oklch(0.58 0.22 27);
+  --background: var(--brand-background);
+  --foreground: var(--brand-text);
+  --card: var(--brand-surface);
+  --card-foreground: var(--brand-text);
+  --popover: var(--brand-surface);
+  --popover-foreground: var(--brand-text);
+  --primary: var(--brand-primary);
+  --primary-foreground: #ffffff;
+  --secondary: #f3f0f9;
+  --secondary-foreground: var(--brand-text);
+  --muted: #f1f1f5;
+  --muted-foreground: var(--brand-muted);
+  --accent: #f1ecf8;
+  --accent-foreground: var(--brand-primary);
+  --destructive: var(--brand-danger);
+  --destructive-foreground: #ffffff;
+  --success: var(--brand-success);
+  --warning: var(--brand-warning);
+  --border: var(--brand-border);
+  --input: var(--brand-border);
+  --ring: var(--brand-primary-light);
+  --chart-1: var(--brand-primary);
+  --chart-2: var(--brand-primary-light);
+  --chart-3: var(--brand-accent);
+  --chart-4: var(--brand-success);
+  --chart-5: #9aa5b1;
+  --sidebar: var(--brand-primary);
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: var(--brand-primary-light);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: color-mix(in oklab, white 12%, var(--brand-primary));
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: color-mix(in oklab, white 14%, transparent);
+  --sidebar-ring: var(--brand-primary-light);
 }
 
 .dark {
-  --background: oklch(0.16 0.02 260);
-  --foreground: oklch(0.98 0.003 250);
-  --card: oklch(0.21 0.02 260);
-  --card-foreground: oklch(0.98 0.003 250);
-  --popover: oklch(0.21 0.02 260);
-  --popover-foreground: oklch(0.98 0.003 250);
-  --primary: oklch(0.65 0.2 27);
-  --primary-foreground: oklch(0.99 0.003 250);
-  --secondary: oklch(0.28 0.02 260);
-  --secondary-foreground: oklch(0.98 0.003 250);
-  --muted: oklch(0.28 0.02 260);
-  --muted-foreground: oklch(0.7 0.02 260);
-  --accent: oklch(0.32 0.05 27);
-  --accent-foreground: oklch(0.98 0.003 250);
-  --destructive: oklch(0.7 0.19 22);
-  --destructive-foreground: oklch(0.98 0.003 250);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.65 0.2 27);
-  --chart-1: oklch(0.65 0.2 27);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.21 0.02 260);
-  --sidebar-foreground: oklch(0.98 0.003 250);
-  --sidebar-primary: oklch(0.65 0.2 27);
-  --sidebar-primary-foreground: oklch(0.99 0.003 250);
-  --sidebar-accent: oklch(0.32 0.05 27);
-  --sidebar-accent-foreground: oklch(0.98 0.003 250);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.65 0.2 27);
+  --brand-background: #15121b;
+  --brand-surface: #1e1a26;
+  --brand-text: #f3f4f6;
+  --brand-muted: #a6a8b3;
+  --brand-border: color-mix(in oklab, white 12%, transparent);
+
+  --background: var(--brand-background);
+  --foreground: var(--brand-text);
+  --card: var(--brand-surface);
+  --card-foreground: var(--brand-text);
+  --popover: var(--brand-surface);
+  --popover-foreground: var(--brand-text);
+  --primary: var(--brand-primary-light);
+  --primary-foreground: #ffffff;
+  --secondary: #2a2530;
+  --secondary-foreground: var(--brand-text);
+  --muted: #2a2530;
+  --muted-foreground: var(--brand-muted);
+  --accent: #2e2438;
+  --accent-foreground: #e7dff5;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --border: var(--brand-border);
+  --input: color-mix(in oklab, white 15%, transparent);
+  --ring: var(--brand-primary-light);
+  --chart-1: var(--brand-primary-light);
+  --chart-2: #8b5cf6;
+  --chart-3: var(--brand-accent);
+  --chart-4: #4ade80;
+  --chart-5: #8892a0;
+  --sidebar: #2f1148;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: var(--brand-primary-light);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: color-mix(in oklab, white 14%, #2f1148);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: color-mix(in oklab, white 14%, transparent);
+  --sidebar-ring: var(--brand-primary-light);
 }
 
 @layer base {
@@ -190,6 +231,12 @@
   background-color: color-mix(in oklab, var(--color-background) 92%, transparent);
   backdrop-filter: blur(8px);
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* Ambient heartbeat trace on the login page's branded panel. */
+@keyframes pulse-line {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 

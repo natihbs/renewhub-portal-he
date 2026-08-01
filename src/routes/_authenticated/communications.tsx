@@ -28,9 +28,9 @@ export const Route = createFileRoute("/_authenticated/communications")({
   beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
-      { title: "מרכז תקשורת · RenewHub" },
+      { title: "מרכז תקשורת · Pulse" },
       { name: "description", content: "יצירה אוטומטית של הודעות ניהוליות - עדכוני בוקר, סיכומי ערב, תחרויות, ברכות ומשוב" },
-      { property: "og:title", content: "מרכז תקשורת · RenewHub" },
+      { property: "og:title", content: "מרכז תקשורת · Pulse" },
       { property: "og:description", content: "יצירה אוטומטית של הודעות ניהוליות מבוססות נתוני הדשבורד" },
     ],
   }),
@@ -356,7 +356,7 @@ function WhatsAppPreview({ body }: { body: string }) {
   return (
     <div className="rounded-xl bg-[#e8f0e6] p-4">
       <div className="mx-auto max-w-md rounded-2xl bg-white p-3 shadow-soft">
-        <div className="mb-2 text-[11px] font-semibold text-emerald-700">RenewHub · צוות ניהול</div>
+        <div className="mb-2 text-[11px] font-semibold text-emerald-700">Pulse · צוות ניהול</div>
         <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground">
           {body}
         </div>
@@ -372,7 +372,7 @@ function EmailPreview({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-xl border bg-card">
       <div className="border-b p-3 text-sm">
-        <div><span className="text-muted-foreground">מאת: </span>ניהול RenewHub</div>
+        <div><span className="text-muted-foreground">מאת: </span>ניהול Pulse</div>
         <div><span className="text-muted-foreground">אל: </span>צוות חידושים</div>
         <div><span className="text-muted-foreground">נושא: </span><b>{title}</b></div>
       </div>

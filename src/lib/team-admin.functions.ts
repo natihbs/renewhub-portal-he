@@ -3,6 +3,27 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
+/**
+ * Team headcount, computed per team. `rep_count` MUST come from
+ * representatives.team_id directly, independent of `people` (profiles/login
+ * accounts) — a representative has no `profiles` row at all unless a login
+ * account is linked to it, so deriving rep_count from `people` silently
+ * excludes every representative that doesn't have a linked user account.
+ */
+export function aggregateTeamCounts(
+  teamId: string,
+  people: { team_id: string | null; active: boolean }[],
+  representatives: { team_id: string | null }[],
+): { member_count: number; rep_count: number; active_member_count: number } {
+  const members = people.filter((p) => p.team_id === teamId);
+  const teamReps = representatives.filter((r) => r.team_id === teamId);
+  return {
+    member_count: members.length,
+    rep_count: teamReps.length,
+    active_member_count: members.filter((m) => m.active).length,
+  };
+}
+
 async function getRoles(ctx: Ctx): Promise<string[]> {
   const { data, error } = await ctx.supabase.from("user_roles").select("role").eq("user_id", ctx.userId);
   if (error) throw new Error("שגיאה באימות הרשאות");
@@ -45,7 +66,7 @@ export const listTeams = createServerFn({ method: "GET" })
     const roles = await assertAdminOrManager(ctx);
     const isAdmin = roles.includes("admin");
 
-    const [{ data: teams, error: tErr }, { data: profiles, error: pErr }, { data: userRoles, error: rErr }] =
+    const [{ data: teams, error: tErr }, { data: profiles, error: pErr }, { data: userRoles, error: rErr }, { data: reps, error: repErr }] =
       await Promise.all([
         ctx.supabase
           .from("teams")
@@ -53,10 +74,16 @@ export const listTeams = createServerFn({ method: "GET" })
           .order("created_at", { ascending: false }),
         ctx.supabase.from("profiles").select("id, full_name, email, team_id, manager_id, representative_id, active"),
         ctx.supabase.from("user_roles").select("user_id, role"),
+        // Representative headcount must come from representatives.team_id directly — a
+        // representative has no `profiles` row at all unless a login account is linked
+        // to it, so counting via profiles silently drops every representative without
+        // an account. See rep_count below.
+        ctx.supabase.from("representatives").select("id, team_id, active"),
       ]);
     if (tErr) throw new Error(tErr.message);
     if (pErr) throw new Error(pErr.message);
     if (rErr) throw new Error(rErr.message);
+    if (repErr) throw new Error(repErr.message);
 
     const rolesByUser = new Map<string, string[]>();
     for (const r of (userRoles ?? []) as { user_id: string; role: string }[]) {
@@ -66,16 +93,12 @@ export const listTeams = createServerFn({ method: "GET" })
     }
 
     const people = ((profiles ?? []) as any[]).map((p) => ({ ...p, roles: rolesByUser.get(p.id) ?? [] }));
+    const repRows = (reps ?? []) as { id: string; team_id: string | null; active: boolean }[];
 
-    const rows = ((teams ?? []) as any[]).map((t) => {
-      const members = people.filter((p) => p.team_id === t.id);
-      return {
-        ...t,
-        member_count: members.length,
-        rep_count: members.filter((m) => m.roles.includes("representative")).length,
-        active_member_count: members.filter((m) => m.active).length,
-      };
-    });
+    const rows = ((teams ?? []) as any[]).map((t) => ({
+      ...t,
+      ...aggregateTeamCounts(t.id, people, repRows),
+    }));
 
     return {
       teams: rows,
@@ -93,7 +116,7 @@ export const getTeamDetails = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
     await assertAdminOrManager(ctx);
-    const [{ data: team, error: tErr }, { data: members, error: mErr }, { data: userRoles }] = await Promise.all([
+    const [{ data: team, error: tErr }, { data: members, error: mErr }, { data: userRoles }, { data: reps, error: repErr }] = await Promise.all([
       ctx.supabase
         .from("teams")
         .select("id, name, department, description, manager_id, active, created_at, updated_at")
@@ -104,9 +127,18 @@ export const getTeamDetails = createServerFn({ method: "POST" })
         .select("id, full_name, email, team_id, manager_id, representative_id, active, last_login_at")
         .eq("team_id", data.team_id),
       ctx.supabase.from("user_roles").select("user_id, role"),
+      // Independent of `members` (profiles/login accounts) — representatives.team_id
+      // is the source of truth for representative team membership regardless of
+      // whether a login account is linked.
+      ctx.supabase
+        .from("representatives")
+        .select("id, name, external_ref, user_id, active")
+        .eq("team_id", data.team_id)
+        .order("name"),
     ]);
     if (tErr) throw new Error(tErr.message);
     if (mErr) throw new Error(mErr.message);
+    if (repErr) throw new Error(repErr.message);
     if (!team) throw new Error("הצוות לא נמצא");
 
     const rolesByUser = new Map<string, string[]>();
@@ -119,6 +151,7 @@ export const getTeamDetails = createServerFn({ method: "POST" })
     return {
       team,
       members: ((members ?? []) as any[]).map((m) => ({ ...m, roles: rolesByUser.get(m.id) ?? [] })),
+      representatives: (reps ?? []) as { id: string; name: string; external_ref: string | null; user_id: string | null; active: boolean }[],
     };
   });
 

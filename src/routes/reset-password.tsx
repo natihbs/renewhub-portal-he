@@ -7,14 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { PulseLogo } from "@/components/PulseLogo";
 
 export const Route = createFileRoute("/reset-password")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "איפוס סיסמה · RenewHub" },
+      { title: "איפוס סיסמה · Pulse" },
       { name: "description", content: "קביעת סיסמה חדשה" },
-      { property: "og:title", content: "איפוס סיסמה · RenewHub" },
+      { property: "og:title", content: "איפוס סיסמה · Pulse" },
       { property: "og:description", content: "קביעת סיסמה חדשה" },
     ],
   }),
@@ -57,27 +58,30 @@ function ResetPasswordPage() {
 
   return (
     <div dir="rtl" className="min-h-dvh flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle>איפוס סיסמה</CardTitle>
-          <CardDescription>{ready ? "בחר סיסמה חדשה" : "מאמת קישור..."}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="p1">סיסמה חדשה</Label>
-              <Input id="p1" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" disabled={!ready} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="p2">אימות סיסמה</Label>
-              <Input id="p2" type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} dir="ltr" disabled={!ready} />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading || !ready}>
-              {loading ? "מעדכן..." : "עדכן סיסמה"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <div className="w-full max-w-md">
+        <PulseLogo variant="symbol" className="h-10 mx-auto mb-4" />
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle>איפוס סיסמה</CardTitle>
+            <CardDescription>{ready ? "בחר סיסמה חדשה" : "מאמת קישור..."}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="p1">סיסמה חדשה</Label>
+                <Input id="p1" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" disabled={!ready} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="p2">אימות סיסמה</Label>
+                <Input id="p2" type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} dir="ltr" disabled={!ready} />
+              </div>
+              <Button type="submit" className="w-full" disabled={loading || !ready}>
+                {loading ? "מעדכן..." : "עדכן סיסמה"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

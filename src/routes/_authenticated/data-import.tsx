@@ -42,9 +42,9 @@ export const Route = createFileRoute("/_authenticated/data-import")({
   beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
-      { title: "ייבוא נתונים · RenewHub" },
+      { title: "ייבוא נתונים · Pulse" },
       { name: "description", content: "העלאת דוחות ביצועים יומיים ועדכון הדשבורד" },
-      { property: "og:title", content: "ייבוא נתונים · RenewHub" },
+      { property: "og:title", content: "ייבוא נתונים · Pulse" },
       { property: "og:description", content: "העלאת דוחות ביצועים יומיים ועדכון הדשבורד" },
     ],
   }),
@@ -554,7 +554,7 @@ function PiiBlockDialog({ data, onClose }: { data: { fileName: string; hits: Pii
             תעודות זהות, מספרי טלפון, כתובות אימייל או מספרי פוליסה.
           </p>
           <p className="text-muted-foreground">
-            RenewHub מיועדת לניהול ביצועים בלבד. יש להסיר את העמודות הרגישות מהקובץ ולנסות שוב.
+            Pulse מיועדת לניהול ביצועים בלבד. יש להסיר את העמודות הרגישות מהקובץ ולנסות שוב.
           </p>
           <div className="rounded-lg border bg-muted/30 p-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">נמצא בקובץ</div>

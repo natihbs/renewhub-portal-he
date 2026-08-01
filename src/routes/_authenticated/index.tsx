@@ -21,9 +21,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
-      { title: "RenewHub" },
+      { title: "Pulse" },
       { name: "description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
-      { property: "og:title", content: "RenewHub" },
+      { property: "og:title", content: "Pulse" },
       { property: "og:description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
     ],
   }),
