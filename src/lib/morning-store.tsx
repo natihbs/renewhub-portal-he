@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
+import { useAuth } from "@/lib/auth";
 
 export type RefreshStatus = "complete" | "partial" | "failed";
 
@@ -26,49 +28,45 @@ export type UnderwritingIssue = {
   dueAt: string;
 };
 
-type MorningState = {
+type CallRow = {
+  id: string;
+  representative_id: string | null;
+  subject: string;
+  scheduled_at: string;
+  status: string;
+  summary: string | null;
+  follow_up_at: string | null;
+};
+type IssueRow = {
+  id: string;
+  representative_id: string | null;
+  subject: string;
+  priority: string;
+  opened_on: string;
+  status: string;
+  owner: string;
+  due_on: string | null;
+};
+type ChecklistRow = { id: string; checklist_date: string; task_key: string; checked: boolean };
+type SettingsRow = {
+  user_id: string;
+  saved_update_template: string | null;
+  last_refresh_at: string | null;
+  refresh_status: string;
+  data_as_of: string | null;
+  yesterday_renewal_pct: number;
+  monthly_avg_renewal_pct: number;
+};
+
+type Ctx = {
   lastRefreshAt: string | null;
   refreshStatus: RefreshStatus;
-  dataAsOf: string; // YYYY-MM-DD
+  dataAsOf: string;
   yesterdayRenewalPct: number;
   monthlyAvgRenewalPct: number;
   managerCalls: ManagerCall[];
   underwriting: UnderwritingIssue[];
-  checklistByDate: Record<string, Record<string, boolean>>;
   savedUpdateTemplate: string | null;
-};
-
-const KEY = "renewhub_morning_v1";
-const uid = () => Math.random().toString(36).slice(2, 10);
-const isoDate = (d = new Date()) => d.toISOString().slice(0, 10);
-
-function seed(): MorningState {
-  const now = new Date();
-  now.setHours(7, 40, 0, 0);
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  return {
-    lastRefreshAt: now.toISOString(),
-    refreshStatus: "complete",
-    dataAsOf: isoDate(yesterday),
-    yesterdayRenewalPct: 71,
-    monthlyAvgRenewalPct: 68,
-    managerCalls: [
-      { id: uid(), repId: "", subject: "שיחת ליווי - התנגדויות מחיר", scheduledAt: new Date(Date.now() + 3600e3).toISOString(), status: "planned" },
-      { id: uid(), repId: "", subject: "שיחת משוב אחרי האזנה", scheduledAt: new Date(Date.now() - 26 * 3600e3).toISOString(), status: "overdue" },
-      { id: uid(), repId: "", subject: "מעקב יעדי חודש", scheduledAt: new Date(Date.now() - 3 * 3600e3).toISOString(), status: "completed", summary: "הוצבו יעדים שבועיים" },
-    ],
-    underwriting: [
-      { id: uid(), repId: "", subject: "אישור חריג במסלול רכב", priority: "high", openedAt: isoDate(yesterday), status: "ממתין לחיתום", owner: "חיתום", dueAt: isoDate(new Date(Date.now() + 24 * 3600e3)) },
-      { id: uid(), repId: "", subject: "עדכון תנאי דירה - הצפה", priority: "medium", openedAt: isoDate(yesterday), status: "בטיפול", owner: "מנהל צוות", dueAt: isoDate(new Date(Date.now() + 3 * 24 * 3600e3)) },
-      { id: uid(), repId: "", subject: "בקשת הנחה חריגה", priority: "low", openedAt: isoDate(new Date(Date.now() - 3 * 24 * 3600e3)), status: "ממתין לנציג", owner: "נציג", dueAt: isoDate(new Date(Date.now() + 2 * 24 * 3600e3)) },
-    ],
-    checklistByDate: {},
-    savedUpdateTemplate: null,
-  };
-}
-
-type Ctx = MorningState & {
   simulateRefresh: (status?: RefreshStatus) => void;
   addManagerCall: (c: Omit<ManagerCall, "id" | "status"> & { status?: ManagerCall["status"] }) => void;
   updateManagerCall: (id: string, p: Partial<ManagerCall>) => void;
@@ -82,67 +80,155 @@ type Ctx = MorningState & {
 };
 
 const MCtx = createContext<Ctx | null>(null);
+const uid = () => Math.random().toString(36).slice(2, 10);
+const isoDate = (d = new Date()) => d.toISOString().slice(0, 10);
 
 export function MorningProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<MorningState>(seed);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setState({ ...seed(), ...JSON.parse(raw) });
-    } catch {}
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
-  }, [state, hydrated]);
-
+  const { user } = useAuth();
+  const calls = useCloudCollection<CallRow>("manager_calls", {
+    order: { column: "scheduled_at", ascending: true },
+  });
+  const issues = useCloudCollection<IssueRow>("underwriting_issues", { order: { column: "opened_on" } });
   const today = isoDate();
+  const checklist = useCloudCollection<ChecklistRow>("morning_checklist", {
+    eq: { checklist_date: today },
+  });
+  const settings = useCloudCollection<SettingsRow>("morning_settings", {});
 
-  const value = useMemo<Ctx>(() => ({
-    ...state,
-    simulateRefresh: (status = "complete") => setState((s) => ({
-      ...s,
-      lastRefreshAt: new Date().toISOString(),
-      refreshStatus: status,
-      dataAsOf: isoDate(new Date(Date.now() - 24 * 3600e3)),
-    })),
-    addManagerCall: (c) => setState((s) => ({
-      ...s,
-      managerCalls: [{ id: uid(), status: c.status ?? "planned", ...c }, ...s.managerCalls],
-    })),
-    updateManagerCall: (id, p) => setState((s) => ({
-      ...s,
-      managerCalls: s.managerCalls.map((c) => c.id === id ? { ...c, ...p } : c),
-    })),
-    removeManagerCall: (id) => setState((s) => ({
-      ...s,
-      managerCalls: s.managerCalls.filter((c) => c.id !== id),
-    })),
-    addUnderwriting: (u) => setState((s) => ({
-      ...s,
-      underwriting: [{ id: uid(), openedAt: u.openedAt ?? isoDate(), ...u }, ...s.underwriting],
-    })),
-    updateUnderwriting: (id, p) => setState((s) => ({
-      ...s,
-      underwriting: s.underwriting.map((u) => u.id === id ? { ...u, ...p } : u),
-    })),
-    removeUnderwriting: (id) => setState((s) => ({
-      ...s,
-      underwriting: s.underwriting.filter((u) => u.id !== id),
-    })),
-    toggleChecklist: (task) => setState((s) => {
-      const day = s.checklistByDate[today] ?? {};
+  const [demoCalls, setDemoCalls] = useState<ManagerCall[]>([]);
+  const [demoIssues, setDemoIssues] = useState<UnderwritingIssue[]>([]);
+  const [demoChecklist, setDemoChecklist] = useState<Record<string, boolean>>({});
+  const [demoTemplate, setDemoTemplate] = useState<string | null>(null);
+
+  const value = useMemo<Ctx>(() => {
+    if (!calls.live) {
       return {
-        ...s,
-        checklistByDate: { ...s.checklistByDate, [today]: { ...day, [task]: !day[task] } },
+        lastRefreshAt: null,
+        refreshStatus: "complete",
+        dataAsOf: isoDate(new Date(Date.now() - 24 * 3600e3)),
+        yesterdayRenewalPct: 0,
+        monthlyAvgRenewalPct: 0,
+        managerCalls: demoCalls,
+        underwriting: demoIssues,
+        savedUpdateTemplate: demoTemplate,
+        simulateRefresh: () => {},
+        addManagerCall: (c) =>
+          setDemoCalls((s) => [{ id: uid(), status: c.status ?? "planned", ...c }, ...s]),
+        updateManagerCall: (id, p) => setDemoCalls((s) => s.map((c) => (c.id === id ? { ...c, ...p } : c))),
+        removeManagerCall: (id) => setDemoCalls((s) => s.filter((c) => c.id !== id)),
+        addUnderwriting: (u) =>
+          setDemoIssues((s) => [{ id: uid(), openedAt: u.openedAt ?? isoDate(), ...u }, ...s]),
+        updateUnderwriting: (id, p) => setDemoIssues((s) => s.map((x) => (x.id === id ? { ...x, ...p } : x))),
+        removeUnderwriting: (id) => setDemoIssues((s) => s.filter((x) => x.id !== id)),
+        toggleChecklist: (task) => setDemoChecklist((s) => ({ ...s, [task]: !s[task] })),
+        isChecked: (task) => !!demoChecklist[task],
+        saveTemplate: (text) => setDemoTemplate(text),
       };
-    }),
-    isChecked: (task) => !!state.checklistByDate[today]?.[task],
-    saveTemplate: (text) => setState((s) => ({ ...s, savedUpdateTemplate: text })),
-  }), [state, today]);
+    }
+
+    const s = settings.rows[0];
+    const managerCalls: ManagerCall[] = calls.rows.map((c) => ({
+      id: c.id,
+      repId: c.representative_id ?? "",
+      subject: c.subject,
+      scheduledAt: c.scheduled_at,
+      status: (c.status as ManagerCall["status"]) ?? "planned",
+      summary: c.summary ?? undefined,
+      followUpAt: c.follow_up_at ?? undefined,
+    }));
+    const underwriting: UnderwritingIssue[] = issues.rows.map((i) => ({
+      id: i.id,
+      repId: i.representative_id ?? "",
+      subject: i.subject,
+      priority: (i.priority as UnderwritingPriority) ?? "medium",
+      openedAt: i.opened_on,
+      status: (i.status as UnderwritingStatus) ?? "חדש",
+      owner: i.owner,
+      dueAt: i.due_on ?? "",
+    }));
+
+    return {
+      lastRefreshAt: s?.last_refresh_at ?? null,
+      refreshStatus: (s?.refresh_status as RefreshStatus) ?? "complete",
+      dataAsOf: s?.data_as_of ?? isoDate(new Date(Date.now() - 24 * 3600e3)),
+      yesterdayRenewalPct: s?.yesterday_renewal_pct ?? 0,
+      monthlyAvgRenewalPct: s?.monthly_avg_renewal_pct ?? 0,
+      managerCalls,
+      underwriting,
+      savedUpdateTemplate: s?.saved_update_template ?? null,
+      simulateRefresh: (status = "complete") =>
+        void settings.upsert(
+          {
+            user_id: user?.id ?? "",
+            last_refresh_at: new Date().toISOString(),
+            refresh_status: status,
+            data_as_of: isoDate(new Date(Date.now() - 24 * 3600e3)),
+          },
+          "user_id",
+        ),
+      addManagerCall: (c) =>
+        void calls.insert({
+          representative_id: c.repId || null,
+          subject: c.subject,
+          scheduled_at: c.scheduledAt,
+          status: c.status ?? "planned",
+          summary: c.summary ?? null,
+          follow_up_at: c.followUpAt ?? null,
+          owner_id: user?.id ?? "",
+        }),
+      updateManagerCall: (id, p) => {
+        const row: Record<string, string | null> = {};
+        if (p.repId !== undefined) row.representative_id = p.repId || null;
+        if (p.subject !== undefined) row.subject = p.subject;
+        if (p.scheduledAt !== undefined) row.scheduled_at = p.scheduledAt;
+        if (p.status !== undefined) row.status = p.status;
+        if (p.summary !== undefined) row.summary = p.summary ?? null;
+        if (p.followUpAt !== undefined) row.follow_up_at = p.followUpAt ?? null;
+        void calls.update(id, row);
+      },
+      removeManagerCall: (id) => void calls.remove(id),
+      addUnderwriting: (u) =>
+        void issues.insert(
+          {
+            representative_id: u.repId || null,
+            subject: u.subject,
+            priority: u.priority,
+            opened_on: u.openedAt ?? isoDate(),
+            status: u.status,
+            owner: u.owner,
+            due_on: u.dueAt || null,
+          },
+          "created_by",
+        ),
+      updateUnderwriting: (id, p) => {
+        const row: Record<string, string | null> = {};
+        if (p.repId !== undefined) row.representative_id = p.repId || null;
+        if (p.subject !== undefined) row.subject = p.subject;
+        if (p.priority !== undefined) row.priority = p.priority;
+        if (p.openedAt !== undefined) row.opened_on = p.openedAt;
+        if (p.status !== undefined) row.status = p.status;
+        if (p.owner !== undefined) row.owner = p.owner;
+        if (p.dueAt !== undefined) row.due_on = p.dueAt || null;
+        void issues.update(id, row);
+      },
+      removeUnderwriting: (id) => void issues.remove(id),
+      toggleChecklist: (task) => {
+        const current = checklist.rows.find((r) => r.task_key === task);
+        void checklist.upsert(
+          {
+            user_id: user?.id ?? "",
+            checklist_date: today,
+            task_key: task,
+            checked: !current?.checked,
+          },
+          "user_id,checklist_date,task_key",
+        );
+      },
+      isChecked: (task) => !!checklist.rows.find((r) => r.task_key === task)?.checked,
+      saveTemplate: (text) =>
+        void settings.upsert({ user_id: user?.id ?? "", saved_update_template: text }, "user_id"),
+    };
+  }, [calls, issues, checklist, settings, user, today, demoCalls, demoIssues, demoChecklist, demoTemplate]);
 
   return <MCtx.Provider value={value}>{children}</MCtx.Provider>;
 }

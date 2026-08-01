@@ -1,5 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
 import type { Rep } from "./seed";
+
 
 export type ImportFieldKey =
   | "name"
@@ -56,17 +58,9 @@ export type ImportHistoryEntry = {
   errorReport?: { row: number; name?: string; messages: string[] }[];
 };
 
-type UxState = {
+type Ctx = {
   templates: MappingTemplate[];
   history: ImportHistoryEntry[];
-};
-
-const KEY = "renewhub_import_v1";
-const uid = () => Math.random().toString(36).slice(2, 10);
-
-const SEED: UxState = { templates: [], history: [] };
-
-type Ctx = UxState & {
   saveTemplate: (name: string, mapping: Record<string, ImportFieldKey>) => void;
   removeTemplate: (id: string) => void;
   pushHistory: (entry: Omit<ImportHistoryEntry, "id" | "date">) => ImportHistoryEntry;
@@ -74,55 +68,122 @@ type Ctx = UxState & {
   removeHistory: (id: string) => void;
 };
 
+type TemplateRow = { id: string; name: string; mapping: Record<string, ImportFieldKey>; created_at: string };
+type HistoryRow = {
+  id: string;
+  file_name: string;
+  imported_by_name: string;
+  rows_processed: number;
+  rows_updated: number;
+  rows_created: number;
+  rows_skipped: number;
+  warnings: number;
+  errors: number;
+  status: ImportHistoryEntry["status"];
+  snapshot: Rep[] | null;
+  error_report: ImportHistoryEntry["errorReport"] | null;
+  created_at: string;
+};
+
 const ImportCtx = createContext<Ctx | null>(null);
+const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function ImportProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<UxState>(SEED);
-  const [hydrated, setHydrated] = useState(false);
+  const templatesCloud = useCloudCollection<TemplateRow>("import_templates", {
+    order: { column: "created_at" },
+  });
+  const historyCloud = useCloudCollection<HistoryRow>("import_history", {
+    order: { column: "created_at" },
+    limit: 50,
+  });
+  const [demoTemplates, setDemoTemplates] = useState<MappingTemplate[]>([]);
+  const [demoHistory, setDemoHistory] = useState<ImportHistoryEntry[]>([]);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setState({ ...SEED, ...JSON.parse(raw) });
-    } catch {}
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
-  }, [state, hydrated]);
+  const value = useMemo<Ctx>(() => {
+    if (!templatesCloud.live) {
+      return {
+        templates: demoTemplates,
+        history: demoHistory,
+        saveTemplate: (name, mapping) =>
+          setDemoTemplates((s) => [{ id: uid(), name, mapping, createdAt: new Date().toISOString() }, ...s]),
+        removeTemplate: (id) => setDemoTemplates((s) => s.filter((t) => t.id !== id)),
+        pushHistory: (entry) => {
+          const full: ImportHistoryEntry = { ...entry, id: uid(), date: new Date().toISOString() };
+          setDemoHistory((h) => [full, ...h.map((x) => ({ ...x, snapshot: undefined }))].slice(0, 50));
+          return full;
+        },
+        clearSnapshotsExcept: (keepId) =>
+          setDemoHistory((h) => h.map((x) => (x.id === keepId ? x : { ...x, snapshot: undefined }))),
+        removeHistory: (id) => setDemoHistory((h) => h.filter((x) => x.id !== id)),
+      };
+    }
 
-  const saveTemplate = useCallback((name: string, mapping: Record<string, ImportFieldKey>) => {
-    setState((s) => ({
-      ...s,
-      templates: [{ id: uid(), name, mapping, createdAt: new Date().toISOString() }, ...s.templates].slice(0, 20),
+    const templates: MappingTemplate[] = templatesCloud.rows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      mapping: t.mapping ?? {},
+      createdAt: t.created_at,
     }));
-  }, []);
-  const removeTemplate = useCallback((id: string) => {
-    setState((s) => ({ ...s, templates: s.templates.filter((t) => t.id !== id) }));
-  }, []);
-  const pushHistory = useCallback((entry: Omit<ImportHistoryEntry, "id" | "date">) => {
-    const full: ImportHistoryEntry = { ...entry, id: uid(), date: new Date().toISOString() };
-    setState((s) => ({
-      ...s,
-      // keep snapshot only on most recent
-      history: [full, ...s.history.map((h) => ({ ...h, snapshot: undefined }))].slice(0, 50),
+    const history: ImportHistoryEntry[] = historyCloud.rows.map((h) => ({
+      id: h.id,
+      fileName: h.file_name,
+      date: h.created_at,
+      importedBy: h.imported_by_name,
+      rowsProcessed: h.rows_processed,
+      rowsUpdated: h.rows_updated,
+      rowsCreated: h.rows_created,
+      rowsSkipped: h.rows_skipped,
+      warnings: h.warnings,
+      errors: h.errors,
+      status: h.status,
+      snapshot: h.snapshot ?? undefined,
+      errorReport: h.error_report ?? undefined,
     }));
-    return full;
-  }, []);
-  const clearSnapshotsExcept = useCallback((keepId: string) => {
-    setState((s) => ({
-      ...s,
-      history: s.history.map((h) => (h.id === keepId ? h : { ...h, snapshot: undefined })),
-    }));
-  }, []);
-  const removeHistory = useCallback((id: string) => {
-    setState((s) => ({ ...s, history: s.history.filter((h) => h.id !== id) }));
-  }, []);
 
-  const value = useMemo<Ctx>(() => ({ ...state, saveTemplate, removeTemplate, pushHistory, clearSnapshotsExcept, removeHistory }), [state, saveTemplate, removeTemplate, pushHistory, clearSnapshotsExcept, removeHistory]);
+    return {
+      templates,
+      history,
+      saveTemplate: (name, mapping) =>
+        void templatesCloud.insert({ name, mapping } as never, "created_by"),
+      removeTemplate: (id) => void templatesCloud.remove(id),
+      pushHistory: (entry) => {
+        void historyCloud
+          .insert(
+            {
+              file_name: entry.fileName,
+              imported_by_name: entry.importedBy,
+              rows_processed: entry.rowsProcessed,
+              rows_updated: entry.rowsUpdated,
+              rows_created: entry.rowsCreated,
+              rows_skipped: entry.rowsSkipped,
+              warnings: entry.warnings,
+              errors: entry.errors,
+              status: entry.status,
+              snapshot: (entry.snapshot ?? null) as never,
+              error_report: (entry.errorReport ?? null) as never,
+            },
+            "imported_by",
+          )
+          .then(() => {
+            // keep snapshots only on the most recent import
+            for (const old of history.filter((h) => h.snapshot)) {
+              void historyCloud.update(old.id, { snapshot: null });
+            }
+          });
+        return { ...entry, id: uid(), date: new Date().toISOString() };
+      },
+      clearSnapshotsExcept: (keepId) => {
+        for (const h of history) {
+          if (h.id !== keepId && h.snapshot) void historyCloud.update(h.id, { snapshot: null });
+        }
+      },
+      removeHistory: (id) => void historyCloud.remove(id),
+    };
+  }, [templatesCloud, historyCloud, demoTemplates, demoHistory]);
+
   return <ImportCtx.Provider value={value}>{children}</ImportCtx.Provider>;
 }
+
 
 export function useImport() {
   const ctx = useContext(ImportCtx);

@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
 
 export type Idea = {
   id: string;
@@ -7,8 +8,12 @@ export type Idea = {
   date: string;
 };
 
-const KEY = "renewhub_ideas_v1";
-const uid = () => Math.random().toString(36).slice(2, 10);
+type IdeaRow = {
+  id: string;
+  text: string;
+  category: string;
+  created_at: string;
+};
 
 type Ctx = {
   ideas: Idea[];
@@ -18,28 +23,36 @@ type Ctx = {
 };
 
 const IdeasCtx = createContext<Ctx | null>(null);
+const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function IdeasProvider({ children }: { children: ReactNode }) {
-  const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setIdeas(JSON.parse(raw));
-    } catch {}
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(KEY, JSON.stringify(ideas)); } catch {}
-  }, [ideas, hydrated]);
+  const cloud = useCloudCollection<IdeaRow>("ideas", { order: { column: "created_at" } });
+  const [demoIdeas, setDemoIdeas] = useState<Idea[]>([]);
 
-  const value = useMemo<Ctx>(() => ({
-    ideas,
-    addIdea: (i) => setIdeas((s) => [{ ...i, id: uid(), date: new Date().toISOString() }, ...s]),
-    removeIdea: (id) => setIdeas((s) => s.filter((x) => x.id !== id)),
-    clearIdeas: () => setIdeas([]),
-  }), [ideas]);
+  const value = useMemo<Ctx>(() => {
+    if (!cloud.live) {
+      return {
+        ideas: demoIdeas,
+        addIdea: (i) => setDemoIdeas((s) => [{ ...i, id: uid(), date: new Date().toISOString() }, ...s]),
+        removeIdea: (id) => setDemoIdeas((s) => s.filter((x) => x.id !== id)),
+        clearIdeas: () => setDemoIdeas([]),
+      };
+    }
+    const ideas: Idea[] = cloud.rows.map((r) => ({
+      id: r.id,
+      text: r.text,
+      category: (r.category as Idea["category"]) ?? "רעיון",
+      date: r.created_at,
+    }));
+    return {
+      ideas,
+      addIdea: (i) => void cloud.insert({ text: i.text, category: i.category }, "created_by"),
+      removeIdea: (id) => void cloud.remove(id),
+      clearIdeas: () => {
+        for (const i of ideas) void cloud.remove(i.id);
+      },
+    };
+  }, [cloud, demoIdeas]);
 
   return <IdeasCtx.Provider value={value}>{children}</IdeasCtx.Provider>;
 }

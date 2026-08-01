@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
 
 export type CommsKind = "morning" | "evening" | "competition" | "congrats" | "coaching" | "listening";
 
@@ -27,6 +28,9 @@ export type CommsTemplate = {
   createdAt: string;
 };
 
+type MessageRow = { id: string; kind: string; title: string; body: string; created_at: string };
+type TemplateRow = { id: string; kind: string; name: string; body: string; created_at: string };
+
 type Ctx = {
   history: CommsMessage[];
   templates: CommsTemplate[];
@@ -38,61 +42,79 @@ type Ctx = {
   removeTemplate: (id: string) => void;
 };
 
-const HISTORY_KEY = "renewhub_comms_history_v1";
-const TEMPLATES_KEY = "renewhub_comms_templates_v1";
-
 const CommsCtx = createContext<Ctx | null>(null);
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function CommsProvider({ children }: { children: ReactNode }) {
-  const [history, setHistory] = useState<CommsMessage[]>([]);
-  const [templates, setTemplates] = useState<CommsTemplate[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const messages = useCloudCollection<MessageRow>("comms_messages", { order: { column: "created_at" } });
+  const templatesCloud = useCloudCollection<TemplateRow>("comms_templates", {
+    order: { column: "created_at" },
+  });
+  const [demoHistory, setDemoHistory] = useState<CommsMessage[]>([]);
+  const [demoTemplates, setDemoTemplates] = useState<CommsTemplate[]>([]);
 
-  useEffect(() => {
-    try {
-      const h = localStorage.getItem(HISTORY_KEY);
-      if (h) setHistory(JSON.parse(h));
-      const t = localStorage.getItem(TEMPLATES_KEY);
-      if (t) setTemplates(JSON.parse(t));
-    } catch {}
-    setHydrated(true);
-  }, []);
+  const value = useMemo<Ctx>(() => {
+    if (!messages.live) {
+      return {
+        history: demoHistory,
+        templates: demoTemplates,
+        saveMessage: (m) => {
+          const msg: CommsMessage = { ...m, id: uid(), createdAt: new Date().toISOString() };
+          setDemoHistory((h) => [msg, ...h].slice(0, 100));
+          return msg;
+        },
+        updateMessage: (id, patch) =>
+          setDemoHistory((h) => h.map((m) => (m.id === id ? { ...m, ...patch } : m))),
+        removeMessage: (id) => setDemoHistory((h) => h.filter((m) => m.id !== id)),
+        duplicateMessage: (id) =>
+          setDemoHistory((h) => {
+            const src = h.find((m) => m.id === id);
+            if (!src) return h;
+            return [{ ...src, id: uid(), createdAt: new Date().toISOString(), title: `${src.title} (עותק)` }, ...h];
+          }),
+        saveTemplate: (t) =>
+          setDemoTemplates((all) => [{ ...t, id: uid(), createdAt: new Date().toISOString() }, ...all]),
+        removeTemplate: (id) => setDemoTemplates((all) => all.filter((t) => t.id !== id)),
+      };
+    }
 
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
-  }, [history, hydrated]);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates)); } catch {}
-  }, [templates, hydrated]);
+    const history: CommsMessage[] = messages.rows.map((r) => ({
+      id: r.id,
+      kind: r.kind as CommsKind,
+      title: r.title,
+      body: r.body,
+      createdAt: r.created_at,
+    }));
+    const templates: CommsTemplate[] = templatesCloud.rows.map((r) => ({
+      id: r.id,
+      kind: r.kind as CommsKind,
+      name: r.name,
+      body: r.body,
+      createdAt: r.created_at,
+    }));
 
-  const saveMessage = useCallback<Ctx["saveMessage"]>((m) => {
-    const msg: CommsMessage = { ...m, id: uid(), createdAt: new Date().toISOString() };
-    setHistory((h) => [msg, ...h].slice(0, 100));
-    return msg;
-  }, []);
-  const updateMessage = useCallback<Ctx["updateMessage"]>((id, patch) => {
-    setHistory((h) => h.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-  }, []);
-  const removeMessage = useCallback((id: string) => setHistory((h) => h.filter((m) => m.id !== id)), []);
-  const duplicateMessage = useCallback((id: string) => {
-    setHistory((h) => {
-      const src = h.find((m) => m.id === id);
-      if (!src) return h;
-      return [{ ...src, id: uid(), createdAt: new Date().toISOString(), title: `${src.title} (עותק)` }, ...h];
-    });
-  }, []);
-  const saveTemplate = useCallback<Ctx["saveTemplate"]>((t) => {
-    setTemplates((all) => [{ ...t, id: uid(), createdAt: new Date().toISOString() }, ...all]);
-  }, []);
-  const removeTemplate = useCallback((id: string) => setTemplates((all) => all.filter((t) => t.id !== id)), []);
-
-  const value = useMemo<Ctx>(
-    () => ({ history, templates, saveMessage, updateMessage, removeMessage, duplicateMessage, saveTemplate, removeTemplate }),
-    [history, templates, saveMessage, updateMessage, removeMessage, duplicateMessage, saveTemplate, removeTemplate]
-  );
+    return {
+      history,
+      templates,
+      saveMessage: (m) => {
+        void messages.insert({ kind: m.kind, title: m.title, body: m.body }, "created_by");
+        return { ...m, id: uid(), createdAt: new Date().toISOString() };
+      },
+      updateMessage: (id, patch) => void messages.update(id, { ...patch }),
+      removeMessage: (id) => void messages.remove(id),
+      duplicateMessage: (id) => {
+        const src = history.find((m) => m.id === id);
+        if (!src) return;
+        void messages.insert(
+          { kind: src.kind, title: `${src.title} (עותק)`, body: src.body },
+          "created_by",
+        );
+      },
+      saveTemplate: (t) =>
+        void templatesCloud.insert({ kind: t.kind, name: t.name, body: t.body }, "created_by"),
+      removeTemplate: (id) => void templatesCloud.remove(id),
+    };
+  }, [messages, templatesCloud, demoHistory, demoTemplates]);
 
   return <CommsCtx.Provider value={value}>{children}</CommsCtx.Provider>;
 }
