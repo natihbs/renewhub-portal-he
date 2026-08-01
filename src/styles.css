@@ -133,12 +133,17 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* No page ever scrolls sideways; wide content scrolls inside its own box. */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-feature-settings: "kern", "liga";
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
 
   :focus-visible {
@@ -148,6 +153,7 @@
 
   h1, h2, h3, h4 {
     letter-spacing: -0.01em;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -158,4 +164,32 @@
     border-color: color-mix(in oklab, var(--color-border) 55%, var(--color-primary) 45%);
   }
 }
+
+/* Horizontal scroller for wide content (tables, step indicators) on phones. */
+@utility scroll-x-touch {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+/* Bottom padding that clears the iOS home indicator / Safari toolbar. */
+@utility pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@utility pt-safe {
+  padding-top: max(0px, env(safe-area-inset-top));
+}
+
+/* Sticky action bar used at the bottom of long mobile forms. */
+@utility sticky-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background-color: color-mix(in oklab, var(--color-background) 92%, transparent);
+  backdrop-filter: blur(8px);
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
 

@@ -183,7 +183,7 @@ function ActiveCompetitionCard({ comp, onClose, isManager }: { comp: Competition
                 {isManager && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button size="icon" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
+                      <Button size="icon" variant="ghost" aria-label={`מחיקת הקטגוריה ${cat.label}`}><Trash2 className="h-4 w-4" /></Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>

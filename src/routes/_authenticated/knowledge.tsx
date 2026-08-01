@@ -135,10 +135,10 @@ function ArticleCard({ article, isManager }: { article: Article; isManager: bool
           <Button size="sm" onClick={() => setRead(true)}>פתיחת מאמר</Button>
           {isManager && (
             <>
-              <ArticleFormDialog article={article} trigger={<Button size="icon" variant="ghost"><Pencil className="h-4 w-4" /></Button>} />
+              <ArticleFormDialog article={article} trigger={<Button size="icon" variant="ghost" aria-label={`עריכת המאמר ${article.title}`}><Pencil className="h-4 w-4" /></Button>} />
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button size="icon" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
+                  <Button size="icon" variant="ghost" aria-label={`מחיקת המאמר ${article.title}`}><Trash2 className="h-4 w-4" /></Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>

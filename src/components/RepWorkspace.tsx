@@ -22,7 +22,7 @@ import {
   Headphones, Pencil, StickyNote, Trophy, BookOpen, ArrowUpRight, Plus,
   Trash2, CheckCircle2, Circle, Award, Flame, Star, Target, Calendar,
   TrendingUp, TrendingDown, Minus, User, LineChart as LineChartIcon,
-  Clock, MessageSquare, Sparkles, X,
+  Clock, MessageSquare, Sparkles, ChevronRight,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, CartesianGrid } from "recharts";
 
@@ -283,11 +283,22 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   return (
     <>
       {/* Sticky header */}
-      <SheetHeader className="p-5 pb-4 border-b bg-card">
-        <div className="flex items-start gap-3">
+      <SheetHeader className="p-4 pb-4 border-b bg-card sm:p-5">
+        {/* Explicit back control: on a phone this sheet reads as a full page. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+          className="sm:hidden -ms-2 self-start gap-1 text-muted-foreground"
+        >
+          <ChevronRight className="h-4 w-4" />
+          חזרה
+        </Button>
+        <div className="flex items-start gap-3 pe-10">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10 text-primary font-bold shrink-0 text-lg">
             {rep.name.slice(0, 1)}
           </div>
+
           <div className="min-w-0 flex-1">
             <SheetTitle className="text-lg text-start truncate">{rep.name}</SheetTitle>
             <SheetDescription className="text-start flex items-center gap-2 flex-wrap mt-1">
@@ -296,7 +307,6 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
               <RiskBadge level={risk.level} />
             </SheetDescription>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="סגירה"><X className="h-4 w-4" /></Button>
         </div>
       </SheetHeader>
 
@@ -603,7 +613,7 @@ function ChartAndSummary({ data, avgPct, tp, target }: { data: ReturnType<typeof
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} vertical={false} />
-            <XAxis dataKey="month" reversed tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+            <XAxis dataKey="month" reversed tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={10} tickLine={false} axisLine={false} />
             <YAxis hide />
             <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} formatter={(v: number) => [formatNum(v), "ביצוע"]} labelFormatter={(l) => `חודש ${l}`} />
             <ReferenceLine y={target} stroke="var(--muted-foreground)" strokeDasharray="4 4" opacity={0.6} />
@@ -629,7 +639,7 @@ function TaskRow({ task, onToggle, onDelete }: { task: { id: string; title: stri
   const priorityLabel = { low: "נמוכה", medium: "בינונית", high: "גבוהה" }[task.priority];
   return (
     <li className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", task.done && "opacity-60")}>
-      <Checkbox checked={task.done} onCheckedChange={onToggle} />
+      <Checkbox checked={task.done} onCheckedChange={onToggle} aria-label={`סימון המשימה ${task.title} כבוצעה`} />
       <div className="min-w-0 flex-1">
         <div className={cn("text-sm truncate", task.done && "line-through")}>{task.title}</div>
         <div className="text-[11px] text-muted-foreground flex items-center gap-2">

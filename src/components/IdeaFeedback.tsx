@@ -31,7 +31,8 @@ export function IdeaFeedbackButton() {
         type="button"
         onClick={() => setOpen(true)}
         className={cn(
-          "fixed bottom-5 start-5 z-40 flex items-center gap-2 rounded-full bg-primary text-primary-foreground",
+          // Sits above the mobile bottom navigation so it never covers it.
+          "fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom))] start-4 z-40 flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-primary text-primary-foreground lg:bottom-5 lg:start-5",
           "px-4 py-2.5 text-sm font-medium shadow-lg hover:shadow-xl transition-all",
           "hover:scale-105 active:scale-95"
         )}
@@ -40,6 +41,7 @@ export function IdeaFeedbackButton() {
         <Lightbulb className="h-4 w-4" />
         <span className="hidden sm:inline">דווח על רעיון</span>
       </button>
+
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent dir="rtl" className="sm:max-w-lg">

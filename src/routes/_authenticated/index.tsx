@@ -117,14 +117,14 @@ function HomePage() {
 
       {/* KPI cards */}
       {isManager ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard icon={Target} label="יעד חודשי" value={formatNum(totalTarget)} sub={`סה"כ חידושים לצוותים`} trend={{ dir: "up", text: "יעד קבוע" }} />
           <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(totalResult)} sub={`${formatPct(pct)} מהיעד`} trend={{ dir: diff >= 0 ? "up" : "down", text: `${diff >= 0 ? "+" : ""}${diff} מול הצפוי` }} />
           <KPICard icon={TrendingUp} label="תחזית סוף חודש" value={formatNum(forecast)} sub={onTrack ? "צפוי לעמוד ביעד" : "מתחת ליעד"} trend={{ dir: onTrack ? "up" : "down", text: `${forecast - totalTarget >= 0 ? "+" : ""}${forecast - totalTarget}` }} tone={onTrack ? "success" : "danger"} />
           <KPICard icon={CalendarClock} label="ימי עבודה שנותרו" value={String(wdRemaining)} sub={`מתוך ${wdTotal} בחודש`} trend={{ dir: "up", text: `${perDayNeeded}/יום נדרש` }} />
         </div>
       ) : me ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard icon={Target} label="היעד שלי" value={formatNum(me.monthlyTarget)} sub="חידושים לחודש" />
           <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(me.currentResult)} sub={`${formatPct((me.currentResult / me.monthlyTarget) * 100)} מהיעד`} tone={statusForRep(me).tone} />
           <KPICard icon={TrendingUp} label="נותר ליעד" value={formatNum(Math.max(0, me.monthlyTarget - me.currentResult))} sub={`~${wdRemaining > 0 ? Math.ceil(Math.max(0, me.monthlyTarget - me.currentResult) / wdRemaining) : 0}/יום`} />
@@ -460,6 +460,7 @@ function TodayTasks() {
             <Checkbox
               checked={!!done[t]}
               onCheckedChange={(v) => setDone((s) => ({ ...s, [t]: !!v }))}
+              aria-label={t}
             />
             <span className={cn("text-sm", done[t] && "line-through text-muted-foreground")}>{t}</span>
           </label>

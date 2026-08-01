@@ -55,7 +55,7 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
         to={item.to as string}
         onClick={onClick}
         className={cn(
-          "flex items-center gap-3 rounded-xl pe-9 ps-3 py-2.5 text-sm font-medium transition-colors",
+          "flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-3 py-2.5 text-sm font-medium transition-colors sm:pe-9",
           active
             ? "bg-primary text-primary-foreground shadow-soft"
             : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -68,14 +68,15 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.to); }}
         className={cn(
-          "absolute end-2 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-md transition-opacity",
-          pinned ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          "absolute end-1 top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-md transition-opacity sm:end-2 sm:h-6 sm:w-6",
+          pinned ? "opacity-100" : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
           active ? "text-primary-foreground/80 hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground"
         )}
-        aria-label={pinned ? "הסרה מהמועדפים" : "הוספה למועדפים"}
+        aria-label={pinned ? `הסרת ${item.label} מהמועדפים` : `הוספת ${item.label} למועדפים`}
       >
         <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
       </button>
+
     </div>
   );
 }
@@ -273,7 +274,7 @@ function UserMenu() {
             type="button"
             disabled={loading}
             aria-label="תפריט משתמש"
-            className="flex items-center gap-2 h-10 rounded-full ps-1 pe-2 md:pe-3 hover:bg-accent transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 min-h-11 rounded-full ps-1 pe-2 md:pe-3 hover:bg-accent transition-colors disabled:opacity-50"
           >
             <Avatar className="h-8 w-8">
               <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
@@ -346,6 +347,71 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
 
 const BARE_ROUTES = ["/auth", "/reset-password", "/access-denied"];
 
+const PAGE_TITLES: Record<string, string> = {
+  "/": "דף הבית",
+  "/performance": "ביצועים",
+  "/competitions": "תחרויות",
+  "/knowledge": "מרכז ידע",
+  "/feedback": "האזנות ומשוב",
+  "/data-import": "ייבוא נתונים",
+  "/communications": "מרכז תקשורת",
+  "/users": "ניהול משתמשים",
+  "/admin": "ניהול המערכת",
+  "/changelog": "יומן שינויים",
+};
+
+/** Bottom navigation shown instead of the sidebar on phones and small tablets. */
+function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const { state } = useApp();
+  const { isDemo } = useAppMode();
+  const { roles } = useAuth();
+  const canManage = isDemo ? state.role === "manager" : (roles.includes("admin") || roles.includes("manager"));
+  const canAdmin = isDemo ? state.role === "manager" : roles.includes("admin");
+  const visible = NAV.filter((n) => (n.adminOnly ? canAdmin : n.managerOnly ? canManage : true));
+  const primary = visible.slice(0, 4);
+
+  return (
+    <nav
+      aria-label="ניווט ראשי"
+      className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 pb-[env(safe-area-inset-bottom)]"
+    >
+      <ul className="grid grid-cols-5">
+        {primary.map((n) => {
+          const Icon = n.icon;
+          const active = pathname === n.to;
+          return (
+            <li key={n.to}>
+              <Link
+                to={n.to as string}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium transition-colors",
+                  active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.4]")} />
+                <span className="w-full truncate text-center leading-none">{n.label}</span>
+              </Link>
+            </li>
+          );
+        })}
+        <li>
+          <button
+            type="button"
+            onClick={onOpenMenu}
+            aria-label="פתיחת תפריט מלא"
+            className="flex w-full min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Menu className="h-5 w-5 shrink-0" />
+            <span className="leading-none">עוד</span>
+          </button>
+        </li>
+      </ul>
+    </nav>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const cmd = useCommandPalette();
@@ -353,6 +419,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (BARE_ROUTES.includes(pathname)) {
     return <div className="min-h-dvh bg-background">{children}</div>;
   }
+
+  const pageTitle = PAGE_TITLES[pathname] ?? "RenewHub";
 
   return (
     <div className="min-h-dvh flex bg-background">
@@ -363,21 +431,25 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 sticky top-0 z-30 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:px-6">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="min-h-14 lg:h-16 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 sticky top-0 z-30 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 pt-safe sm:gap-3 sm:px-4 md:px-6">
+          <div className="flex items-center gap-2 min-w-0">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="lg:hidden shrink-0">
+                <Button variant="ghost" size="icon" className="lg:hidden shrink-0" aria-label="פתיחת תפריט הניווט">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="p-0 w-72">
-                <SheetTitle className="sr-only">תפריט</SheetTitle>
+              <SheetContent side="right" className="p-0 sm:w-80 sm:max-w-[85vw]">
+                <SheetTitle className="sr-only">תפריט ניווט</SheetTitle>
                 <Brand />
+                <div className="px-3 pt-3 lg:hidden">
+                  <ModeToggle />
+                </div>
                 <NavList onNavigate={() => setOpen(false)} />
               </SheetContent>
             </Sheet>
-            <div className="lg:hidden font-bold truncate">RenewHub</div>
+            {/* Current page title: the only wayfinding cue once the sidebar is gone. */}
+            <h2 className="lg:hidden truncate text-base font-bold">{pageTitle}</h2>
           </div>
 
           <div className="flex justify-center md:justify-start">
@@ -393,21 +465,27 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <ModeToggle />
-            <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
+          <div className="flex items-center gap-1 shrink-0 sm:gap-2">
+            <div className="hidden lg:block">
+              <ModeToggle />
+            </div>
+            <div className="hidden md:block">
+              <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
+            </div>
             <NotificationBell />
             <RoleSwitcher />
             <UserMenu />
           </div>
         </header>
 
-        <main className="flex-1 p-4 md:p-6 lg:p-8 min-w-0">{children}</main>
+        <main className="flex-1 p-4 pb-24 md:p-6 lg:p-8 lg:pb-8 min-w-0">{children}</main>
       </div>
 
+      <BottomNav onOpenMenu={() => setOpen(true)} />
       <CommandPalette open={cmd.open} onOpenChange={cmd.setOpen} />
       <WhatsNewDialog />
     </div>
   );
 }
+
 
