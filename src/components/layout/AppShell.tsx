@@ -28,6 +28,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { ModeToggle } from "@/components/ModeToggle";
 import { AboutDialog } from "@/components/AboutDialog";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
+import { CloudRepsSync } from "@/components/CloudRepsSync";
 import { APP_NAME, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_DATE } from "@/lib/app-meta";
 
 
