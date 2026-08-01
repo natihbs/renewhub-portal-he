@@ -4,6 +4,8 @@ import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { z } from "zod";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import {
   Upload, FileSpreadsheet, Download, ArrowRight, ArrowLeft, ShieldAlert,
   CheckCircle2, AlertTriangle, XCircle, History, Undo2, FileDown, UserPlus, Pencil,
@@ -19,14 +21,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useIsManager, useApp } from "@/lib/store";
+import { useIsManager, useApp, teamsFromReps } from "@/lib/store";
+import { useAppMode } from "@/lib/app-mode";
+import { useAuth } from "@/lib/auth";
+import { useCloudTeams, type CloudTeam } from "@/lib/teams-hooks";
+import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
 import {
-  useImport, autoMap, normalizeName, parseTeam, parseNumber, parseDate,
+  useImport, autoMap, normalizeName, resolveTeam, parseNumber, parseDate,
   detectPii, PII_LABEL, type PiiHit,
   FIELD_LABEL, REQUIRED_FIELDS, type ImportFieldKey, type ImportHistoryEntry,
 } from "@/lib/import-store";
 
-import { TEAM_LABEL, type Rep } from "@/lib/seed";
+import type { Rep } from "@/lib/seed";
 import { formatDateIL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +62,11 @@ type ProcessedRow = {
   index: number;
   raw: RawRow;
   name: string;
-  team: "car" | "home" | null;
+  /** Resolved against the real cloud teams list — never a car/home guess. Null = unassigned or unrecognized. */
+  teamId: string | null;
+  teamName: string | null;
+  /** Raw text from the file, kept for display when it couldn't be resolved to a known team. */
+  teamRaw: string;
   monthlyTarget: number | null;
   currentResult: number | null;
   updatedAt: string | null;
@@ -153,16 +163,23 @@ async function parseFile(file: File): Promise<{ headers: string[]; rows: RawRow[
   return { headers, rows: json };
 }
 
-// zod schema for validation (per-row)
+// zod schema for validation (per-row). Team is resolved separately against the
+// real cloud teams list (resolveTeam) rather than a fixed car/home enum — an
+// unrecognized team text is a warning, not a blocking error, since a rep can
+// still be created/updated without a team assignment.
 const rowSchema = z.object({
   name: z.string().trim().min(1, "שם הנציג חסר").max(80, "שם ארוך מדי"),
-  team: z.enum(["car", "home"], { message: "צוות חייב להיות 'חידושי רכב' או 'חידושי דירה'" }),
   monthlyTarget: z.number({ message: "יעד חודשי חייב להיות מספר" }).positive("יעד חייב להיות חיובי"),
   currentResult: z.number({ message: "ביצוע נוכחי חייב להיות מספר" }).min(0, "ביצוע לא יכול להיות שלילי"),
   updatedAt: z.string().min(1, "תאריך עדכון לא תקין"),
 });
 
-function processRows(rows: RawRow[], mapping: Record<string, ImportFieldKey>, reps: Rep[]): ProcessedRow[] {
+function processRows(
+  rows: RawRow[],
+  mapping: Record<string, ImportFieldKey>,
+  reps: Rep[],
+  teams: CloudTeam[] | { id: string; name: string }[],
+): ProcessedRow[] {
   // reverse mapping: field -> column
   const fieldToCol: Partial<Record<ImportFieldKey, string>> = {};
   for (const [col, field] of Object.entries(mapping)) {
@@ -177,13 +194,17 @@ function processRows(rows: RawRow[], mapping: Record<string, ImportFieldKey>, re
   rows.forEach((raw, i) => {
     const issues: RowIssue[] = [];
     const rawName = fieldToCol.name ? String(raw[fieldToCol.name] ?? "").trim() : "";
-    const team = fieldToCol.team ? parseTeam(raw[fieldToCol.team]) : null;
+    const teamRaw = fieldToCol.team ? String(raw[fieldToCol.team] ?? "").trim() : "";
+    const { teamId, teamName } = resolveTeam(fieldToCol.team ? raw[fieldToCol.team] : null, teams);
+    if (teamRaw && !teamId) {
+      issues.push({ severity: "warning", message: `הצוות "${teamRaw}" אינו מזוהה מול צוותי הענן — הנציג יישמר ללא שיוך צוות` });
+    }
     const target = fieldToCol.monthlyTarget ? parseNumber(raw[fieldToCol.monthlyTarget]) : null;
     const current = fieldToCol.currentResult ? parseNumber(raw[fieldToCol.currentResult]) : null;
     const upd = fieldToCol.updatedAt ? parseDate(raw[fieldToCol.updatedAt]) : null;
 
     const check = rowSchema.safeParse({
-      name: rawName, team: team ?? undefined,
+      name: rawName,
       monthlyTarget: target ?? undefined, currentResult: current ?? undefined,
       updatedAt: upd ?? undefined,
     });
@@ -212,7 +233,7 @@ function processRows(rows: RawRow[], mapping: Record<string, ImportFieldKey>, re
     const match = rawName ? repByNorm.get(normalizeName(rawName)) : undefined;
     const hasErrors = issues.some((x) => x.severity === "error");
     out.push({
-      index: i, raw, name: rawName, team, monthlyTarget: target, currentResult: current, updatedAt: upd,
+      index: i, raw, name: rawName, teamId, teamName, teamRaw, monthlyTarget: target, currentResult: current, updatedAt: upd,
       issues,
       matchRepId: match?.id ?? null,
       action: hasErrors ? "skip" : match ? "update" : "create",
@@ -224,7 +245,16 @@ function processRows(rows: RawRow[], mapping: Record<string, ImportFieldKey>, re
 function DataImportPage() {
   const isManager = useIsManager();
   const { state, updateRep, addRep, replaceReps } = useApp();
+  const { isDemo } = useAppMode();
+  const { profile, user } = useAuth();
+  const { teams: cloudTeams } = useCloudTeams();
+  const demoTeams = useMemo(() => teamsFromReps(state.reps).map((t) => ({ id: t.teamId, name: t.teamName })), [state.reps]);
+  const teamsForResolution = isDemo ? demoTeams : cloudTeams;
   const importStore = useImport();
+  const qc = useQueryClient();
+  const createRepFn = useServerFn(createRepresentative);
+  const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
+  const importedByName = profile?.full_name || user?.email || "לא ידוע";
 
   const [step, setStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
@@ -276,21 +306,18 @@ function DataImportPage() {
       toast.error("חסרות עמודות חובה", { description: missing.map((m) => FIELD_LABEL[m]).join(", ") });
       return;
     }
-    setProcessed(processRows(rows, mapping, state.reps));
+    setProcessed(processRows(rows, mapping, state.reps, teamsForResolution));
     setStep(2);
   }
 
-  function applyImport() {
+  async function applyImport() {
     setBusy(true);
     try {
       const snapshot = state.reps.map((r) => ({ ...r }));
       const errorReport: ImportHistoryEntry["errorReport"] = [];
-      let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0;
-
-      // Aggregate: last row per rep wins.
-      const finalReps = [...state.reps];
-      const byId = new Map(finalReps.map((r) => [r.id, r] as const));
+      let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0, cloudFailed = 0;
       const now = new Date().toISOString().slice(0, 10);
+      const byId = new Map(state.reps.map((r) => [r.id, r] as const));
 
       for (const r of processed) {
         const rowErrors = r.issues.filter((i) => i.severity === "error");
@@ -305,45 +332,83 @@ function DataImportPage() {
           continue;
         }
         const updatedAt = r.updatedAt ?? now;
-        if (r.action === "update" && r.matchRepId) {
-          const existing = byId.get(r.matchRepId);
-          if (existing) {
-            const patched: Rep = {
-              ...existing,
-              monthlyTarget: r.monthlyTarget ?? existing.monthlyTarget,
-              currentResult: r.currentResult ?? existing.currentResult,
-              team: r.team ?? existing.team,
-              lastUpdatedAt: updatedAt,
-            };
-            byId.set(existing.id, patched);
-            updateRep(existing.id, patched);
+        try {
+          if (r.action === "update" && r.matchRepId) {
+            const existing = byId.get(r.matchRepId);
+            if (!existing) throw new Error("הנציג המקורי לא נמצא — יתכן שהוסר");
+            if (isDemo) {
+              updateRep(existing.id, {
+                monthlyTarget: r.monthlyTarget ?? existing.monthlyTarget,
+                currentResult: r.currentResult ?? existing.currentResult,
+                teamId: r.teamId ?? existing.teamId,
+                teamName: r.teamName ?? existing.teamName,
+                lastUpdatedAt: updatedAt,
+              });
+            } else {
+              await updateMetricsFn({
+                data: {
+                  rep_id: existing.id,
+                  monthly_target: r.monthlyTarget ?? undefined,
+                  current_result: r.currentResult ?? undefined,
+                  team_id: r.teamId ?? undefined,
+                },
+              });
+            }
             updated++;
+          } else if (r.action === "create") {
+            if (isDemo) {
+              addRep({
+                name: r.name, teamId: r.teamId, teamName: r.teamName ?? "ללא צוות",
+                monthlyTarget: r.monthlyTarget!, currentResult: r.currentResult!, lastUpdatedAt: updatedAt,
+              });
+            } else {
+              await createRepFn({
+                data: {
+                  name: r.name, team_id: r.teamId, monthly_target: r.monthlyTarget!, current_result: r.currentResult!,
+                  external_ref: null, user_id: null, active: true,
+                },
+              });
+            }
+            created++;
           }
-        } else if (r.action === "create") {
-          addRep({
-            name: r.name, team: r.team!, monthlyTarget: r.monthlyTarget!, currentResult: r.currentResult!,
-            lastUpdatedAt: updatedAt,
-          });
-          created++;
+        } catch (e) {
+          cloudFailed++;
+          errs++;
+          errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`] });
         }
       }
 
+      if (!isDemo) void qc.invalidateQueries({ queryKey: ["representatives"] });
+
+      const status: ImportHistoryEntry["status"] =
+        cloudFailed > 0 ? (updated + created === 0 ? "failed" : "partial") : (errs > 0 ? "partial" : "success");
+
       const entry = importStore.pushHistory({
         fileName: file?.name ?? "unknown",
-        importedBy: "מנהל",
+        importedBy: importedByName,
         rowsProcessed: processed.length,
         rowsUpdated: updated,
         rowsCreated: created,
         rowsSkipped: skipped,
         warnings: warns,
         errors: errs,
-        status: errs > 0 ? "partial" : "success",
+        status,
         snapshot,
         errorReport,
       });
       setLastSummary(entry);
       setStep(4);
-      toast.success("הייבוא הושלם", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
+
+      // Never report success unless every cloud write actually succeeded.
+      if (cloudFailed > 0) {
+        toast.error("הייבוא הושלם עם שגיאות שמירה", {
+          description: `${updated} עודכנו, ${created} נוספו, ${cloudFailed} נכשלו בשמירה בענן — פרטים בדוח השגיאות`,
+        });
+      } else if (isDemo) {
+        toast.success("הייבוא הושלם (מצב הדגמה — לא נשמר בענן)", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
+      } else {
+        toast.success("הייבוא נשמר בהצלחה בענן", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
+      }
     } catch (e) {
       toast.error("שגיאה בייבוא", { description: String((e as Error).message ?? e) });
     } finally { setBusy(false); }
@@ -427,11 +492,44 @@ function DataImportPage() {
 
       <HistoryCard
         history={importStore.history}
-        onUndo={(entry) => {
+        onUndo={async (entry) => {
           if (!entry.snapshot) { toast.error("לא ניתן לשחזר – אין תמונת מצב שמורה"); return; }
-          replaceReps(entry.snapshot);
-          importStore.removeHistory(entry.id);
-          toast.success("הייבוא האחרון בוטל והנתונים שוחזרו");
+          if (isDemo) {
+            replaceReps(entry.snapshot);
+            importStore.removeHistory(entry.id);
+            toast.success("הייבוא האחרון בוטל והנתונים שוחזרו (מצב הדגמה)");
+            return;
+          }
+          // Restores target/result/team for reps that existed before the import.
+          // Representatives CREATED by this import are not deleted by undo —
+          // remove them manually from /representatives if needed.
+          setBusy(true);
+          try {
+            let failed = 0;
+            for (const prevRep of entry.snapshot) {
+              try {
+                await updateMetricsFn({
+                  data: {
+                    rep_id: prevRep.id,
+                    monthly_target: prevRep.monthlyTarget,
+                    current_result: prevRep.currentResult,
+                    team_id: prevRep.teamId,
+                  },
+                });
+              } catch {
+                failed++;
+              }
+            }
+            void qc.invalidateQueries({ queryKey: ["representatives"] });
+            importStore.removeHistory(entry.id);
+            if (failed > 0) {
+              toast.error("הביטול הושלם חלקית", { description: `${failed} נציגים לא שוחזרו בהצלחה. נציגים חדשים שנוצרו בייבוא זה לא הוסרו.` });
+            } else {
+              toast.success("הייבוא האחרון בוטל ושוחזר בענן", { description: "נציגים חדשים שנוצרו בייבוא זה לא הוסרו — יש למחוק אותם ידנית במידת הצורך." });
+            }
+          } finally {
+            setBusy(false);
+          }
         }}
       />
 
@@ -667,7 +765,7 @@ function PreviewStep({
                 <TableRow key={r.index} className={cn(hasErr && "bg-destructive/5")}>
                   <TableCell className="text-muted-foreground">{r.index + 1}</TableCell>
                   <TableCell className={cn("font-medium", !r.name && "text-destructive")}>{r.name || "—"}</TableCell>
-                  <TableCell>{r.team ? TEAM_LABEL[r.team] : <span className="text-destructive">לא מזוהה</span>}</TableCell>
+                  <TableCell>{r.teamName ? r.teamName : <span className="text-amber-700">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
                   <TableCell>{r.monthlyTarget ?? "—"}</TableCell>
                   <TableCell>{r.currentResult ?? "—"}</TableCell>
                   <TableCell>{r.updatedAt ?? <span className="text-destructive">—</span>}</TableCell>
@@ -734,7 +832,7 @@ function ManualMatchDialog({ reps, onPick }: { reps: Rep[]; onPick: (id: string)
             <button key={r.id} type="button" onClick={() => { onPick(r.id); setOpen(false); }}
               className="flex w-full items-center justify-between p-2 text-start hover:bg-accent">
               <span>{r.name}</span>
-              <span className="text-xs text-muted-foreground">{TEAM_LABEL[r.team]}</span>
+              <span className="text-xs text-muted-foreground">{r.teamName}</span>
             </button>
           ))}
           {filtered.length === 0 && <div className="p-4 text-center text-sm text-muted-foreground">לא נמצאו נציגים</div>}
@@ -981,32 +1079,65 @@ function downloadErrorReport(h: ImportHistoryEntry) {
 
 function ManualEntryDialog() {
   const { state, updateRep, addRep } = useApp();
+  const { isDemo } = useAppMode();
+  const { teams: cloudTeams } = useCloudTeams();
+  const demoTeams = useMemo(() => teamsFromReps(state.reps).map((t) => ({ id: t.teamId, name: t.teamName })), [state.reps]);
+  const teamOptions = isDemo ? demoTeams : cloudTeams;
+  const createRepFn = useServerFn(createRepresentative);
+  const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
+  const qc = useQueryClient();
+
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"update" | "create">("update");
   const [repId, setRepId] = useState<string>(state.reps[0]?.id ?? "");
   const [name, setName] = useState("");
-  const [team, setTeam] = useState<"car" | "home">("car");
+  const [teamId, setTeamId] = useState<string>("");
   const [target, setTarget] = useState<string>("");
   const [current, setCurrent] = useState<string>("");
+  const [busy, setBusy] = useState(false);
 
-  function submit() {
+  async function submit() {
     const t = Number(target), c = Number(current);
     if (mode === "create") {
       if (!name.trim() || !isFinite(t) || t <= 0 || !isFinite(c) || c < 0) {
         toast.error("נא למלא את כל השדות בערכים תקינים"); return;
       }
-      addRep({ name: name.trim(), team, monthlyTarget: t, currentResult: c, lastUpdatedAt: new Date().toISOString().slice(0, 10) });
-      toast.success("הנציג נוסף בהצלחה");
-    } else {
-      if (!repId) { toast.error("בחר נציג"); return; }
-      const patch: Partial<Rep> = { lastUpdatedAt: new Date().toISOString().slice(0, 10) };
-      if (target !== "" && isFinite(t) && t > 0) patch.monthlyTarget = t;
-      if (current !== "" && isFinite(c) && c >= 0) patch.currentResult = c;
-      updateRep(repId, patch);
-      toast.success("הנציג עודכן בהצלחה");
+    } else if (!repId) {
+      toast.error("בחר נציג"); return;
     }
-    setOpen(false);
-    setName(""); setTarget(""); setCurrent("");
+
+    setBusy(true);
+    try {
+      if (isDemo) {
+        if (mode === "create") {
+          const teamName = teamOptions.find((tm) => tm.id === teamId)?.name ?? "ללא צוות";
+          addRep({ name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: t, currentResult: c, lastUpdatedAt: new Date().toISOString().slice(0, 10) });
+        } else {
+          const patch: Partial<Rep> = { lastUpdatedAt: new Date().toISOString().slice(0, 10) };
+          if (target !== "" && isFinite(t) && t > 0) patch.monthlyTarget = t;
+          if (current !== "" && isFinite(c) && c >= 0) patch.currentResult = c;
+          updateRep(repId, patch);
+        }
+        toast.success(mode === "create" ? "הנציג נוסף בהצלחה (מצב הדגמה)" : "הנציג עודכן בהצלחה (מצב הדגמה)");
+      } else {
+        if (mode === "create") {
+          await createRepFn({ data: { name: name.trim(), team_id: teamId || null, monthly_target: t, current_result: c, external_ref: null, user_id: null, active: true } });
+        } else {
+          const payload: { rep_id: string; monthly_target?: number; current_result?: number } = { rep_id: repId };
+          if (target !== "" && isFinite(t) && t > 0) payload.monthly_target = t;
+          if (current !== "" && isFinite(c) && c >= 0) payload.current_result = c;
+          await updateMetricsFn({ data: payload });
+        }
+        void qc.invalidateQueries({ queryKey: ["representatives"] });
+        toast.success(mode === "create" ? "הנציג נוסף ונשמר בענן" : "הנציג עודכן ונשמר בענן");
+      }
+      setOpen(false);
+      setName(""); setTarget(""); setCurrent("");
+    } catch (e) {
+      toast.error("השמירה נכשלה", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -1027,7 +1158,7 @@ function ManualEntryDialog() {
               <Select value={repId} onValueChange={setRepId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {state.reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {TEAM_LABEL[r.team]}</SelectItem>)}
+                  {state.reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.teamName}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1039,11 +1170,11 @@ function ManualEntryDialog() {
               </div>
               <div className="space-y-1">
                 <Label>צוות</Label>
-                <Select value={team} onValueChange={(v) => setTeam(v as "car" | "home")}>
+                <Select value={teamId || "__none__"} onValueChange={(v) => setTeamId(v === "__none__" ? "" : v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="car">חידושי רכב</SelectItem>
-                    <SelectItem value="home">חידושי דירה</SelectItem>
+                    <SelectItem value="__none__">ללא צוות</SelectItem>
+                    {teamOptions.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -1055,8 +1186,8 @@ function ManualEntryDialog() {
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
-          <Button onClick={submit}>שמירה</Button>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>שמירה</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

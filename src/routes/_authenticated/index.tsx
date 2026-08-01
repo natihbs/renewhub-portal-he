@@ -6,12 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useApp, teamSummary, statusForRep } from "@/lib/store";
+import { useApp, teamSummary, teamsFromReps, statusForRep } from "@/lib/store";
 import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth, workdaysPassed } from "@/lib/format";
-import { TEAM_LABEL } from "@/lib/seed";
 import {
-  Car, Home, TrendingUp, TrendingDown, Award, Trophy, PlusCircle, Headphones, BookOpen, Megaphone,
+  Users2, TrendingUp, TrendingDown, Award, Trophy, PlusCircle, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, AlertTriangle, Bell, ListChecks, Lightbulb, Sparkles, Users, Clock,
   Activity, BarChart3, FileText, MessageSquare,
 } from "lucide-react";
@@ -60,8 +59,7 @@ function HomePage() {
   const forecast = Math.round(dailyPace * wdTotal);
   const onTrack = forecast >= totalTarget;
 
-  const carSum = teamSummary(reps, "car");
-  const homeSum = teamSummary(reps, "home");
+  const teamGroups = teamsFromReps(reps);
 
   const top3 = [...reps]
     .map((r) => ({ ...r, pct: r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0 }))
@@ -141,10 +139,13 @@ function HomePage() {
       )}
 
       {/* Teams */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TeamCard team="car" summary={carSum} />
-        <TeamCard team="home" summary={homeSum} />
-      </div>
+      {teamGroups.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {teamGroups.map((t) => (
+            <TeamCard key={t.teamId} teamName={t.teamName} summary={teamSummary(reps, t.teamId)} />
+          ))}
+        </div>
+      )}
 
       {/* Insights */}
       {isManager && <InsightsCard />}
@@ -172,7 +173,7 @@ function HomePage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <div className="font-semibold truncate">{r.name}</div>
-                    <Badge variant="secondary">{TEAM_LABEL[r.team]}</Badge>
+                    <Badge variant="secondary">{r.teamName}</Badge>
                   </div>
                   <div className="mt-1 flex items-center gap-2">
                     <Progress value={Math.min(r.pct, 150)} className="h-2" />
@@ -253,7 +254,7 @@ function HomePage() {
   );
 
   function InsightsCard() {
-    const insights = useMemo(() => buildInsights(reps, feedback, carSum, homeSum, diff), []);
+    const insights = useMemo(() => buildInsights(reps, feedback, diff), []);
     return (
       <Card>
         <CardHeader>
@@ -492,8 +493,8 @@ function KPICard({
   );
 }
 
-function TeamCard({ team, summary }: { team: "car" | "home"; summary: ReturnType<typeof teamSummary> }) {
-  const Icon = team === "car" ? Car : Home;
+function TeamCard({ teamName, summary }: { teamName: string; summary: ReturnType<typeof teamSummary> }) {
+  const Icon = Users2;
   const onTrack = summary.pct >= 80;
   return (
     <Card className="card-interactive">
@@ -502,7 +503,7 @@ function TeamCard({ team, summary }: { team: "car" | "home"; summary: ReturnType
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-primary">
             <Icon className="h-4 w-4" />
           </div>
-          <span className="truncate">{TEAM_LABEL[team]}</span>
+          <span className="truncate">{teamName}</span>
         </CardTitle>
         <div className="flex items-center gap-2 shrink-0">
           <Badge variant="outline">{summary.count} נציגים</Badge>
@@ -546,19 +547,22 @@ function TeamCard({ team, summary }: { team: "car" | "home"; summary: ReturnType
 function buildInsights(
   reps: ReturnType<typeof Object>["prototype"] extends never ? never : any,
   _feedback: any,
-  carSum: ReturnType<typeof teamSummary>,
-  homeSum: ReturnType<typeof teamSummary>,
   diff: number,
 ): string[] {
   const list: string[] = [];
   if (diff >= 0) list.push(`הצוות מקדים את הקצב ב־${formatNum(diff)} חידושים.`);
   else list.push(`הצוות מפגר אחרי הקצב ב־${formatNum(Math.abs(diff))} חידושים.`);
 
-  const gap = Math.round(carSum.pct - homeSum.pct);
-  if (gap !== 0) {
-    const higher = gap > 0 ? "הרכב" : "הדירה";
-    const lower = gap > 0 ? "הדירה" : "הרכב";
-    list.push(`שיעור העמידה ביעד של צוות ${higher} גבוה ב־${Math.abs(gap)}% מצוות ${lower}.`);
+  const groups = teamsFromReps(reps);
+  if (groups.length >= 2) {
+    const withPctByTeam = groups.map((g) => ({ name: g.teamName, ...teamSummary(reps, g.teamId) }));
+    withPctByTeam.sort((a, b) => b.pct - a.pct);
+    const top = withPctByTeam[0];
+    const bottom = withPctByTeam[withPctByTeam.length - 1];
+    const gap = Math.round(top.pct - bottom.pct);
+    if (gap !== 0) {
+      list.push(`שיעור העמידה ביעד של ${top.name} גבוה ב־${Math.abs(gap)}% מ־${bottom.name}.`);
+    }
   }
 
   const withPct = (reps as { id: string; name: string; monthlyTarget: number; currentResult: number }[])

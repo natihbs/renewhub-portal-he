@@ -3,13 +3,10 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
-export type RepTeamKey = "car" | "home";
-
 export type CloudRep = {
   id: string;
   name: string;
   team_id: string | null;
-  team_key: RepTeamKey;
   monthly_target: number;
   current_result: number;
   external_ref: string | null;
@@ -69,7 +66,7 @@ export const listRepresentatives = createServerFn({ method: "GET" })
     const [{ data: reps, error: rErr }, { data: teams, error: tErr }, { data: profiles, error: pErr }] = await Promise.all([
       ctx.supabase
         .from("representatives")
-        .select("id, name, team_id, team_key, monthly_target, current_result, external_ref, user_id, active, deactivated_at, created_at, updated_at")
+        .select("id, name, team_id, monthly_target, current_result, external_ref, user_id, active, deactivated_at, created_at, updated_at")
         .order("created_at", { ascending: false }),
       ctx.supabase.from("teams").select("id, name, manager_id, active"),
       ctx.supabase.from("profiles").select("id, full_name, email, active, team_id, representative_id"),
@@ -106,7 +103,6 @@ export const listRepresentatives = createServerFn({ method: "GET" })
 type RepInput = {
   name: string;
   team_id: string | null;
-  team_key: RepTeamKey;
   monthly_target: number;
   current_result: number;
   external_ref: string | null;
@@ -117,7 +113,6 @@ type RepInput = {
 function validateRep(data: RepInput): RepInput {
   if (!data?.name?.trim()) throw new Error("יש להזין שם נציג");
   if (data.name.trim().length > 80) throw new Error("שם הנציג ארוך מדי");
-  if (!["car", "home"].includes(data.team_key)) throw new Error("סוג צוות לא חוקי");
   const target = Number(data.monthly_target);
   const result = Number(data.current_result);
   if (!Number.isFinite(target) || target < 0) throw new Error("יעד חודשי לא חוקי");
@@ -144,7 +139,6 @@ export const createRepresentative = createServerFn({ method: "POST" })
       .insert({
         name: data.name,
         team_id: data.team_id,
-        team_key: data.team_key,
         monthly_target: data.monthly_target,
         current_result: data.current_result,
         external_ref: data.external_ref,
@@ -177,7 +171,7 @@ export const updateRepresentative = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: before } = await supabaseAdmin
       .from("representatives")
-      .select("name, team_id, team_key, monthly_target, current_result, external_ref, user_id, active")
+      .select("name, team_id, monthly_target, current_result, external_ref, user_id, active")
       .eq("id", data.rep_id)
       .maybeSingle();
     if (!before) throw new Error("הנציג לא נמצא");
@@ -188,7 +182,6 @@ export const updateRepresentative = createServerFn({ method: "POST" })
       .update({
         name: data.name,
         team_id: data.team_id,
-        team_key: data.team_key,
         monthly_target: data.monthly_target,
         current_result: data.current_result,
         external_ref: data.external_ref,
@@ -248,7 +241,7 @@ export const setRepresentativeActive = createServerFn({ method: "POST" })
 
 export const setRepresentativeTeam = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { rep_id: string; team_id: string | null; team_key?: RepTeamKey }) => {
+  .inputValidator((data: { rep_id: string; team_id: string | null }) => {
     if (!data?.rep_id) throw new Error("חסר מזהה נציג");
     return data;
   })
@@ -259,9 +252,7 @@ export const setRepresentativeTeam = createServerFn({ method: "POST" })
     const { data: rep } = await supabaseAdmin.from("representatives").select("team_id, user_id, name").eq("id", data.rep_id).maybeSingle();
     if (!rep) throw new Error("הנציג לא נמצא");
 
-    const update: { team_id: string | null; team_key?: RepTeamKey } = { team_id: data.team_id };
-    if (data.team_key) update.team_key = data.team_key;
-    const { error } = await supabaseAdmin.from("representatives").update(update).eq("id", data.rep_id);
+    const { error } = await supabaseAdmin.from("representatives").update({ team_id: data.team_id }).eq("id", data.rep_id);
     if (error) throw new Error(error.message);
 
     // Keep the linked user's profile aligned with the new team + manager.
@@ -371,5 +362,71 @@ export const deleteRepresentative = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.from("representatives").delete().eq("id", data.rep_id);
     if (error) throw new Error(error.message);
     await logAudit(supabaseAdmin, ctx, "rep.delete", { rep_id: rep.id, name: rep.name, team_id: rep.team_id });
+    return { ok: true };
+  });
+
+/**
+ * Narrow, high-frequency patch path for Performance edits and Data Import writes.
+ * Only ever touches name/team_id/monthly_target/current_result — never external_ref,
+ * user_id or active — so callers that don't carry those fields (Performance, Import)
+ * can never accidentally wipe them. Uses the same authorization as updateRepresentative.
+ */
+export type RepMetricsInput = {
+  rep_id: string;
+  name?: string;
+  team_id?: string | null;
+  monthly_target?: number;
+  current_result?: number;
+};
+
+export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: RepMetricsInput) => {
+    if (!data?.rep_id) throw new Error("חסר מזהה נציג");
+    const out: RepMetricsInput = { rep_id: data.rep_id };
+    if (data.name !== undefined) {
+      const name = data.name.trim();
+      if (!name) throw new Error("יש להזין שם נציג");
+      if (name.length > 80) throw new Error("שם הנציג ארוך מדי");
+      out.name = name;
+    }
+    if (data.team_id !== undefined) out.team_id = data.team_id;
+    if (data.monthly_target !== undefined) {
+      const t = Number(data.monthly_target);
+      if (!Number.isFinite(t) || t < 0) throw new Error("יעד חודשי לא חוקי");
+      out.monthly_target = Math.round(t);
+    }
+    if (data.current_result !== undefined) {
+      const c = Number(data.current_result);
+      if (!Number.isFinite(c) || c < 0) throw new Error("תוצאה נוכחית לא חוקית");
+      out.current_result = Math.round(c);
+    }
+    return out;
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    await assertCanEdit(ctx, data.rep_id);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: before } = await supabaseAdmin
+      .from("representatives")
+      .select("name, team_id, monthly_target, current_result")
+      .eq("id", data.rep_id)
+      .maybeSingle();
+    if (!before) throw new Error("הנציג לא נמצא");
+
+    const update: { name?: string; team_id?: string | null; monthly_target?: number; current_result?: number } = {};
+    if (data.name !== undefined) update.name = data.name;
+    if (data.team_id !== undefined) update.team_id = data.team_id;
+    if (data.monthly_target !== undefined) update.monthly_target = data.monthly_target;
+    if (data.current_result !== undefined) update.current_result = data.current_result;
+    if (Object.keys(update).length === 0) return { ok: true };
+
+    const { error } = await supabaseAdmin.from("representatives").update(update).eq("id", data.rep_id);
+    if (error) throw new Error(error.message);
+
+    await logAudit(supabaseAdmin, ctx, "rep.metrics_update", { rep_id: data.rep_id, before, after: update });
+    if (update.team_id !== undefined && before.team_id !== update.team_id) {
+      await logAudit(supabaseAdmin, ctx, "rep.transfer", { rep_id: data.rep_id, from_team: before.team_id, to_team: update.team_id });
+    }
     return { ok: true };
   });

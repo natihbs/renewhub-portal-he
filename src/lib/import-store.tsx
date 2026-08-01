@@ -239,13 +239,29 @@ export function autoMap(headers: string[]): Record<string, ImportFieldKey> {
   return map;
 }
 
-export function parseTeam(v: unknown): "car" | "home" | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (!s) return null;
-  if (/רכב|car|auto/i.test(s)) return "car";
-  if (/דירה|בית|home|house/i.test(s)) return "home";
-  return null;
+/**
+ * Resolves a free-text "team" cell against the real cloud teams list — never
+ * against a fixed car/home enum. Tries an exact normalized-name match first,
+ * then falls back to a loose substring match either direction (handles export
+ * formats that add a prefix/suffix like "צוות חידושי רכב" vs "חידושי רכב").
+ * No match => unassigned (null), not a guess.
+ */
+export function resolveTeam(
+  v: unknown,
+  teams: { id: string; name: string }[],
+): { teamId: string | null; teamName: string | null } {
+  if (v == null) return { teamId: null, teamName: null };
+  const raw = String(v).trim();
+  if (!raw) return { teamId: null, teamName: null };
+  const norm = normalizeName(raw);
+  const exact = teams.find((t) => normalizeName(t.name) === norm);
+  if (exact) return { teamId: exact.id, teamName: exact.name };
+  const loose = teams.find((t) => {
+    const tn = normalizeName(t.name);
+    return tn.length > 0 && (tn.includes(norm) || norm.includes(tn));
+  });
+  if (loose) return { teamId: loose.id, teamName: loose.name };
+  return { teamId: null, teamName: null };
 }
 
 export function parseNumber(v: unknown): number | null {

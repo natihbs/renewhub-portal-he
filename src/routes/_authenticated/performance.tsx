@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useApp, useIsManager } from "@/lib/store";
-import { TEAM_LABEL, type Rep, type Team } from "@/lib/seed";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { useApp, useIsManager, teamsFromReps } from "@/lib/store";
+import { useAppMode } from "@/lib/app-mode";
+import { useCloudTeams } from "@/lib/teams-hooks";
+import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
+import type { Rep } from "@/lib/seed";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
@@ -200,12 +205,13 @@ function repDemoNotes(rep: Rep) {
 
 type SortKey = "pct_desc" | "pct_asc" | "target" | "result" | "name";
 type StatusFilter = "all" | Status;
-type TeamFilter = "all" | Team;
+type TeamFilter = "all" | string;
 
 function PerformancePage() {
   const { state } = useApp();
   const isManager = useIsManager();
   const { open: openWorkspace } = useRepWorkspace();
+  const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
 
   const [query, setQuery] = useState("");
   const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
@@ -238,7 +244,7 @@ function PerformancePage() {
 
   const filtered = useMemo(() => {
     let arr = enriched;
-    if (teamFilter !== "all") arr = arr.filter((e) => e.rep.team === teamFilter);
+    if (teamFilter !== "all") arr = arr.filter((e) => e.rep.teamId === teamFilter);
     if (statusFilter !== "all") arr = arr.filter((e) => e.status === statusFilter);
     if (query.trim()) arr = arr.filter((e) => e.rep.name.includes(query.trim()));
     const sorted = [...arr];
@@ -283,7 +289,7 @@ function PerformancePage() {
       ["שם", "צוות", "יעד", "ביצוע", "אחוז", "פער", "תחזית", "סטטוס"],
       ...filtered.map((e) => [
         e.rep.name,
-        TEAM_LABEL[e.rep.team],
+        e.rep.teamName,
         e.rep.monthlyTarget,
         e.rep.currentResult,
         `${Math.round(e.pct)}%`,
@@ -397,7 +403,7 @@ function PerformancePage() {
                         <span className="text-xs text-muted-foreground">{formatPct(e.pct)}</span>
                       </div>
                       <div className="text-xs text-muted-foreground truncate">
-                        {TEAM_LABEL[e.rep.team]} · פער {e.gap > 0 ? "+" : ""}{formatNum(e.gap)}
+                        {e.rep.teamName} · פער {e.gap > 0 ? "+" : ""}{formatNum(e.gap)}
                       </div>
                     </div>
                     <PriorityBadge level={priority} />
@@ -432,8 +438,7 @@ function PerformancePage() {
               <SelectTrigger><SelectValue placeholder="צוות" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">כל הצוותים</SelectItem>
-                <SelectItem value="car">{TEAM_LABEL.car}</SelectItem>
-                <SelectItem value="home">{TEAM_LABEL.home}</SelectItem>
+                {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
@@ -498,7 +503,7 @@ function PerformancePage() {
                       >
                         <TableCell className="font-semibold">{e.rep.name}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="font-normal">{TEAM_LABEL[e.rep.team]}</Badge>
+                          <Badge variant="outline" className="font-normal">{e.rep.teamName}</Badge>
                         </TableCell>
                         <TableCell className="text-end tabular-nums">{formatNum(e.rep.monthlyTarget)}</TableCell>
                         <TableCell className="text-end tabular-nums font-medium">{formatNum(e.rep.currentResult)}</TableCell>
@@ -550,7 +555,7 @@ function PerformancePage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-semibold truncate">{e.rep.name}</div>
-                        <div className="text-xs text-muted-foreground mt-0.5">{TEAM_LABEL[e.rep.team]}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">{e.rep.teamName}</div>
                       </div>
                       <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium shrink-0", statusBadgeClass(e.status))}>
                         <StatusDot status={e.status} />
@@ -720,15 +725,23 @@ function buildInsights(items: ReturnType<typeof enrich>[]) {
   const leader = sorted[0];
   if (leader) out.push(`${leader.rep.name} מוביל את החודש עם ${formatPct(leader.pct)} עמידה ביעד.`);
 
-  const carItems = items.filter((e) => e.rep.team === "car");
-  const homeItems = items.filter((e) => e.rep.team === "home");
+  // Compare the leading vs. trailing team by average pct — generalizes the old
+  // fixed car-vs-home comparison to any number of teams.
   const avg = (arr: typeof items) => (arr.length ? arr.reduce((s, e) => s + e.pct, 0) / arr.length : 0);
-  if (carItems.length && homeItems.length) {
-    const diff = avg(carItems) - avg(homeItems);
-    if (Math.abs(diff) >= 3) {
-      const lead = diff > 0 ? TEAM_LABEL.car : TEAM_LABEL.home;
-      const behind = diff > 0 ? TEAM_LABEL.home : TEAM_LABEL.car;
-      out.push(`${lead} מקדים את ${behind} ב-${formatPct(Math.abs(diff))}.`);
+  const byTeam = new Map<string, { name: string; items: typeof items }>();
+  for (const e of items) {
+    if (!e.rep.teamId) continue;
+    const bucket = byTeam.get(e.rep.teamId) ?? { name: e.rep.teamName, items: [] };
+    bucket.items.push(e);
+    byTeam.set(e.rep.teamId, bucket);
+  }
+  const teamAverages = Array.from(byTeam.values(), (b) => ({ name: b.name, avgPct: avg(b.items) }));
+  if (teamAverages.length >= 2) {
+    teamAverages.sort((a, b) => b.avgPct - a.avgPct);
+    const [top, bottom] = [teamAverages[0], teamAverages[teamAverages.length - 1]];
+    const diff = top.avgPct - bottom.avgPct;
+    if (diff >= 3) {
+      out.push(`${top.name} מקדים את ${bottom.name} ב-${formatPct(diff)}.`);
     }
   }
 
@@ -788,7 +801,7 @@ function RepDetailsSheet({
             <div className="min-w-0">
               <SheetTitle className="text-lg truncate text-start">{rep.name}</SheetTitle>
               <SheetDescription className="text-start">
-                {TEAM_LABEL[rep.team]} · <span className={cn("inline-flex items-center gap-1", statusBadgeClass(item.status), "rounded-full px-2 py-0.5 text-xs")}>
+                {rep.teamName} · <span className={cn("inline-flex items-center gap-1", statusBadgeClass(item.status), "rounded-full px-2 py-0.5 text-xs")}>
                   <StatusDot status={item.status} />{STATUS_LABEL[item.status]}
                 </span>
               </SheetDescription>
@@ -997,28 +1010,49 @@ function NoteList({ title, tone, items }: { title: string; tone: "success" | "da
 
 // -------- add/edit dialog --------
 
-function RepFormDialog({
-  trigger, rep, defaultTeam = "car",
-}: { trigger: React.ReactNode; rep?: Rep; defaultTeam?: Team }) {
-  const { addRep, updateRep } = useApp();
+function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }) {
+  const { isDemo } = useAppMode();
+  const { state, addRep, updateRep } = useApp();
+  const { teams: cloudTeams } = useCloudTeams();
+  const demoTeams = useMemo(() => teamsFromReps(state.reps), [state.reps]);
+  const teamOptions = isDemo ? demoTeams.map((t) => ({ id: t.teamId, name: t.teamName })) : cloudTeams;
+  const createFn = useServerFn(createRepresentative);
+  const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
+  const qc = useQueryClient();
+
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(rep?.name ?? "");
-  const [team, setTeam] = useState<Team>(rep?.team ?? defaultTeam);
+  const [teamId, setTeamId] = useState<string>(rep?.teamId ?? "");
   const [target, setTarget] = useState<number>(rep?.monthlyTarget ?? 100);
   const [result, setResult] = useState<number>(rep?.currentResult ?? 0);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (isDemo) {
+        const teamName = teamOptions.find((t) => t.id === teamId)?.name ?? "ללא צוות";
+        if (rep) updateRep(rep.id, { name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: target, currentResult: result });
+        else addRep({ name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: target, currentResult: result });
+        return;
+      }
+      if (rep) {
+        await updateMetricsFn({ data: { rep_id: rep.id, name: name.trim(), team_id: teamId || null, monthly_target: target, current_result: result } });
+      } else {
+        await createFn({ data: { name: name.trim(), team_id: teamId || null, monthly_target: target, current_result: result, external_ref: null, user_id: null, active: true } });
+      }
+      void qc.invalidateQueries({ queryKey: ["representatives"] });
+    },
+    onSuccess: () => {
+      toast.success(rep ? "הנציג עודכן" : "הנציג נוסף");
+      setOpen(false);
+    },
+    onError: (e: Error) => toast.error("השמירה נכשלה", { description: e.message }),
+  });
 
   const submit = () => {
     if (!name.trim()) return toast.error("יש להזין שם נציג");
     if (target <= 0) return toast.error("יעד חייב להיות גדול מ-0");
     if (result < 0) return toast.error("ביצוע לא יכול להיות שלילי");
-    if (rep) {
-      updateRep(rep.id, { name: name.trim(), team, monthlyTarget: target, currentResult: result });
-      toast.success("הנציג עודכן");
-    } else {
-      addRep({ name: name.trim(), team, monthlyTarget: target, currentResult: result });
-      toast.success("הנציג נוסף");
-    }
-    setOpen(false);
+    mutation.mutate();
   };
 
   return (
@@ -1035,11 +1069,11 @@ function RepFormDialog({
           </div>
           <div className="space-y-2">
             <Label>צוות</Label>
-            <Select value={team} onValueChange={(v) => setTeam(v as Team)}>
+            <Select value={teamId || "__none__"} onValueChange={(v) => setTeamId(v === "__none__" ? "" : v)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="car">{TEAM_LABEL.car}</SelectItem>
-                <SelectItem value="home">{TEAM_LABEL.home}</SelectItem>
+                <SelectItem value="__none__">ללא צוות</SelectItem>
+                {teamOptions.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -1055,8 +1089,8 @@ function RepFormDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
-          <Button onClick={submit}>{rep ? "שמירה" : "הוספה"}</Button>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={mutation.isPending}>ביטול</Button>
+          <Button onClick={submit} disabled={mutation.isPending}>{rep ? "שמירה" : "הוספה"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

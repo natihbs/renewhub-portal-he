@@ -6,8 +6,7 @@ import {
   Copy, Save, RefreshCw, Pencil, Trash2, Files, ShieldAlert, MessageCircle,
   Mail, Megaphone, Sparkles,
 } from "lucide-react";
-import { useApp, useIsManager, teamSummary, competitionLeaderboard } from "@/lib/store";
-import { TEAM_LABEL } from "@/lib/seed";
+import { useApp, useIsManager, teamSummary, teamsFromReps, competitionLeaderboard } from "@/lib/store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
 import { useComms, KIND_LABEL, type CommsKind, type CommsMessage } from "@/lib/comms-store";
 import { PageHeader } from "@/components/ui/page-header";
@@ -104,11 +103,10 @@ function useGenerationInputs() {
   const { state } = useApp();
   return useMemo(() => {
     const reps = state.reps;
-    const car = teamSummary(reps, "car");
-    const home = teamSummary(reps, "home");
-    const totalTarget = car.target + home.target;
-    const totalResult = car.result + home.result;
+    const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
+    const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
     const overall = totalTarget > 0 ? (totalResult / totalTarget) * 100 : 0;
+    const teams = teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) }));
 
     const withPct = reps.map((r) => ({
       ...r,
@@ -123,14 +121,14 @@ function useGenerationInputs() {
     const board = activeComp ? competitionLeaderboard(activeComp) : [];
     const leaderboard = board.slice(0, 5).map((b) => {
       const rep = reps.find((r) => r.id === b.repId);
-      return { name: rep?.name ?? "-", team: rep?.team, total: b.total };
+      return { name: rep?.name ?? "-", total: b.total };
     });
 
     const listeningsThisWeek = state.feedback.slice(0, 20);
 
     return {
       reps: withPct,
-      car, home, overall, totalResult, totalTarget,
+      teams, overall, totalResult, totalTarget,
       above, below, onPace, top,
       activeComp, leaderboard,
       listeningsThisWeek,
@@ -235,7 +233,7 @@ function Generator() {
                       <SelectContent>
                         {inputs.reps.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
-                            {r.name} · {TEAM_LABEL[r.team]} · {formatPct(r.pct)}
+                            {r.name} · {r.teamName} · {formatPct(r.pct)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -564,8 +562,9 @@ function generateMorning(i: Inputs): { title: string; body: string } {
   lines.push(`אחוז חידושים כללי: ${formatPct(i.overall)} (${formatNum(i.totalResult)} מתוך ${formatNum(i.totalTarget)})`);
   lines.push(`נותרו ${i.workdaysLeft} ימי עבודה בחודש.`);
   lines.push("");
-  lines.push(`🚗 ${TEAM_LABEL.car}: ${formatPct(i.car.pct)} · ${formatNum(i.car.result)}/${formatNum(i.car.target)}`);
-  lines.push(`🏠 ${TEAM_LABEL.home}: ${formatPct(i.home.pct)} · ${formatNum(i.home.result)}/${formatNum(i.home.target)}`);
+  for (const t of i.teams) {
+    lines.push(`🔹 ${t.teamName}: ${formatPct(t.pct)} · ${formatNum(t.result)}/${formatNum(t.target)}`);
+  }
   lines.push("");
   if (i.top.length) {
     lines.push("⭐ מובילים כרגע:");
@@ -590,7 +589,7 @@ function generateEvening(i: Inputs): { title: string; body: string } {
   lines.push(`סיכום יום · ${date} 🌙`);
   lines.push("");
   lines.push(`סה"כ חידושים החודש: ${formatNum(i.totalResult)} (${formatPct(i.overall)} מהיעד)`);
-  lines.push(`🚗 ${TEAM_LABEL.car}: ${formatPct(i.car.pct)} · 🏠 ${TEAM_LABEL.home}: ${formatPct(i.home.pct)}`);
+  lines.push(i.teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)}`).join(" · "));
   lines.push("");
   if (i.above.length) {
     lines.push(`🏆 ${i.above.length} נציגים מעל היעד:`);
@@ -652,7 +651,7 @@ function generateCongrats(i: Inputs, repId: string): { title: string; body: stri
   lines.push("");
   if (rep.pct >= 100) {
     lines.push(`עמדת ביעד עם ${formatPct(rep.pct)} - זה הישג משמעותי.`);
-    lines.push(`${formatNum(rep.currentResult)} חידושים בצוות ${TEAM_LABEL[rep.team]} מדברים בעד עצמם.`);
+    lines.push(`${formatNum(rep.currentResult)} חידושים בצוות ${rep.teamName} מדברים בעד עצמם.`);
   } else if (rep.pct >= 80) {
     lines.push(`אתה בקצב מעולה - ${formatPct(rep.pct)} מהיעד ועדיין נותרו ${i.workdaysLeft} ימי עבודה.`);
     lines.push("ההתמדה שלך ניכרת בכל שיחה.");
@@ -672,7 +671,7 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   lines.push(`היי ${rep.name},`);
   lines.push("");
   // Positive opening
-  lines.push(`אני רוצה להתחיל בלהגיד שאני מעריך את הנוכחות והמחויבות שלך בצוות ${TEAM_LABEL[rep.team]}.`);
+  lines.push(`אני רוצה להתחיל בלהגיד שאני מעריך את הנוכחות והמחויבות שלך בצוות ${rep.teamName}.`);
   lines.push("");
   // Current challenge
   const gap = rep.monthlyTarget - rep.currentResult;

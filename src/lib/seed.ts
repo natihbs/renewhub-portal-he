@@ -1,10 +1,12 @@
-export type Team = "car" | "home";
-export const TEAM_LABEL: Record<Team, string> = { car: "חידושי רכב", home: "חידושי דירה" };
+export const UNASSIGNED_TEAM_LABEL = "ללא צוות";
 
 export type Rep = {
   id: string;
   name: string;
-  team: Team;
+  /** Source of truth for team membership: representatives.team_id. Null = unassigned. */
+  teamId: string | null;
+  /** Denormalized display name of the linked team (or the unassigned label). */
+  teamName: string;
   monthlyTarget: number;
   currentResult: number;
   lastUpdatedAt?: string;
@@ -73,7 +75,6 @@ export const CRITERIA: { key: string; label: string }[] = [
 
 export type Feedback = {
   id: string;
-  team: Team;
   repId: string;
   date: string;
   callId: string;
@@ -116,18 +117,18 @@ export const SEED: AppState = {
   role: "manager",
   currentRepId: "r1",
   reps: [
-    { id: "r1", name: "יעל כהן", team: "car", monthlyTarget: 120, currentResult: 98 },
-    { id: "r2", name: "אורי לוי", team: "car", monthlyTarget: 120, currentResult: 132 },
-    { id: "r3", name: "דנה פרץ", team: "car", monthlyTarget: 110, currentResult: 76 },
-    { id: "r4", name: "רון ביטון", team: "car", monthlyTarget: 130, currentResult: 145 },
-    { id: "r5", name: "מיכל אזולאי", team: "car", monthlyTarget: 120, currentResult: 88 },
-    { id: "r6", name: "שגיא דהן", team: "car", monthlyTarget: 120, currentResult: 115 },
-    { id: "r7", name: "נועה מזרחי", team: "car", monthlyTarget: 100, currentResult: 62 },
-    { id: "r8", name: "איתי שפירא", team: "car", monthlyTarget: 120, currentResult: 128 },
-    { id: "r9", name: "טל אברהם", team: "home", monthlyTarget: 60, currentResult: 54 },
-    { id: "r10", name: "ליאור חדד", team: "home", monthlyTarget: 55, currentResult: 61 },
-    { id: "r11", name: "שירה בן דוד", team: "home", monthlyTarget: 60, currentResult: 38 },
-    { id: "r12", name: "עומר יוסף", team: "home", monthlyTarget: 55, currentResult: 47 },
+    { id: "r1", name: "יעל כהן", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 98 },
+    { id: "r2", name: "אורי לוי", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 132 },
+    { id: "r3", name: "דנה פרץ", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 110, currentResult: 76 },
+    { id: "r4", name: "רון ביטון", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 130, currentResult: 145 },
+    { id: "r5", name: "מיכל אזולאי", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 88 },
+    { id: "r6", name: "שגיא דהן", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 115 },
+    { id: "r7", name: "נועה מזרחי", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 100, currentResult: 62 },
+    { id: "r8", name: "איתי שפירא", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 128 },
+    { id: "r9", name: "טל אברהם", teamId: "demo-team-2", teamName: "חידושי דירה", monthlyTarget: 60, currentResult: 54 },
+    { id: "r10", name: "ליאור חדד", teamId: "demo-team-2", teamName: "חידושי דירה", monthlyTarget: 55, currentResult: 61 },
+    { id: "r11", name: "שירה בן דוד", teamId: "demo-team-2", teamName: "חידושי דירה", monthlyTarget: 60, currentResult: 38 },
+    { id: "r12", name: "עומר יוסף", teamId: "demo-team-2", teamName: "חידושי דירה", monthlyTarget: 55, currentResult: 47 },
   ],
   announcements: [
     { id: "a1", title: "יעדים חדשים לרבעון", body: "החל מהחודש הבא יעודכנו היעדים בהתאם למגמת החידושים.", date: daysAgo(1) },
@@ -240,7 +241,6 @@ export const SEED: AppState = {
   feedback: [
     {
       id: "f1",
-      team: "car",
       repId: "r1",
       date: daysAgo(2),
       callId: "CAR-1042",
@@ -259,7 +259,6 @@ export const SEED: AppState = {
     },
     {
       id: "f2",
-      team: "car",
       repId: "r2",
       date: daysAgo(5),
       callId: "CAR-1078",
@@ -278,7 +277,6 @@ export const SEED: AppState = {
     },
     {
       id: "f3",
-      team: "home",
       repId: "r9",
       date: daysAgo(3),
       callId: "HOME-334",
@@ -297,7 +295,6 @@ export const SEED: AppState = {
     },
     {
       id: "f4",
-      team: "car",
       repId: "r3",
       date: daysAgo(7),
       callId: "CAR-1123",
@@ -316,7 +313,6 @@ export const SEED: AppState = {
     },
     {
       id: "f5",
-      team: "home",
       repId: "r10",
       date: daysAgo(1),
       callId: "HOME-355",

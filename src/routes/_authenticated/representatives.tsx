@@ -23,10 +23,9 @@ import { Users, Plus, Search, Pencil, Trash2, Power, Link2, Link2Off, ArrowLeftR
 import { requireRole } from "@/lib/require-role";
 import { useApp } from "@/lib/store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
-import { TEAM_LABEL } from "@/lib/seed";
 import {
   listRepresentatives, createRepresentative, updateRepresentative, setRepresentativeActive,
-  setRepresentativeTeam, linkRepresentativeUser, deleteRepresentative, type DeleteBlocker, type RepTeamKey,
+  setRepresentativeTeam, linkRepresentativeUser, deleteRepresentative, type DeleteBlocker,
 } from "@/lib/rep-admin.functions";
 
 export const Route = createFileRoute("/_authenticated/representatives")({
@@ -172,7 +171,7 @@ function RepresentativesPage() {
                           {r.name}
                           {r.external_ref ? <div className="text-xs text-muted-foreground">מזהה: {r.external_ref}</div> : null}
                         </TableCell>
-                        <TableCell>{r.team_name ?? "—"} <span className="text-xs text-muted-foreground">({TEAM_LABEL[r.team_key as RepTeamKey]})</span></TableCell>
+                        <TableCell>{r.team_name ?? "ללא צוות"}</TableCell>
                         <TableCell>{r.current_result} / {r.monthly_target}</TableCell>
                         <TableCell className="text-sm">{r.linked_user ? (r.linked_user.email ?? r.linked_user.full_name) : <span className="text-muted-foreground">לא מקושר</span>}</TableCell>
                         <TableCell>
@@ -203,7 +202,7 @@ function RepresentativesPage() {
                       <Badge variant={r.active ? "default" : "secondary"}>{r.active ? "פעיל" : "מושבת"}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {r.team_name ?? "ללא צוות"} · {TEAM_LABEL[r.team_key as RepTeamKey]} · {r.current_result}/{r.monthly_target}
+                      {r.team_name ?? "ללא צוות"} · {r.current_result}/{r.monthly_target}
                     </div>
                     <div className="text-xs">{r.linked_user ? r.linked_user.email : "ללא חשבון משתמש"}</div>
                     <RowActions
@@ -279,7 +278,6 @@ function RepDialog({ rep, teams, people, isAdmin, onClose, onDone }: {
   const update = useServerFn(updateRepresentative);
   const [name, setName] = useState(rep?.name ?? "");
   const [teamId, setTeamId] = useState(rep?.team_id ?? NONE);
-  const [teamKey, setTeamKey] = useState<RepTeamKey>((rep?.team_key as RepTeamKey) ?? "car");
   const [target, setTarget] = useState(String(rep?.monthly_target ?? 0));
   const [result, setResult] = useState(String(rep?.current_result ?? 0));
   const [externalRef, setExternalRef] = useState(rep?.external_ref ?? "");
@@ -291,7 +289,6 @@ function RepDialog({ rep, teams, people, isAdmin, onClose, onDone }: {
       const payload = {
         name,
         team_id: teamId === NONE ? null : teamId,
-        team_key: teamKey,
         monthly_target: Number(target) || 0,
         current_result: Number(result) || 0,
         external_ref: externalRef || null,
@@ -312,23 +309,13 @@ function RepDialog({ rep, teams, people, isAdmin, onClose, onDone }: {
         <div className="space-y-3">
           <div className="space-y-1"><Label>שם מלא</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
+            <div className="space-y-1 sm:col-span-2">
               <Label>צוות</Label>
               <Select value={teamId} onValueChange={setTeamId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>ללא צוות</SelectItem>
                   {teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>תחום</Label>
-              <Select value={teamKey} onValueChange={(v) => setTeamKey(v as RepTeamKey)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="car">{TEAM_LABEL.car}</SelectItem>
-                  <SelectItem value="home">{TEAM_LABEL.home}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -403,9 +390,8 @@ function DeactivateDialog({ rep, isAdmin, onClose, onDone }: { rep: RepRow; isAd
 function TransferDialog({ rep, teams, onClose, onDone }: { rep: RepRow; teams: { id: string; name: string }[]; onClose: () => void; onDone: () => void }) {
   const transfer = useServerFn(setRepresentativeTeam);
   const [teamId, setTeamId] = useState(rep.team_id ?? NONE);
-  const [teamKey, setTeamKey] = useState<RepTeamKey>(rep.team_key as RepTeamKey);
   const mutation = useMutation({
-    mutationFn: () => transfer({ data: { rep_id: rep.id, team_id: teamId === NONE ? null : teamId, team_key: teamKey } }),
+    mutationFn: () => transfer({ data: { rep_id: rep.id, team_id: teamId === NONE ? null : teamId } }),
     onSuccess: () => { toast.success("הנציג הועבר לצוות החדש"); onDone(); onClose(); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -422,16 +408,6 @@ function TransferDialog({ rep, teams, onClose, onDone }: { rep: RepRow; teams: {
               <SelectContent>
                 <SelectItem value={NONE}>ללא צוות</SelectItem>
                 {teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label>תחום</Label>
-            <Select value={teamKey} onValueChange={(v) => setTeamKey(v as RepTeamKey)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="car">{TEAM_LABEL.car}</SelectItem>
-                <SelectItem value="home">{TEAM_LABEL.home}</SelectItem>
               </SelectContent>
             </Select>
           </div>

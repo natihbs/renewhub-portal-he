@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useApp, useIsManager, computeScore } from "@/lib/store";
-import { CRITERIA, TEAM_LABEL, type CriterionValue, type Team, type Feedback, type Rep } from "@/lib/seed";
+import { useApp, useIsManager, computeScore, teamsFromReps } from "@/lib/store";
+import { CRITERIA, type CriterionValue, type Feedback, type Rep } from "@/lib/seed";
 import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,6 +129,7 @@ function ListeningCenter() {
   const feedbackList = isManager ? state.feedback : state.feedback.filter((f) => f.repId === state.currentRepId);
   const viewed = view ? state.feedback.find((f) => f.id === view) : null;
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
+  const teamNameOf = (id: string) => state.reps.find((r) => r.id === id)?.teamName ?? "ללא צוות";
 
   const openNewFor = (repId?: string) => { setPrefRepId(repId); setOpenForm(true); };
 
@@ -184,11 +185,11 @@ function ListeningCenter() {
             <CalendarTab openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="history" className="mt-4">
-            <HistoryTable list={feedbackList} nameOf={nameOf} onView={setView} />
+            <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} />
           </TabsContent>
         </Tabs>
       ) : (
-        <HistoryTable list={feedbackList} nameOf={nameOf} onView={setView} />
+        <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} />
       )}
 
       {isManager && (
@@ -440,7 +441,7 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                 <TableRow key={r.id} className="cursor-pointer" onClick={() => openRepWorkspace(r.id)}>
                   <TableCell><PriorityBadge level={level} /></TableCell>
                   <TableCell className="font-medium">{r.name}</TableCell>
-                  <TableCell><Badge variant="secondary">{TEAM_LABEL[r.team]}</Badge></TableCell>
+                  <TableCell><Badge variant="secondary">{r.teamName}</Badge></TableCell>
                   <TableCell className="text-sm">{last ? `${formatDateIL(last.date)} · לפני ${days} ימים` : "טרם בוצע"}</TableCell>
                   <TableCell>
                     <span className={cn("font-bold",
@@ -978,7 +979,7 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
 }
 
 // -------------------- History table --------------------
-function HistoryTable({ list, nameOf, onView }: { list: Feedback[]; nameOf: (id: string) => string; onView: (id: string) => void }) {
+function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; nameOf: (id: string) => string; teamNameOf: (id: string) => string; onView: (id: string) => void }) {
   if (list.length === 0) {
     return (
       <Card><CardContent className="pt-6">
@@ -1011,7 +1012,7 @@ function HistoryTable({ list, nameOf, onView }: { list: Feedback[]; nameOf: (id:
                 <TableRow key={f.id}>
                   <TableCell>{formatDateIL(f.date)}</TableCell>
                   <TableCell className="font-medium">{nameOf(f.repId)}</TableCell>
-                  <TableCell><Badge variant="secondary">{TEAM_LABEL[f.team]}</Badge></TableCell>
+                  <TableCell><Badge variant="secondary">{teamNameOf(f.repId)}</Badge></TableCell>
                   <TableCell className="font-mono text-xs">{f.callId}</TableCell>
                   <TableCell>{f.callType}</TableCell>
                   <TableCell>{f.listener}</TableCell>
@@ -1117,8 +1118,9 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
   open: boolean; onOpenChange: (v: boolean) => void; defaultRepId?: string;
 }) {
   const { state, addFeedback } = useApp();
+  const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
   const initialRep = state.reps.find((r) => r.id === defaultRepId);
-  const [team, setTeam] = useState<Team>(initialRep?.team ?? "car");
+  const [teamId, setTeamId] = useState<string>(initialRep?.teamId ?? teamOptions[0]?.teamId ?? "");
   const [repId, setRepId] = useState<string>(defaultRepId ?? "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [callId, setCallId] = useState("");
@@ -1134,14 +1136,14 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
   const [nextTask, setNextTask] = useState("");
 
   const score = computeScore(criteria);
-  const teamReps = state.reps.filter((r) => r.team === team);
+  const teamReps = state.reps.filter((r) => r.teamId === teamId);
 
   // sync when defaultRepId changes
   useMemo(() => {
     if (defaultRepId && open) {
       setRepId(defaultRepId);
       const r = state.reps.find((x) => x.id === defaultRepId);
-      if (r) setTeam(r.team);
+      if (r?.teamId) setTeamId(r.teamId);
     }
   }, [defaultRepId, open, state.reps]);
 
@@ -1152,7 +1154,7 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
     if (!callId.trim()) return toast.error("יש להזין מזהה שיחה");
     if (!listener.trim()) return toast.error("יש להזין שם מאזין");
     addFeedback({
-      team, repId, date, callId: callId.trim(), callType,
+      repId, date, callId: callId.trim(), callType,
       listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
     });
     toast.success(`ההאזנה נשמרה. ציון: ${score}`);
@@ -1168,11 +1170,10 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1"><Label>צוות</Label>
-              <Select value={team} onValueChange={(v) => { setTeam(v as Team); setRepId(""); }}>
+              <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(""); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="car">{TEAM_LABEL.car}</SelectItem>
-                  <SelectItem value="home">{TEAM_LABEL.home}</SelectItem>
+                  {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1277,7 +1278,7 @@ function ScheduleDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
             <Select value={repId} onValueChange={setRepId}>
               <SelectTrigger><SelectValue placeholder="בחר נציג" /></SelectTrigger>
               <SelectContent>
-                {state.reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {TEAM_LABEL[r.team]}</SelectItem>)}
+                {state.reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.teamName}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
