@@ -52,9 +52,9 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Ctx>(() => {
     // Demo Mode is allowed only for an explicit request, and only in dev or for admins.
     const canUseDemo = demoRequested && (import.meta.env.DEV || isAdmin);
-    // Authenticated users are always in Live Mode unless demo was explicitly unlocked.
-    const signedIn = !!user;
-    const mode: AppMode = canUseDemo ? "demo" : signedIn || !ready || loading ? "live" : "live";
+    // Everyone else — including every authenticated production user — is in Live Mode.
+    const mode: AppMode = canUseDemo ? "demo" : "live";
+
     return {
       mode,
       isDemo: mode === "demo",
