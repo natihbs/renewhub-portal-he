@@ -32,9 +32,9 @@ export const Route = createFileRoute("/_authenticated/teams")({
   beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
-      { title: "ניהול צוותים · RenewHub" },
+      { title: "ניהול צוותים · Pulse" },
       { name: "description", content: "ניהול צוותי חידושים, מנהלים ונציגים" },
-      { property: "og:title", content: "ניהול צוותים · RenewHub" },
+      { property: "og:title", content: "ניהול צוותים · Pulse" },
       { property: "og:description", content: "ניהול צוותי חידושים, מנהלים ונציגים" },
     ],
   }),
@@ -63,6 +63,14 @@ type Person = {
   representative_id: string | null;
   active: boolean;
   roles: string[];
+};
+
+type RepMember = {
+  id: string;
+  name: string;
+  external_ref: string | null;
+  user_id: string | null;
+  active: boolean;
 };
 
 const NONE = "__none__";
@@ -463,7 +471,10 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
 
   const team = q.data?.team as (TeamRow & { description: string | null }) | undefined;
   const members = (q.data?.members ?? []) as Person[];
-  const reps = members.filter((m) => m.roles.includes("representative"));
+  // Representatives are sourced independently from representatives.team_id — a
+  // representative has no `profiles` row (and so is never in `members`) unless a
+  // login account is linked to it. Do not derive this list from `members`.
+  const reps = (q.data?.representatives ?? []) as RepMember[];
   const unassigned = people.filter((p) => p.team_id !== teamId);
 
   const assignM = useMutation({
@@ -573,6 +584,33 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>נציגים בצוות</Label>
+              {reps.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+                  אין עדיין נציגים משויכים לצוות
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {reps.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between gap-2 rounded-xl border p-2.5">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{r.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {r.user_id ? "מקושר לחשבון משתמש" : "ללא חשבון משתמש"}
+                          {r.external_ref ? ` · ${r.external_ref}` : ""}
+                        </div>
+                      </div>
+                      {!r.active && <Badge variant="secondary">מושבת</Badge>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                שיוך נציגים לצוות מנוהל מעמוד <span className="font-medium">ניהול נציגים</span>, לא מכאן.
+              </p>
             </div>
 
             {canManage && (
