@@ -97,6 +97,59 @@ export type Database = {
           },
         ]
       }
+      representatives: {
+        Row: {
+          active: boolean
+          created_at: string
+          current_result: number
+          deactivated_at: string | null
+          external_ref: string | null
+          id: string
+          monthly_target: number
+          name: string
+          team_id: string | null
+          team_key: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          current_result?: number
+          deactivated_at?: string | null
+          external_ref?: string | null
+          id?: string
+          monthly_target?: number
+          name: string
+          team_id?: string | null
+          team_key?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          current_result?: number
+          deactivated_at?: string | null
+          external_ref?: string | null
+          id?: string
+          monthly_target?: number
+          name?: string
+          team_id?: string | null
+          team_key?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "representatives_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teams: {
         Row: {
           active: boolean

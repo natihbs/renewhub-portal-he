@@ -28,6 +28,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { ModeToggle } from "@/components/ModeToggle";
 import { AboutDialog } from "@/components/AboutDialog";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
+import { CloudRepsSync } from "@/components/CloudRepsSync";
 import { APP_NAME, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_DATE } from "@/lib/app-meta";
 
 
@@ -41,6 +42,7 @@ const NAV: NavItem[] = [
   { to: "/data-import", label: "ייבוא נתונים", icon: Upload, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/communications", label: "מרכז תקשורת", icon: MessageSquare, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/teams", label: "ניהול צוותים", icon: UsersRound, managerOnly: true, roles: ["admin", "manager"] },
+  { to: "/representatives", label: "ניהול נציגים", icon: Users2, managerOnly: true, roles: ["admin", "manager"] },
   { to: "/users", label: "ניהול משתמשים", icon: Users2, managerOnly: true, adminOnly: true, roles: ["admin"] },
   { to: "/admin", label: "ניהול המערכת", icon: Settings, managerOnly: true, adminOnly: true, roles: ["admin"] },
 ];
@@ -356,6 +358,8 @@ const PAGE_TITLES: Record<string, string> = {
   "/feedback": "האזנות ומשוב",
   "/data-import": "ייבוא נתונים",
   "/communications": "מרכז תקשורת",
+  "/teams": "ניהול צוותים",
+  "/representatives": "ניהול נציגים",
   "/users": "ניהול משתמשים",
   "/admin": "ניהול המערכת",
   "/changelog": "יומן שינויים",
@@ -425,6 +429,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh flex bg-background">
+      <CloudRepsSync />
       {/* Sidebar - desktop */}
       <aside className="hidden lg:flex w-64 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground">
         <Brand />
