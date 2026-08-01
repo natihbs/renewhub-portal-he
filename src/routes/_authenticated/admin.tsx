@@ -49,8 +49,8 @@ function AdminPage() {
   }
 
   const cards = [
-    { title: "ניהול נציגים", desc: "הוספה ועדכון נציגים ויעדים", icon: Users, to: "/performance" as const },
-    { title: "ניהול צוותים", desc: "מעבר בין צוותי רכב ודירה", icon: UsersRound, to: "/performance" as const },
+    { title: "ניהול נציגים", desc: "הוספה ועדכון נציגים ויעדים", icon: Users, to: "/users" as const },
+    { title: "ניהול צוותים", desc: "יצירה, עריכה והשבתה של צוותים", icon: UsersRound, to: "/teams" as const },
     { title: "ניהול תכנים", desc: "הוספה ועריכת מאמרים במרכז הידע", icon: BookOpen, to: "/knowledge" as const },
     { title: "ניהול תחרויות", desc: "יצירה ועריכת תחרויות וקטגוריות", icon: Trophy, to: "/competitions" as const },
   ];

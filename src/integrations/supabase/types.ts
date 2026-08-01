@@ -99,21 +99,30 @@ export type Database = {
       }
       teams: {
         Row: {
+          active: boolean
           created_at: string
+          department: string | null
+          description: string | null
           id: string
           manager_id: string | null
           name: string
           updated_at: string
         }
         Insert: {
+          active?: boolean
           created_at?: string
+          department?: string | null
+          description?: string | null
           id?: string
           manager_id?: string | null
           name: string
           updated_at?: string
         }
         Update: {
+          active?: boolean
           created_at?: string
+          department?: string | null
+          description?: string | null
           id?: string
           manager_id?: string | null
           name?: string
