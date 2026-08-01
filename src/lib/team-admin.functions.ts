@@ -24,6 +24,29 @@ export function aggregateTeamCounts(
   };
 }
 
+/**
+ * Never return a raw database id to the UI. `profiles.representative_id` holds the
+ * linked representative's uuid (despite the column being typed `text`), so it must
+ * never be rendered directly — resolve it to a business-facing identifier instead.
+ * `employeeNumber`/`representativeCode` have no backing column in the current schema;
+ * they're accepted here so this stays correct without a UI change if those columns
+ * are ever added.
+ */
+export function resolveBusinessIdentifier(input: {
+  employeeNumber?: string | null;
+  representativeCode?: string | null;
+  email?: string | null;
+  externalRef?: string | null;
+}): string {
+  return (
+    input.employeeNumber?.trim() ||
+    input.representativeCode?.trim() ||
+    input.email?.trim() ||
+    input.externalRef?.trim() ||
+    "ללא מזהה עסקי"
+  );
+}
+
 async function getRoles(ctx: Ctx): Promise<string[]> {
   const { data, error } = await ctx.supabase.from("user_roles").select("role").eq("user_id", ctx.userId);
   if (error) throw new Error("שגיאה באימות הרשאות");
@@ -148,9 +171,38 @@ export const getTeamDetails = createServerFn({ method: "POST" })
       rolesByUser.set(r.user_id, arr);
     }
 
+    // profiles.representative_id holds a representative uuid, not a business code — it
+    // must never reach the client raw. Resolve it to that representative's external_ref
+    // (may point outside this team if the two assignments have ever drifted) so the UI
+    // can show a real identifier instead.
+    const linkedRepIds = Array.from(
+      new Set(((members ?? []) as any[]).map((m) => m.representative_id).filter((v): v is string => !!v)),
+    );
+    let externalRefByRepId = new Map<string, string | null>();
+    if (linkedRepIds.length > 0) {
+      const { data: linkedReps, error: lrErr } = await ctx.supabase
+        .from("representatives")
+        .select("id, external_ref")
+        .in("id", linkedRepIds);
+      if (lrErr) throw new Error(lrErr.message);
+      externalRefByRepId = new Map(((linkedReps ?? []) as { id: string; external_ref: string | null }[]).map((r) => [r.id, r.external_ref]));
+    }
+
     return {
       team,
-      members: ((members ?? []) as any[]).map((m) => ({ ...m, roles: rolesByUser.get(m.id) ?? [] })),
+      members: ((members ?? []) as any[]).map((m) => {
+        const { representative_id, ...rest } = m;
+        return {
+          ...rest,
+          roles: rolesByUser.get(m.id) ?? [],
+          business_id: representative_id
+            ? resolveBusinessIdentifier({
+                email: m.email,
+                externalRef: externalRefByRepId.get(representative_id) ?? null,
+              })
+            : null,
+        };
+      }),
       representatives: (reps ?? []) as { id: string; name: string; external_ref: string | null; user_id: string | null; active: boolean }[],
     };
   });

@@ -39,6 +39,25 @@ async function assertCanEdit(ctx: Ctx, repId: string) {
   return { isAdmin: false };
 }
 
+/**
+ * Keep a representative's linked login account aligned with the representative's team,
+ * so a rep with an account always shows up consistently under both "חברי הצוות" and
+ * "נציגים בצוות" for the same team. Every write path that can change a representative's
+ * team_id or user_id must call this for the (possibly new) linked user.
+ *
+ * Only ever pushes representative -> profile. Never call this to react to a user being
+ * unlinked/removed from a representative — that profile's team_id must be left alone
+ * (a login account's team membership doesn't depend on having a linked representative).
+ */
+async function syncLinkedProfileTeam(admin: any, userId: string, teamId: string | null) {
+  let managerId: string | null = null;
+  if (teamId) {
+    const { data: team } = await admin.from("teams").select("manager_id").eq("id", teamId).maybeSingle();
+    managerId = team?.manager_id ?? null;
+  }
+  await admin.from("profiles").update({ team_id: teamId, manager_id: managerId }).eq("id", userId);
+}
+
 async function logAudit(
   admin: any,
   ctx: Ctx,
@@ -148,6 +167,7 @@ export const createRepresentative = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
+    if (data.user_id) await syncLinkedProfileTeam(supabaseAdmin, data.user_id, data.team_id);
     await logAudit(supabaseAdmin, ctx, "rep.create", { rep_id: created.id, name: data.name, team_id: data.team_id }, data.user_id);
     return { rep_id: created.id as string };
   });
@@ -191,6 +211,7 @@ export const updateRepresentative = createServerFn({ method: "POST" })
       })
       .eq("id", data.rep_id);
     if (error) throw new Error(error.message);
+    if (data.user_id) await syncLinkedProfileTeam(supabaseAdmin, data.user_id, data.team_id);
 
     await logAudit(supabaseAdmin, ctx, "rep.update", { rep_id: data.rep_id, before, after: data });
     if (before.team_id !== data.team_id) {
@@ -255,15 +276,7 @@ export const setRepresentativeTeam = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.from("representatives").update({ team_id: data.team_id }).eq("id", data.rep_id);
     if (error) throw new Error(error.message);
 
-    // Keep the linked user's profile aligned with the new team + manager.
-    if (rep.user_id) {
-      let managerId: string | null = null;
-      if (data.team_id) {
-        const { data: team } = await supabaseAdmin.from("teams").select("manager_id").eq("id", data.team_id).maybeSingle();
-        managerId = team?.manager_id ?? null;
-      }
-      await supabaseAdmin.from("profiles").update({ team_id: data.team_id, manager_id: managerId }).eq("id", rep.user_id);
-    }
+    if (rep.user_id) await syncLinkedProfileTeam(supabaseAdmin, rep.user_id, data.team_id);
 
     await logAudit(supabaseAdmin, ctx, "rep.transfer", {
       rep_id: data.rep_id, name: rep.name, from_team: rep.team_id, to_team: data.team_id,
@@ -281,12 +294,16 @@ export const linkRepresentativeUser = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     await assertAdmin(ctx);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rep } = await supabaseAdmin.from("representatives").select("user_id, name").eq("id", data.rep_id).maybeSingle();
+    const { data: rep } = await supabaseAdmin.from("representatives").select("user_id, name, team_id").eq("id", data.rep_id).maybeSingle();
     if (!rep) throw new Error("הנציג לא נמצא");
     if (data.user_id) await assertUserFree(supabaseAdmin, data.user_id, data.rep_id);
 
     const { error } = await supabaseAdmin.from("representatives").update({ user_id: data.user_id }).eq("id", data.rep_id);
     if (error) throw new Error(error.message);
+    // Newly-linked user inherits the rep's current team. Unlinking must NOT touch the
+    // previous user's profile — their team membership as a login account stands on its
+    // own regardless of representative linkage.
+    if (data.user_id) await syncLinkedProfileTeam(supabaseAdmin, data.user_id, rep.team_id);
     await logAudit(supabaseAdmin, ctx, data.user_id ? "rep.user_linked" : "rep.user_unlinked", {
       rep_id: data.rep_id, name: rep.name, from: rep.user_id, to: data.user_id,
     }, data.user_id ?? rep.user_id ?? null);
@@ -409,7 +426,7 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: before } = await supabaseAdmin
       .from("representatives")
-      .select("name, team_id, monthly_target, current_result")
+      .select("name, team_id, monthly_target, current_result, user_id")
       .eq("id", data.rep_id)
       .maybeSingle();
     if (!before) throw new Error("הנציג לא נמצא");
@@ -423,6 +440,9 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
 
     const { error } = await supabaseAdmin.from("representatives").update(update).eq("id", data.rep_id);
     if (error) throw new Error(error.message);
+    if (before.user_id && update.team_id !== undefined && update.team_id !== before.team_id) {
+      await syncLinkedProfileTeam(supabaseAdmin, before.user_id, update.team_id);
+    }
 
     await logAudit(supabaseAdmin, ctx, "rep.metrics_update", { rep_id: data.rep_id, before, after: update });
     if (update.team_id !== undefined && before.team_id !== update.team_id) {

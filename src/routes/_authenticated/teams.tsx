@@ -65,6 +65,10 @@ type Person = {
   roles: string[];
 };
 
+// getTeamDetails resolves the linked representative to a business identifier
+// server-side and never returns the raw representative_id uuid to the client.
+type TeamMember = Omit<Person, "representative_id"> & { business_id: string | null };
+
 type RepMember = {
   id: string;
   name: string;
@@ -75,7 +79,7 @@ type RepMember = {
 
 const NONE = "__none__";
 
-function personName(p: Person | undefined | null) {
+function personName(p: { full_name: string | null; email: string | null } | undefined | null) {
   return p?.full_name || p?.email || "—";
 }
 
@@ -470,7 +474,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
   });
 
   const team = q.data?.team as (TeamRow & { description: string | null }) | undefined;
-  const members = (q.data?.members ?? []) as Person[];
+  const members = (q.data?.members ?? []) as TeamMember[];
   // Representatives are sourced independently from representatives.team_id — a
   // representative has no `profiles` row (and so is never in `members`) unless a
   // login account is linked to it. Do not derive this list from `members`.
@@ -544,6 +548,10 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
 
             <div className="space-y-2">
               <Label>חברי הצוות</Label>
+              <p className="text-xs text-muted-foreground">
+                משתמשים עם חשבון התחברות המשויכים לצוות — מנהלים, מנהלי מערכת ונציגים בעלי חשבון.
+                נציג ללא חשבון מופיע רק תחת "נציגים בצוות" למטה.
+              </p>
               {members.length === 0 ? (
                 <div className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
                   אין עדיין משתמשים משויכים לצוות
@@ -556,7 +564,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
                         <div className="text-sm font-medium truncate">{personName(m)}</div>
                         <div className="text-xs text-muted-foreground truncate">
                           {m.roles.includes("representative") ? "נציג" : m.roles.includes("manager") ? "מנהל" : m.roles.includes("admin") ? "מנהל מערכת" : "ללא תפקיד"}
-                          {m.representative_id ? ` · ${m.representative_id}` : ""}
+                          {m.business_id ? ` · ${m.business_id}` : ""}
                         </div>
                       </div>
                       {canManage && (
@@ -588,6 +596,10 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
 
             <div className="space-y-2">
               <Label>נציגים בצוות</Label>
+              <p className="text-xs text-muted-foreground">
+                כלל הנציגים המשויכים לצוות, כולל נציגים ללא חשבון התחברות. נציג עם חשבון
+                מופיע גם ברשימת "חברי הצוות" למעלה.
+              </p>
               {reps.length === 0 ? (
                 <div className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
                   אין עדיין נציגים משויכים לצוות
