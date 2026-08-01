@@ -283,11 +283,22 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   return (
     <>
       {/* Sticky header */}
-      <SheetHeader className="p-5 pb-4 border-b bg-card">
-        <div className="flex items-start gap-3">
+      <SheetHeader className="p-4 pb-4 border-b bg-card sm:p-5">
+        {/* Explicit back control: on a phone this sheet reads as a full page. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+          className="sm:hidden -ms-2 self-start gap-1 text-muted-foreground"
+        >
+          <ChevronRight className="h-4 w-4" />
+          חזרה
+        </Button>
+        <div className="flex items-start gap-3 pe-10">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10 text-primary font-bold shrink-0 text-lg">
             {rep.name.slice(0, 1)}
           </div>
+
           <div className="min-w-0 flex-1">
             <SheetTitle className="text-lg text-start truncate">{rep.name}</SheetTitle>
             <SheetDescription className="text-start flex items-center gap-2 flex-wrap mt-1">
