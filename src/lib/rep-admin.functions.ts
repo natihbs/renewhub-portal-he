@@ -259,8 +259,8 @@ export const setRepresentativeTeam = createServerFn({ method: "POST" })
     const { data: rep } = await supabaseAdmin.from("representatives").select("team_id, user_id, name").eq("id", data.rep_id).maybeSingle();
     if (!rep) throw new Error("הנציג לא נמצא");
 
-    const update: Record<string, unknown> = { team_id: data.team_id };
-    if (data.team_key) update['team_key'] = data.team_key;
+    const update: { team_id: string | null; team_key?: RepTeamKey } = { team_id: data.team_id };
+    if (data.team_key) update.team_key = data.team_key;
     const { error } = await supabaseAdmin.from("representatives").update(update).eq("id", data.rep_id);
     if (error) throw new Error(error.message);
 
