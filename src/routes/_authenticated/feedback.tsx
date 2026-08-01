@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { useApp, useIsManager, computeScore, teamsFromReps } from "@/lib/store";
+import { useEffect, useMemo, useState } from "react";
+import { useApp, useIsManager, computeScore, teamsFromReps, visibleFeedback } from "@/lib/store";
 import { CRITERIA, type CriterionValue, type Feedback, type Rep } from "@/lib/seed";
 import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -119,19 +119,41 @@ export const Route = createFileRoute("/_authenticated/feedback")({
 });
 
 function ListeningCenter() {
-  const { state } = useApp();
+  const { state, updateFeedback } = useApp();
   const isManager = useIsManager();
   const [openForm, setOpenForm] = useState(false);
   const [openSchedule, setOpenSchedule] = useState(false);
   const [view, setView] = useState<string | null>(null);
   const [prefRepId, setPrefRepId] = useState<string | undefined>(undefined);
+  const [prefScheduleId, setPrefScheduleId] = useState<string | undefined>(undefined);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const feedbackList = isManager ? state.feedback : state.feedback.filter((f) => f.repId === state.currentRepId);
+  // Reps only ever see their own published feedback — enforced by RLS and the cloud
+  // query scope in store.tsx; this filter is a harmless extra safety net, not the
+  // real boundary.
+  const feedbackList = visibleFeedback(state.feedback, isManager, state.currentRepId);
   const viewed = view ? state.feedback.find((f) => f.id === view) : null;
+  const editing = editingId ? state.feedback.find((f) => f.id === editingId) ?? null : null;
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
   const teamNameOf = (id: string) => state.reps.find((r) => r.id === id)?.teamName ?? "ללא צוות";
 
-  const openNewFor = (repId?: string) => { setPrefRepId(repId); setOpenForm(true); };
+  const openNewFor = (repId?: string, scheduleId?: string) => {
+    setEditingId(null);
+    setPrefRepId(repId);
+    setPrefScheduleId(scheduleId);
+    setOpenForm(true);
+  };
+  const openEditFor = (id: string) => {
+    setEditingId(id);
+    setPrefRepId(undefined);
+    setPrefScheduleId(undefined);
+    setView(null);
+    setOpenForm(true);
+  };
+  const publish = (id: string) => {
+    updateFeedback(id, { published: true });
+    toast.success("המשוב פורסם לנציג");
+  };
 
   return (
     <div className="space-y-6">
@@ -194,7 +216,13 @@ function ListeningCenter() {
 
       {isManager && (
         <>
-          <FeedbackFormDialog open={openForm} onOpenChange={setOpenForm} defaultRepId={prefRepId} />
+          <FeedbackFormDialog
+            open={openForm}
+            onOpenChange={setOpenForm}
+            defaultRepId={prefRepId}
+            defaultScheduleId={prefScheduleId}
+            editing={editing}
+          />
           <ScheduleDialog open={openSchedule} onOpenChange={setOpenSchedule} />
         </>
       )}
@@ -202,7 +230,14 @@ function ListeningCenter() {
       <Dialog open={!!viewed} onOpenChange={(v) => !v && setView(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>פירוט משוב — {viewed ? nameOf(viewed.repId) : ""}</DialogTitle></DialogHeader>
-          {viewed && <FeedbackView f={viewed} />}
+          {viewed && (
+            <FeedbackView
+              f={viewed}
+              isManager={isManager}
+              onEdit={() => openEditFor(viewed.id)}
+              onPublish={() => publish(viewed.id)}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -907,9 +942,9 @@ function RepBadges({ list, currentAvg }: { list: Feedback[]; currentAvg: number 
 }
 
 // -------------------- Calendar tab --------------------
-function CalendarTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
+function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?: string) => void }) {
   const { state } = useApp();
-  const { schedules, updateSchedule, removeSchedule, completeSchedule } = useListening();
+  const { schedules, updateSchedule, removeSchedule } = useListening();
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
 
   const grouped = useMemo(() => {
@@ -952,7 +987,7 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                       <div className="flex items-center gap-1">
                         {s.status === "planned" && (
                           <>
-                            <Button size="sm" variant="outline" onClick={() => { openNewFor(s.repId); completeSchedule(s.id); }}>
+                            <Button size="sm" variant="outline" onClick={() => openNewFor(s.repId, s.id)}>
                               <CheckCircle2 className="ms-1 h-3.5 w-3.5" />בצע
                             </Button>
                             <Button size="icon" variant="ghost" onClick={() => updateSchedule(s.id, { status: "cancelled" })}>
@@ -1004,6 +1039,7 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
                 <TableHead>נקודת חוזק</TableHead>
                 <TableHead>לשיפור</TableHead>
                 <TableHead>ציון</TableHead>
+                <TableHead>סטטוס</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -1024,6 +1060,11 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
                     )}>{f.score}</span>
                   </TableCell>
                   <TableCell>
+                    {f.published
+                      ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
+                      : <Badge variant="outline">טיוטה</Badge>}
+                  </TableCell>
+                  <TableCell>
                     <Button size="icon" variant="ghost" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
@@ -1037,9 +1078,25 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
 }
 
 // -------------------- Feedback view (read-only) --------------------
-function FeedbackView({ f }: { f: Feedback }) {
+function FeedbackView({ f, isManager, onEdit, onPublish }: {
+  f: Feedback; isManager?: boolean; onEdit?: () => void; onPublish?: () => void;
+}) {
   return (
     <div className="space-y-4">
+      {isManager && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">סטטוס:</span>
+            {f.published
+              ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
+              : <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>}
+          </div>
+          <div className="flex gap-2">
+            {!f.published && onPublish && <Button size="sm" onClick={onPublish}>פרסום לנציג</Button>}
+            {onEdit && <Button size="sm" variant="outline" onClick={onEdit}>עריכה</Button>}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
         <Info label="תאריך" value={formatDateIL(f.date)} />
         <Info label="מזהה שיחה" value={f.callId} />
@@ -1114,76 +1171,117 @@ function MiniKpi({ icon: Icon, label, value, sub, tone }: {
 }
 
 // -------------------- Feedback form dialog (sectioned) --------------------
-function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
+function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleId, editing }: {
   open: boolean; onOpenChange: (v: boolean) => void; defaultRepId?: string;
+  defaultScheduleId?: string; editing?: Feedback | null;
 }) {
-  const { state, addFeedback } = useApp();
+  const { state, addFeedback, updateFeedback } = useApp();
+  const { completeSchedule } = useListening();
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
-  const initialRep = state.reps.find((r) => r.id === defaultRepId);
+  const initialRep = state.reps.find((r) => r.id === (editing?.repId ?? defaultRepId));
   const [teamId, setTeamId] = useState<string>(initialRep?.teamId ?? teamOptions[0]?.teamId ?? "");
-  const [repId, setRepId] = useState<string>(defaultRepId ?? "");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [callId, setCallId] = useState("");
-  const [callType, setCallType] = useState("חידוש");
-  const [listener, setListener] = useState("");
+  const [repId, setRepId] = useState<string>(editing?.repId ?? defaultRepId ?? "");
+  const [date, setDate] = useState(editing?.date ?? new Date().toISOString().slice(0, 10));
+  const [callId, setCallId] = useState(editing?.callId ?? "");
+  const [callType, setCallType] = useState(editing?.callType ?? "חידוש");
+  const [listener, setListener] = useState(editing?.listener ?? "");
   const allKeys = SECTIONS.flatMap((s) => s.criteriaKeys);
   const [criteria, setCriteria] = useState<Record<string, CriterionValue>>(
-    Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>
+    editing?.criteria ?? (Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>)
   );
-  const [keep, setKeep] = useState("");
-  const [improve, setImprove] = useState("");
-  const [managerSummary, setManagerSummary] = useState("");
-  const [nextTask, setNextTask] = useState("");
+  const [keep, setKeep] = useState(editing?.keep ?? "");
+  const [improve, setImprove] = useState(editing?.improve ?? "");
+  const [managerSummary, setManagerSummary] = useState(editing?.managerSummary ?? "");
+  const [nextTask, setNextTask] = useState(editing?.nextTask ?? "");
 
   const score = computeScore(criteria);
   const teamReps = state.reps.filter((r) => r.teamId === teamId);
 
-  // sync when defaultRepId changes
-  useMemo(() => {
-    if (defaultRepId && open) {
+  // Reload the form whenever a different feedback record is opened for editing, or a
+  // new "create for this rep" request comes in.
+  useEffect(() => {
+    if (!open) return;
+    if (editing) {
+      setRepId(editing.repId);
+      const r = state.reps.find((x) => x.id === editing.repId);
+      if (r?.teamId) setTeamId(r.teamId);
+      setDate(editing.date);
+      setCallId(editing.callId);
+      setCallType(editing.callType);
+      setListener(editing.listener);
+      setCriteria(editing.criteria);
+      setKeep(editing.keep);
+      setImprove(editing.improve);
+      setManagerSummary(editing.managerSummary);
+      setNextTask(editing.nextTask);
+    } else if (defaultRepId) {
       setRepId(defaultRepId);
       const r = state.reps.find((x) => x.id === defaultRepId);
       if (r?.teamId) setTeamId(r.teamId);
     }
-  }, [defaultRepId, open, state.reps]);
+  }, [editing, defaultRepId, open, state.reps]);
 
   const labelForCriterion = (k: string) => CRITERIA.find((c) => c.key === k)?.label ?? k;
+
+  const resetForm = () => {
+    setCallId(""); setListener(""); setKeep(""); setImprove(""); setManagerSummary(""); setNextTask("");
+    setCriteria(Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>);
+  };
 
   const submit = () => {
     if (!repId) return toast.error("יש לבחור נציג");
     if (!callId.trim()) return toast.error("יש להזין מזהה שיחה");
     if (!listener.trim()) return toast.error("יש להזין שם מאזין");
-    addFeedback({
-      repId, date, callId: callId.trim(), callType,
-      listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
-    });
-    toast.success(`ההאזנה נשמרה. ציון: ${score}`);
+    if (editing) {
+      // Reassigning feedback to a different representative isn't supported here —
+      // the rep/team pickers are locked during edit (see JSX below).
+      updateFeedback(editing.id, {
+        date, callId: callId.trim(), callType,
+        listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
+      });
+      toast.success(`המשוב עודכן. ציון: ${score}`);
+    } else {
+      addFeedback({
+        repId, date, callId: callId.trim(), callType,
+        listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
+        scheduleId: defaultScheduleId ?? null,
+      });
+      if (defaultScheduleId) completeSchedule(defaultScheduleId);
+      toast.success(`ההאזנה נשמרה כטיוטה (ציון: ${score}). יש לפרסם אותה כדי שתוצג לנציג.`);
+    }
     onOpenChange(false);
-    setCallId(""); setListener(""); setKeep(""); setImprove(""); setManagerSummary(""); setNextTask("");
-    setCriteria(Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>);
+    resetForm();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>טופס האזנה חכם</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{editing ? "עריכת משוב" : "טופס האזנה חכם"}</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1"><Label>צוות</Label>
-              <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(""); }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {editing ? (
+                <Input disabled value={teamOptions.find((t) => t.teamId === teamId)?.teamName ?? "—"} />
+              ) : (
+                <Select value={teamId} onValueChange={(v) => { setTeamId(v); setRepId(""); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1"><Label>שם הנציג</Label>
-              <Select value={repId} onValueChange={setRepId}>
-                <SelectTrigger><SelectValue placeholder="בחר נציג" /></SelectTrigger>
-                <SelectContent>
-                  {teamReps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {editing ? (
+                <Input disabled value={state.reps.find((r) => r.id === repId)?.name ?? "—"} />
+              ) : (
+                <Select value={repId} onValueChange={setRepId}>
+                  <SelectTrigger><SelectValue placeholder="בחר נציג" /></SelectTrigger>
+                  <SelectContent>
+                    {teamReps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1"><Label>תאריך ההאזנה</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
             <div className="space-y-1"><Label>מזהה שיחה פנימי</Label><Input value={callId} onChange={(e) => setCallId(e.target.value)} placeholder="למשל: CAR-1234" /></div>
@@ -1244,7 +1342,7 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId }: {
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>ביטול</Button>
-            <Button onClick={submit}>שמירת האזנה</Button>
+            <Button onClick={submit}>{editing ? "עדכון משוב" : "שמירת האזנה"}</Button>
           </div>
         </div>
       </DialogContent>

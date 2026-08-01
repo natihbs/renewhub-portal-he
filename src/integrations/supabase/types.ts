@@ -340,7 +340,9 @@ export type Database = {
           listener: string
           manager_summary: string
           next_task: string
+          published: boolean
           representative_id: string
+          schedule_id: string | null
           score: number
           team_key: string
           updated_at: string
@@ -358,7 +360,9 @@ export type Database = {
           listener?: string
           manager_summary?: string
           next_task?: string
+          published?: boolean
           representative_id: string
+          schedule_id?: string | null
           score?: number
           team_key?: string
           updated_at?: string
@@ -376,7 +380,9 @@ export type Database = {
           listener?: string
           manager_summary?: string
           next_task?: string
+          published?: boolean
           representative_id?: string
+          schedule_id?: string | null
           score?: number
           team_key?: string
           updated_at?: string
@@ -387,6 +393,13 @@ export type Database = {
             columns: ["representative_id"]
             isOneToOne: false
             referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feedback_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "listening_schedules"
             referencedColumns: ["id"]
           },
         ]

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   SEED,
   type AppState,
@@ -44,7 +44,8 @@ type Ctx = {
   updateArticle: (id: string, patch: Partial<Article>) => void;
   removeArticle: (id: string) => void;
   // feedback
-  addFeedback: (f: Omit<Feedback, "id" | "score"> & { score?: number }) => void;
+  addFeedback: (f: Omit<Feedback, "id" | "score" | "published"> & { score?: number }) => void;
+  updateFeedback: (id: string, patch: Partial<Omit<Feedback, "id">>) => void;
   resetAll: () => void;
 };
 
@@ -89,6 +90,8 @@ type FeedbackRow = {
   improve: string;
   manager_summary: string;
   next_task: string;
+  published: boolean;
+  schedule_id: string | null;
 };
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -105,6 +108,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentRepId, setCurrentRepId] = useState<string>("");
   const [reps, setReps] = useState<Rep[]>([]);
   const [demo, setDemo] = useState<AppState>(SEED);
+  const { profile, isAdmin, isManager } = useAuth();
 
   const announcements = useCloudCollection<AnnouncementRow>("announcements", {
     order: { column: "published_on" },
@@ -117,9 +121,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     order: { column: "created_at", ascending: true },
   });
   const compScores = useCloudCollection<CompetitionScoreRow>("competition_scores", {});
-  const feedback = useCloudCollection<FeedbackRow>("feedback", { order: { column: "feedback_date" } });
+  // A plain representative (no manager/admin role) only ever needs their own feedback —
+  // scope the query to it. Managers/admins need every rep they can manage, which the
+  // simple equality filter here can't express, so they stay unscoped and rely on RLS
+  // (can_manage_rep) as they already do.
+  const isRepOnly = !isAdmin && !isManager;
+  const feedback = useCloudCollection<FeedbackRow>("feedback", {
+    order: { column: "feedback_date" },
+    eq: isRepOnly && currentRepId ? { representative_id: currentRepId } : undefined,
+  });
 
   const live = announcements.live;
+
+  // A representative's identity is never chosen in the UI in Live Mode (the role/rep
+  // switcher is demo-only) — resolve it from their own linked representative record so
+  // "my feedback" / "my performance" actually show their data instead of staying empty.
+  useEffect(() => {
+    if (live && !currentRepId && profile?.representative_id) {
+      setCurrentRepId(profile.representative_id);
+    }
+  }, [live, currentRepId, profile?.representative_id]);
 
   const replaceReps = useCallback((next: Rep[]) => setReps(next), []);
 
@@ -173,6 +194,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         improve: f.improve,
         managerSummary: f.manager_summary,
         nextTask: f.next_task,
+        published: f.published,
+        scheduleId: f.schedule_id,
       })),
     };
   }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows]);
@@ -252,8 +275,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeArticle: (id) => patch((s) => ({ ...s, articles: s.articles.filter((a) => a.id !== id) })),
         addFeedback: (f) => {
           const score = f.score ?? computeScore(f.criteria);
-          patch((s) => ({ ...s, feedback: [{ ...f, id: uid(), score }, ...s.feedback] }));
+          patch((s) => ({ ...s, feedback: [{ ...f, id: uid(), score, published: false }, ...s.feedback] }));
         },
+        updateFeedback: (id, p) =>
+          patch((s) => ({
+            ...s,
+            feedback: s.feedback.map((f) => {
+              if (f.id !== id) return f;
+              const next = { ...f, ...p };
+              return { ...next, score: p.criteria ? computeScore(next.criteria) : next.score };
+            }),
+          })),
         resetAll: () => setDemo(SEED),
       };
     }
@@ -352,9 +384,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
             improve: f.improve,
             manager_summary: f.managerSummary,
             next_task: f.nextTask,
+            // New feedback always starts as a draft — a representative must never see
+            // it until a manager explicitly publishes it (updateFeedback with published: true).
+            published: false,
+            schedule_id: f.scheduleId,
           },
           "created_by",
         ),
+      updateFeedback: (id, p) => {
+        const row: Record<string, string | number | boolean | null> = {};
+        if (p.date !== undefined) row.feedback_date = p.date;
+        if (p.callId !== undefined) row.call_id = p.callId;
+        if (p.callType !== undefined) row.call_type = p.callType;
+        if (p.listener !== undefined) row.listener = p.listener;
+        if (p.criteria !== undefined) {
+          row.criteria = p.criteria as never;
+          // Editing must recalculate the score immediately from the same formula
+          // used everywhere else — never trust a stale score passed alongside it.
+          row.score = computeScore(p.criteria);
+        }
+        if (p.keep !== undefined) row.keep_doing = p.keep;
+        if (p.improve !== undefined) row.improve = p.improve;
+        if (p.managerSummary !== undefined) row.manager_summary = p.managerSummary;
+        if (p.nextTask !== undefined) row.next_task = p.nextTask;
+        if (p.published !== undefined) row.published = p.published;
+        if (p.scheduleId !== undefined) row.schedule_id = p.scheduleId;
+        void feedback.update(id, row);
+      },
       resetAll: () => {},
     };
   }, [state, live, replaceReps, announcements, articles, competitions, compCategories, compScores, feedback]);
@@ -389,6 +445,19 @@ export function computeScore(criteria: Record<string, CriterionValue>) {
   if (relevant.length === 0) return 0;
   const sum = relevant.reduce((acc, v) => acc + (v === "done" ? 1 : v === "partial" ? 0.5 : 0), 0);
   return Math.round((sum / relevant.length) * 100);
+}
+
+/**
+ * Single source of truth for "which feedback rows can this viewer see" on the client
+ * side. A manager/admin sees everything (including drafts) for the reps they manage;
+ * a representative only ever sees their own PUBLISHED feedback. This mirrors — but
+ * does not replace — the real boundary enforced by RLS (can_manage_rep / published AND
+ * rep_is_self) on the feedback table itself.
+ */
+export function visibleFeedback(list: Feedback[], isManager: boolean, currentRepId: string): Feedback[] {
+  if (isManager) return list;
+  if (!currentRepId) return [];
+  return list.filter((f) => f.repId === currentRepId && f.published);
 }
 
 export function statusForRep(rep: Rep) {
