@@ -26,11 +26,13 @@ import { RepWorkspace } from "@/components/RepWorkspace";
 import { AppShell } from "@/components/layout/AppShell";
 import { IdeaFeedbackButton } from "@/components/IdeaFeedback";
 import { Toaster } from "@/components/ui/sonner";
+import { PulseLogo } from "@/components/PulseLogo";
 
 function NotFoundComponent() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4" dir="rtl">
       <div className="max-w-md text-center">
+        <PulseLogo variant="symbol" className="h-10 mx-auto mb-4" />
         <h1 className="text-7xl font-bold text-foreground">404</h1>
         <h2 className="mt-4 text-xl font-semibold text-foreground">הדף לא נמצא</h2>
         <p className="mt-2 text-sm text-muted-foreground">הדף שחיפשת אינו קיים או הוסר.</p>
@@ -86,25 +88,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "RenewHub" },
-      { name: "description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
-      { property: "og:title", content: "RenewHub" },
-      { property: "og:description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
+      { title: "Pulse" },
+      { name: "description", content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת." },
+      { property: "og:title", content: "Pulse" },
+      { property: "og:description", content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "RenewHub" },
-      { name: "twitter:description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
+      { name: "twitter:title", content: "Pulse" },
+      { name: "twitter:description", content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת." },
       { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png" },
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&family=Rubik:wght@500;600;700;800&display=swap",
       },
     ],
   }),

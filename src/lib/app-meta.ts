@@ -1,6 +1,8 @@
 // App metadata: version, build, changelog, mode toggle.
 
-export const APP_NAME = "RenewHub";
+export const APP_NAME = "Pulse";
+export const APP_DESCRIPTOR = "Sales Performance Platform";
+export const APP_TAGLINE = "Every team has a pulse.";
 export const APP_STAGE = "Release Candidate 1";
 export const APP_VERSION = "1.0.0-rc.2";
 // Build number is stable per build (bundler inlines Date.now at import time).

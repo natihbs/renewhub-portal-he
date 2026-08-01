@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 100" role="img" aria-labelledby="pulse-logo-light-title">
+  <title id="pulse-logo-light-title">Pulse</title>
+  <g>
+    <path d="M 80.53 69.07 A 36 36 0 1 1 80.53 30.93" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round"/>
+    <path d="M 8 50 L 31 50 L 40 28 L 51 74 L 61 34 L 68 50 L 92 50" fill="none" stroke="#FFC107" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="112" y="68" font-family="Rubik, Heebo, ui-sans-serif, system-ui, sans-serif" font-size="52" font-weight="800" letter-spacing="-1" fill="#FFFFFF">Pulse</text>
+</svg>

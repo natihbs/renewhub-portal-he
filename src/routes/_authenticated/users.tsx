@@ -34,9 +34,9 @@ export const Route = createFileRoute("/_authenticated/users")({
   beforeLoad: () => requireRole(["admin"]),
   head: () => ({
     meta: [
-      { title: "ניהול משתמשים · RenewHub" },
+      { title: "ניהול משתמשים · Pulse" },
       { name: "description", content: "ניהול חשבונות משתמשים, תפקידים וצוותים" },
-      { property: "og:title", content: "ניהול משתמשים · RenewHub" },
+      { property: "og:title", content: "ניהול משתמשים · Pulse" },
       { property: "og:description", content: "ניהול חשבונות משתמשים, תפקידים וצוותים" },
     ],
   }),

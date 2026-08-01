@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
- * Generic, RLS-scoped data access for RenewHub business entities.
+ * Generic, RLS-scoped data access for Pulse business entities.
  *
  * Every call runs as the signed-in user (never the service role), so the
  * database policies are the single source of authorization. The table

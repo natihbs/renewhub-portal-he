@@ -109,9 +109,9 @@ function avgScoreFor(feedback: Feedback[], repId?: string) {
 export const Route = createFileRoute("/_authenticated/feedback")({
   head: () => ({
     meta: [
-      { title: "מרכז האזנות חכם · RenewHub" },
+      { title: "מרכז האזנות חכם · Pulse" },
       { name: "description", content: "מרכז ניהול איכות שיחות: תור האזנות, ניתוח חוזקות וחולשות, תוכנית אימון ויומן האזנות" },
-      { property: "og:title", content: "מרכז האזנות חכם · RenewHub" },
+      { property: "og:title", content: "מרכז האזנות חכם · Pulse" },
       { property: "og:description", content: "ניהול איכות שיחות ברמת ארגון: תור, ניתוח, מפת חום ותוכניות אימון" },
     ],
   }),

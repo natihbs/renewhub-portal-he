@@ -32,10 +32,10 @@ export const Route = createFileRoute("/_authenticated/representatives")({
   beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
-      { title: "ניהול נציגים · RenewHub" },
+      { title: "ניהול נציגים · Pulse" },
       { name: "description", content: "ניהול מחזור החיים של נציגים: יצירה, עריכה, השבתה, העברת צוות ומחיקה" },
-      { property: "og:title", content: "ניהול נציגים · RenewHub" },
-      { property: "og:description", content: "ניהול מחזור החיים של נציגים ב-RenewHub" },
+      { property: "og:title", content: "ניהול נציגים · Pulse" },
+      { property: "og:description", content: "ניהול מחזור החיים של נציגים ב-Pulse" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],

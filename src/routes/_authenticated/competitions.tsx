@@ -21,9 +21,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const Route = createFileRoute("/_authenticated/competitions")({
   head: () => ({
     meta: [
-      { title: "תחרויות · RenewHub" },
+      { title: "תחרויות · Pulse" },
       { name: "description", content: "תחרויות פעילות, ניקוד וטבלת מובילים" },
-      { property: "og:title", content: "תחרויות · RenewHub" },
+      { property: "og:title", content: "תחרויות · Pulse" },
       { property: "og:description", content: "תחרויות פעילות, ניקוד וטבלת מובילים" },
     ],
   }),

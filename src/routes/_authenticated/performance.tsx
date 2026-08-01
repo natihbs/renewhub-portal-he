@@ -36,9 +36,9 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 export const Route = createFileRoute("/_authenticated/performance")({
   head: () => ({
     meta: [
-      { title: "ביצועים · RenewHub" },
+      { title: "ביצועים · Pulse" },
       { name: "description", content: "מרכז ניהול ביצועים לצוותי חידושים - מעקב יעדים, מגמות וסדר עדיפות לליווי" },
-      { property: "og:title", content: "ביצועים · RenewHub" },
+      { property: "og:title", content: "ביצועים · Pulse" },
       { property: "og:description", content: "מרכז ניהול ביצועים לצוותי חידושים" },
     ],
   }),

@@ -29,7 +29,8 @@ import { ModeToggle } from "@/components/ModeToggle";
 import { AboutDialog } from "@/components/AboutDialog";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { CloudRepsSync } from "@/components/CloudRepsSync";
-import { APP_NAME, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_DATE } from "@/lib/app-meta";
+import { PulseLogo } from "@/components/PulseLogo";
+import { APP_NAME, APP_DESCRIPTOR, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_DATE } from "@/lib/app-meta";
 
 
 type NavItem = { to: string; label: string; icon: typeof Home; roles?: Array<"admin" | "manager" | "representative">; managerOnly?: boolean; adminOnly?: boolean };
@@ -58,10 +59,10 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
         to={item.to as string}
         onClick={onClick}
         className={cn(
-          "flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-3 py-2.5 text-sm font-medium transition-colors sm:pe-9",
+          "flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-[9px] py-2.5 text-sm font-medium transition-colors sm:pe-9 border-s-[3px]",
           active
-            ? "bg-primary text-primary-foreground shadow-soft"
-            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-soft border-s-brand-accent"
+            : "border-s-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         )}
       >
         <Icon className="h-4 w-4 shrink-0" />
@@ -73,7 +74,9 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
         className={cn(
           "absolute end-1 top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-md transition-opacity sm:end-2 sm:h-6 sm:w-6",
           pinned ? "opacity-100" : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
-          active ? "text-primary-foreground/80 hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+          active
+            ? "text-sidebar-primary-foreground/80 hover:text-sidebar-primary-foreground"
+            : "text-sidebar-foreground/55 hover:text-sidebar-foreground"
         )}
         aria-label={pinned ? `הסרת ${item.label} מהמועדפים` : `הוספת ${item.label} למועדפים`}
       >
@@ -104,17 +107,17 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="flex flex-col gap-1 p-3">
       {pinned.length > 0 && (
         <>
-          <div className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-            <Star className="h-3 w-3 fill-current text-primary" />
+          <div className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/60 flex items-center gap-1.5">
+            <Star className="h-3 w-3 fill-current text-brand-accent" />
             מועדפים
           </div>
           {pinned.map((n) => (
             <NavRow key={`fav-${n.to}`} item={n} active={pathname === n.to} onClick={onNavigate} />
           ))}
-          <div className="my-2 border-t" />
+          <div className="my-2 border-t border-sidebar-border" />
         </>
       )}
-      <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">ניווט</div>
+      <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/60">ניווט</div>
       {visible.map((n) => (
         <NavRow key={n.to} item={n} active={pathname === n.to} onClick={onNavigate} />
       ))}
@@ -122,15 +125,12 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function Brand() {
+function Brand({ onDark = false }: { onDark?: boolean }) {
   return (
-    <div className="flex items-center gap-2 px-5 py-5 border-b">
-      <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground font-bold shadow-soft">
-        R
-      </div>
-      <div className="min-w-0">
-        <div className="font-extrabold text-base leading-tight">RenewHub</div>
-        <div className="text-xs text-muted-foreground">פורטל חידושים פנימי</div>
+    <div className={cn("flex flex-col gap-1.5 px-5 py-5 border-b", onDark ? "border-sidebar-border" : "")}>
+      <PulseLogo variant={onDark ? "light" : "dark"} className="h-8" />
+      <div className={cn("text-xs", onDark ? "text-sidebar-foreground/65" : "text-muted-foreground")}>
+        מערכת לניהול צוותי מכירות
       </div>
     </div>
   );
@@ -234,7 +234,7 @@ function AboutContentDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       <DialogContent dir="rtl" className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>אודות {APP_NAME}</DialogTitle>
-          <DialogDescription>פורטל חידושים פנימי לצוותי חידושי רכב ודירה.</DialogDescription>
+          <DialogDescription>מערכת לניהול צוותי מכירות · {APP_DESCRIPTOR}</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
           <span className="text-muted-foreground">שלב</span><span className="font-medium">{APP_STAGE}</span>
@@ -317,7 +317,7 @@ function UserMenu() {
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setAboutOpen(true)}>
             <Info className="h-4 w-4 me-2" />
-            אודות RenewHub
+            אודות {APP_NAME}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void handleSignOut()} className="text-destructive focus:text-destructive">
@@ -425,14 +425,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     return <div className="min-h-dvh bg-background">{children}</div>;
   }
 
-  const pageTitle = PAGE_TITLES[pathname] ?? "RenewHub";
+  const pageTitle = PAGE_TITLES[pathname] ?? APP_NAME;
 
   return (
     <div className="min-h-dvh flex bg-background">
       <CloudRepsSync />
       {/* Sidebar - desktop */}
-      <aside className="hidden lg:flex w-64 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground">
-        <Brand />
+      <aside className="hidden lg:flex w-64 shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground">
+        <Brand onDark />
         <NavList />
       </aside>
 
@@ -445,9 +445,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="p-0 sm:w-80 sm:max-w-[85vw]">
+              <SheetContent side="right" className="p-0 sm:w-80 sm:max-w-[85vw] bg-sidebar text-sidebar-foreground">
                 <SheetTitle className="sr-only">תפריט ניווט</SheetTitle>
-                <Brand />
+                <Brand onDark />
                 <div className="px-3 pt-3 lg:hidden">
                   <ModeToggle />
                 </div>
@@ -455,6 +455,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </SheetContent>
             </Sheet>
             {/* Current page title: the only wayfinding cue once the sidebar is gone. */}
+            <PulseLogo variant="symbol" className="h-6 lg:hidden" />
             <h2 className="lg:hidden truncate text-base font-bold">{pageTitle}</h2>
           </div>
 

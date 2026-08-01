@@ -22,9 +22,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 export const Route = createFileRoute("/_authenticated/knowledge")({
   head: () => ({
     meta: [
-      { title: "מרכז ידע · RenewHub" },
+      { title: "מרכז ידע · Pulse" },
       { name: "description", content: "מאמרים, תסריטים והדרכות לצוותי החידושים" },
-      { property: "og:title", content: "מרכז ידע · RenewHub" },
+      { property: "og:title", content: "מרכז ידע · Pulse" },
       { property: "og:description", content: "מאמרים, תסריטים והדרכות לצוותי החידושים" },
     ],
   }),
