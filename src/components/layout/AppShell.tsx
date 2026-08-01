@@ -426,6 +426,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh flex bg-background">
+      <CloudRepsSync />
       {/* Sidebar - desktop */}
       <aside className="hidden lg:flex w-64 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground">
         <Brand />
