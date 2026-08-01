@@ -158,8 +158,9 @@ function RootComponent() {
               </IdeasProvider>
             </UxProvider>
           </AppProvider>
-        </AuthProvider>
-      </AppModeProvider>
+        </AppModeProvider>
+      </AuthProvider>
+
     </QueryClientProvider>
   );
 }
