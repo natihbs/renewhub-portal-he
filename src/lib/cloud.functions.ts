@@ -33,7 +33,8 @@ export const CLOUD_TABLES = [
 ] as const;
 
 export type CloudTable = (typeof CLOUD_TABLES)[number];
-export type Row = Record<string, unknown>;
+export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+export type Row = Record<string, Json>;
 
 type Filters = Record<string, string | number | boolean | null>;
 
@@ -71,7 +72,7 @@ export const cloudList = createServerFn({ method: "POST" })
     if (data.limit) q = q.limit(data.limit);
     const { data: rows, error } = await q;
     fail(error);
-    return (rows ?? []) as Row[];
+    return (rows ?? []) as unknown as Row[];
   });
 
 export const cloudInsert = createServerFn({ method: "POST" })
@@ -86,7 +87,7 @@ export const cloudInsert = createServerFn({ method: "POST" })
       .select()
       .single();
     fail(error);
-    return row as Row;
+    return row as unknown as Row;
   });
 
 export const cloudUpdate = createServerFn({ method: "POST" })
@@ -100,7 +101,7 @@ export const cloudUpdate = createServerFn({ method: "POST" })
       .select()
       .single();
     fail(error);
-    return row as Row;
+    return row as unknown as Row;
   });
 
 export const cloudUpsert = createServerFn({ method: "POST" })
@@ -115,7 +116,7 @@ export const cloudUpsert = createServerFn({ method: "POST" })
       .select()
       .single();
     fail(error);
-    return row as Row;
+    return row as unknown as Row;
   });
 
 export const cloudDelete = createServerFn({ method: "POST" })
