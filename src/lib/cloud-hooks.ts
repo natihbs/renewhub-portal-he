@@ -24,7 +24,7 @@ type ListOpts = {
  * nothing is written to localStorage. Demo Mode simply disables the query and
  * lets the calling store fall back to its in-memory demo data.
  */
-export function useCloudCollection<T extends Row>(table: string, opts: ListOpts = {}) {
+export function useCloudCollection<T>(table: string, opts: ListOpts = {}) {
   const { isDemo } = useAppMode();
   const { user } = useAuth();
   const qc = useQueryClient();
