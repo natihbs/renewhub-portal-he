@@ -639,7 +639,7 @@ function TaskRow({ task, onToggle, onDelete }: { task: { id: string; title: stri
   const priorityLabel = { low: "נמוכה", medium: "בינונית", high: "גבוהה" }[task.priority];
   return (
     <li className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", task.done && "opacity-60")}>
-      <Checkbox checked={task.done} onCheckedChange={onToggle} />
+      <Checkbox checked={task.done} onCheckedChange={onToggle} aria-label={`סימון המשימה ${task.title} כבוצעה`} />
       <div className="min-w-0 flex-1">
         <div className={cn("text-sm truncate", task.done && "line-through")}>{task.title}</div>
         <div className="text-[11px] text-muted-foreground flex items-center gap-2">

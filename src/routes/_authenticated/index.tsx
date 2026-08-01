@@ -460,6 +460,7 @@ function TodayTasks() {
             <Checkbox
               checked={!!done[t]}
               onCheckedChange={(v) => setDone((s) => ({ ...s, [t]: !!v }))}
+              aria-label={t}
             />
             <span className={cn("text-sm", done[t] && "line-through text-muted-foreground")}>{t}</span>
           </label>

@@ -274,7 +274,7 @@ function UserMenu() {
             type="button"
             disabled={loading}
             aria-label="תפריט משתמש"
-            className="flex items-center gap-2 h-10 rounded-full ps-1 pe-2 md:pe-3 hover:bg-accent transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 min-h-11 rounded-full ps-1 pe-2 md:pe-3 hover:bg-accent transition-colors disabled:opacity-50"
           >
             <Avatar className="h-8 w-8">
               <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
