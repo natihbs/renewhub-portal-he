@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/command";
 import { useApp } from "@/lib/store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
-import { TEAM_LABEL } from "@/lib/seed";
 import {
   Home, BarChart3, Trophy, BookOpen, Headphones, Settings,
   UserPlus, PlusCircle, FileSpreadsheet, Users, FileText, MessageSquare,
@@ -44,7 +43,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
   const exportCsv = () => {
     onOpenChange(false);
-    const rows = [["שם", "צוות", "יעד", "ביצוע"], ...state.reps.map((r) => [r.name, TEAM_LABEL[r.team], r.monthlyTarget, r.currentResult])];
+    const rows = [["שם", "צוות", "יעד", "ביצוע"], ...state.reps.map((r) => [r.name, r.teamName, r.monthlyTarget, r.currentResult])];
     const csv = "\uFEFF" + rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -82,10 +81,10 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             <CommandSeparator />
             <CommandGroup heading="נציגים">
               {state.reps.slice(0, 20).map((r) => (
-                <CommandItem key={r.id} value={`נציג ${r.name} ${TEAM_LABEL[r.team]}`} onSelect={() => { onOpenChange(false); openRepWorkspace(r.id); }}>
+                <CommandItem key={r.id} value={`נציג ${r.name} ${r.teamName}`} onSelect={() => { onOpenChange(false); openRepWorkspace(r.id); }}>
                   <Users className="ms-2 h-4 w-4" />
                   <span>{r.name}</span>
-                  <span className="text-xs text-muted-foreground ms-2">· {TEAM_LABEL[r.team]}</span>
+                  <span className="text-xs text-muted-foreground ms-2">· {r.teamName}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { TEAM_LABEL, type Rep } from "@/lib/seed";
+import type { Rep } from "@/lib/seed";
 import { useRepWorkspace, type WorkspaceNote } from "@/lib/rep-workspace";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -302,7 +302,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
           <div className="min-w-0 flex-1">
             <SheetTitle className="text-lg text-start truncate">{rep.name}</SheetTitle>
             <SheetDescription className="text-start flex items-center gap-2 flex-wrap mt-1">
-              <Badge variant="outline" className="font-normal">{TEAM_LABEL[rep.team]}</Badge>
+              <Badge variant="outline" className="font-normal">{rep.teamName}</Badge>
               <StatusBadge s={status} />
               <RiskBadge level={risk.level} />
             </SheetDescription>

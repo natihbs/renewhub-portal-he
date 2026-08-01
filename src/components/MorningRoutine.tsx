@@ -19,10 +19,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useApp, teamSummary } from "@/lib/store";
+import { useApp, teamSummary, teamsFromReps } from "@/lib/store";
 import { useMorning, type UnderwritingIssue, type UnderwritingPriority, type UnderwritingStatus, type ManagerCall } from "@/lib/morning-store";
 import { formatDateIL, formatNum, formatPct, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
-import { TEAM_LABEL, type Rep } from "@/lib/seed";
+import type { Rep } from "@/lib/seed";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 
 const CHECKLIST = [
@@ -47,8 +47,10 @@ export function MorningRoutine() {
   const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
   const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
   const renewalPct = totalTarget > 0 ? (totalResult / totalTarget) * 100 : 0;
-  const carSum = teamSummary(reps, "car");
-  const homeSum = teamSummary(reps, "home");
+  const teamRows = useMemo(
+    () => teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) })),
+    [reps],
+  );
 
   const repsWithData = reps.filter((r) => r.currentResult > 0 || r.lastUpdatedAt);
   const repsMissingData = reps.filter((r) => !(r.currentResult > 0 || r.lastUpdatedAt));
@@ -89,7 +91,7 @@ export function MorningRoutine() {
         {/* Row 1: Data status + Renewal KPI */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DataStatusCard completeness={completeness} withCount={repsWithData.length} missingCount={repsMissingData.length} />
-          <RenewalCard renewalPct={renewalPct} change={change} carPct={carSum.pct} homePct={homeSum.pct} />
+          <RenewalCard renewalPct={renewalPct} change={change} teams={teamRows} />
         </div>
 
         {/* Row 2: Quality check + Priorities */}
@@ -119,8 +121,7 @@ export function MorningRoutine() {
           <div className="lg:col-span-2">
             <MorningUpdateCard
               renewalPct={renewalPct}
-              carSum={carSum}
-              homeSum={homeSum}
+              teams={teamRows}
               reps={reps}
               wdRemaining={wdRemaining}
               totalTarget={totalTarget}
@@ -193,7 +194,7 @@ function QualityCheckCard({ reps, repsMissingData }: { reps: Rep[]; repsMissingD
   const noTarget = reps.filter((r) => !r.monthlyTarget || r.monthlyTarget <= 0);
   const nameCounts = reps.reduce<Record<string, number>>((acc, r) => { acc[r.name] = (acc[r.name] ?? 0) + 1; return acc; }, {});
   const duplicates = reps.filter((r) => nameCounts[r.name] > 1);
-  const unknownTeam = reps.filter((r) => r.team !== "car" && r.team !== "home");
+  const unknownTeam = reps.filter((r) => !r.teamId);
   const stale = reps.filter((r) => r.lastUpdatedAt && (Date.now() - new Date(r.lastUpdatedAt).getTime()) / 86400000 > 1);
   const bigDrops: Rep[] = []; // no daily history; keep hook ready
 
@@ -243,7 +244,7 @@ function QualityCheckCard({ reps, repsMissingData }: { reps: Rep[]; repsMissingD
 }
 
 /* ============ Renewal KPI ============ */
-function RenewalCard({ renewalPct, change, carPct, homePct }: { renewalPct: number; change: number; carPct: number; homePct: number }) {
+function RenewalCard({ renewalPct, change, teams }: { renewalPct: number; change: number; teams: { teamId: string; teamName: string; pct: number }[] }) {
   const m = useMorning();
   const up = change >= 0;
   return (
@@ -260,10 +261,11 @@ function RenewalCard({ renewalPct, change, carPct, homePct }: { renewalPct: numb
       </div>
       <div className="mt-2 text-4xl font-extrabold tracking-tight">{formatPct(renewalPct)}</div>
       <div className="text-xs text-muted-foreground">מול {formatPct(m.yesterdayRenewalPct)} אתמול · ממוצע חודשי {formatPct(m.monthlyAvgRenewalPct)}</div>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <MiniStat label="חידושי רכב" value={formatPct(carPct)} />
-        <MiniStat label="חידושי דירה" value={formatPct(homePct)} />
-      </div>
+      {teams.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {teams.slice(0, 4).map((t) => <MiniStat key={t.teamId} label={t.teamName} value={formatPct(t.pct)} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -374,7 +376,7 @@ function ListeningCard({ reps, feedback, noRecentListening }: { reps: Rep[]; fee
             <Select value={chosen} onValueChange={setChosen}>
               <SelectTrigger><SelectValue placeholder="בחר נציג..." /></SelectTrigger>
               <SelectContent>
-                {reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {TEAM_LABEL[r.team]}</SelectItem>)}
+                {reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.teamName}</SelectItem>)}
               </SelectContent>
             </Select>
             <DialogFooter>
@@ -705,8 +707,8 @@ function AddUwDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChange
 }
 
 /* ============ Morning Update Generator ============ */
-function MorningUpdateCard({ renewalPct, carSum, homeSum, reps, wdRemaining, totalTarget, totalResult }: {
-  renewalPct: number; carSum: ReturnType<typeof teamSummary>; homeSum: ReturnType<typeof teamSummary>;
+function MorningUpdateCard({ renewalPct, teams, reps, wdRemaining, totalTarget, totalResult }: {
+  renewalPct: number; teams: { teamId: string; teamName: string; pct: number; result: number; target: number }[];
   reps: Rep[]; wdRemaining: number; totalTarget: number; totalResult: number;
 }) {
   const m = useMorning();
@@ -726,8 +728,7 @@ function MorningUpdateCard({ renewalPct, carSum, homeSum, reps, wdRemaining, tot
 עדכון בוקר ${formatDateIL(new Date())}
 
 📊 אחוז חידוש כללי: ${formatPct(renewalPct)}
-🚗 חידושי רכב: ${formatPct(carSum.pct)} (${formatNum(carSum.result)}/${formatNum(carSum.target)})
-🏠 חידושי דירה: ${formatPct(homeSum.pct)} (${formatNum(homeSum.result)}/${formatNum(homeSum.target)})
+${teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)} (${formatNum(t.result)}/${formatNum(t.target)})`).join("\n")}
 
 ⭐ מובילים: ${leaders}
 🎯 פוקוס להיום: ${focus}

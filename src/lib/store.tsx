@@ -10,11 +10,13 @@ import {
   type ArticleCategory,
   type Feedback,
   type Role,
-  type Team,
+  UNASSIGNED_TEAM_LABEL,
   CRITERIA,
   type CriterionValue,
 } from "./seed";
 import { useCloudCollection } from "@/lib/cloud-hooks";
+import { useAppMode } from "@/lib/app-mode";
+import { useAuth } from "@/lib/auth";
 
 type Ctx = {
   state: AppState;
@@ -77,7 +79,6 @@ type CompetitionScoreRow = {
 type FeedbackRow = {
   id: string;
   representative_id: string;
-  team_key: string;
   feedback_date: string;
   call_id: string;
   call_type: string;
@@ -161,7 +162,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })),
       feedback: feedback.rows.map((f) => ({
         id: f.id,
-        team: (f.team_key === "home" ? "home" : "car") as Team,
         repId: f.representative_id,
         date: f.feedback_date,
         callId: f.call_id,
@@ -342,7 +342,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         void feedback.insert(
           {
             representative_id: f.repId,
-            team_key: f.team,
             feedback_date: f.date,
             call_id: f.callId,
             call_type: f.callType,
@@ -369,8 +368,18 @@ export function useApp() {
   return ctx;
 }
 
+/**
+ * Real authorization gate: in Live Mode this reflects the signed-in user's
+ * actual Supabase role (admin/manager), never the local demo role switcher.
+ * Demo Mode keeps using the in-memory demo role flag. RLS remains the final
+ * authorization boundary for any cloud write regardless of what this returns.
+ */
 export function useIsManager() {
-  return useApp().state.role === "manager";
+  const { isDemo } = useAppMode();
+  const { isAdmin, isManager } = useAuth();
+  const { state } = useApp();
+  if (isDemo) return state.role === "manager";
+  return isAdmin || isManager;
 }
 
 // Derived helpers
@@ -389,12 +398,27 @@ export function statusForRep(rep: Rep) {
   return { label: "דורש שיפור", tone: "danger" as const };
 }
 
-export function teamSummary(reps: Rep[], team: Team) {
-  const filtered = reps.filter((r) => r.team === team);
+/** Aggregates target/result for one team, identified by its cloud team id (null = unassigned reps). */
+export function teamSummary(reps: Rep[], teamId: string | null) {
+  const filtered = reps.filter((r) => r.teamId === teamId);
   const target = filtered.reduce((a, r) => a + r.monthlyTarget, 0);
   const result = filtered.reduce((a, r) => a + r.currentResult, 0);
   const pct = target > 0 ? (result / target) * 100 : 0;
   return { target, result, pct, count: filtered.length };
+}
+
+/**
+ * Distinct teams actually present among the given reps, in first-seen order.
+ * Used to render per-team UI dynamically instead of hardcoding a fixed set of teams.
+ * Does NOT include empty teams that have no reps yet — use useCloudTeams() for pickers
+ * that must offer every active team (including brand-new, still-empty ones).
+ */
+export function teamsFromReps(reps: Rep[]): { teamId: string; teamName: string }[] {
+  const map = new Map<string, string>();
+  for (const r of reps) {
+    if (r.teamId) map.set(r.teamId, r.teamName || UNASSIGNED_TEAM_LABEL);
+  }
+  return Array.from(map, ([teamId, teamName]) => ({ teamId, teamName }));
 }
 
 export function competitionLeaderboard(comp: Competition) {

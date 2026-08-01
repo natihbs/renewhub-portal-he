@@ -5,7 +5,7 @@ import { useApp } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
 import { listRepresentatives } from "@/lib/rep-admin.functions";
-import type { Team } from "@/lib/seed";
+import { UNASSIGNED_TEAM_LABEL } from "@/lib/seed";
 
 /**
  * In Live Mode representatives come from the cloud only — the local demo seed
@@ -33,7 +33,8 @@ export function CloudRepsSync() {
         .map((r) => ({
           id: r.id,
           name: r.name,
-          team: (r.team_key === "home" ? "home" : "car") as Team,
+          teamId: r.team_id,
+          teamName: r.team_name ?? UNASSIGNED_TEAM_LABEL,
           monthlyTarget: r.monthly_target,
           currentResult: r.current_result,
           lastUpdatedAt: r.updated_at,
