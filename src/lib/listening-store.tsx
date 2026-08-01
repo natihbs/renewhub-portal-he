@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useCloudCollection } from "@/lib/cloud-hooks";
 
 export type Schedule = {
   id: string;
@@ -9,32 +10,17 @@ export type Schedule = {
   status: "planned" | "completed" | "cancelled";
 };
 
-type State = {
+type ScheduleRow = {
+  id: string;
+  representative_id: string;
+  scheduled_on: string;
+  scheduled_time: string;
+  topic: string;
+  status: string;
+};
+
+type Ctx = {
   schedules: Schedule[];
-};
-
-const KEY = "renewhub_listening_v1";
-const uid = () => Math.random().toString(36).slice(2, 10);
-const isoDate = (d = new Date()) => d.toISOString().slice(0, 10);
-const addDays = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return isoDate(d);
-};
-
-function seed(): State {
-  return {
-    schedules: [
-      { id: uid(), repId: "r1", date: isoDate(), time: "10:30", topic: "האזנה יזומה - חידושי רכב", status: "planned" },
-      { id: uid(), repId: "r3", date: isoDate(), time: "12:00", topic: "מעקב שיפור - סגירה", status: "planned" },
-      { id: uid(), repId: "r9", date: addDays(1), time: "09:30", topic: "האזנה שבועית", status: "planned" },
-      { id: uid(), repId: "r11", date: addDays(2), time: "11:00", topic: "האזנה מעמיקה - התנגדויות", status: "planned" },
-      { id: uid(), repId: "r7", date: addDays(3), time: "14:00", topic: "האזנה שבועית", status: "planned" },
-    ],
-  };
-}
-
-type Ctx = State & {
   addSchedule: (s: Omit<Schedule, "id" | "status"> & { status?: Schedule["status"] }) => void;
   updateSchedule: (id: string, p: Partial<Schedule>) => void;
   removeSchedule: (id: string) => void;
@@ -42,42 +28,52 @@ type Ctx = State & {
 };
 
 const C = createContext<Ctx | null>(null);
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+function toRow(p: Partial<Schedule>) {
+  const row: Record<string, string> = {};
+  if (p.repId !== undefined) row.representative_id = p.repId;
+  if (p.date !== undefined) row.scheduled_on = p.date;
+  if (p.time !== undefined) row.scheduled_time = p.time;
+  if (p.topic !== undefined) row.topic = p.topic;
+  if (p.status !== undefined) row.status = p.status;
+  return row;
+}
 
 export function ListeningProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<State>(seed);
-  const [hydrated, setHydrated] = useState(false);
+  const cloud = useCloudCollection<ScheduleRow>("listening_schedules", {
+    order: { column: "scheduled_on", ascending: true },
+  });
+  const [demo, setDemo] = useState<Schedule[]>([]);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setState({ ...seed(), ...JSON.parse(raw) });
-    } catch {}
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
-  }, [state, hydrated]);
-
-  const value = useMemo<Ctx>(() => ({
-    ...state,
-    addSchedule: (s) => setState((st) => ({
-      ...st,
-      schedules: [{ id: uid(), status: s.status ?? "planned", ...s }, ...st.schedules],
-    })),
-    updateSchedule: (id, p) => setState((st) => ({
-      ...st,
-      schedules: st.schedules.map((s) => s.id === id ? { ...s, ...p } : s),
-    })),
-    removeSchedule: (id) => setState((st) => ({
-      ...st,
-      schedules: st.schedules.filter((s) => s.id !== id),
-    })),
-    completeSchedule: (id) => setState((st) => ({
-      ...st,
-      schedules: st.schedules.map((s) => s.id === id ? { ...s, status: "completed" } : s),
-    })),
-  }), [state]);
+  const value = useMemo<Ctx>(() => {
+    if (!cloud.live) {
+      return {
+        schedules: demo,
+        addSchedule: (s) => setDemo((st) => [{ id: uid(), status: s.status ?? "planned", ...s }, ...st]),
+        updateSchedule: (id, p) => setDemo((st) => st.map((s) => (s.id === id ? { ...s, ...p } : s))),
+        removeSchedule: (id) => setDemo((st) => st.filter((s) => s.id !== id)),
+        completeSchedule: (id) =>
+          setDemo((st) => st.map((s) => (s.id === id ? { ...s, status: "completed" } : s))),
+      };
+    }
+    const schedules: Schedule[] = cloud.rows.map((r) => ({
+      id: r.id,
+      repId: r.representative_id,
+      date: r.scheduled_on,
+      time: r.scheduled_time,
+      topic: r.topic,
+      status: (r.status as Schedule["status"]) ?? "planned",
+    }));
+    return {
+      schedules,
+      addSchedule: (s) =>
+        void cloud.insert({ ...toRow({ status: "planned", ...s }) }, "created_by"),
+      updateSchedule: (id, p) => void cloud.update(id, toRow(p)),
+      removeSchedule: (id) => void cloud.remove(id),
+      completeSchedule: (id) => void cloud.update(id, { status: "completed" }),
+    };
+  }, [cloud, demo]);
 
   return <C.Provider value={value}>{children}</C.Provider>;
 }
