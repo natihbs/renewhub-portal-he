@@ -22,7 +22,7 @@ import {
   Headphones, Pencil, StickyNote, Trophy, BookOpen, ArrowUpRight, Plus,
   Trash2, CheckCircle2, Circle, Award, Flame, Star, Target, Calendar,
   TrendingUp, TrendingDown, Minus, User, LineChart as LineChartIcon,
-  Clock, MessageSquare, Sparkles, X,
+  Clock, MessageSquare, Sparkles, ChevronRight,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, CartesianGrid } from "recharts";
 
