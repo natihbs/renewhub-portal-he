@@ -327,7 +327,7 @@ function PerformancePage() {
       />
 
       {/* Summary bar */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <SummaryCard tone="neutral" icon={Users} label="סך נציגים" value={formatNum(summary.total)} sub="בצוותי החידושים" />
         <SummaryCard tone="success" icon={CheckCircle2} label="מעל היעד" value={formatNum(summary.above)} sub="נציגים מקדימים" />
         <SummaryCard tone="warning" icon={Gauge} label="בקצב" value={formatNum(summary.onpace)} sub="עומדים בקצב הצפוי" />
@@ -604,11 +604,11 @@ function SummaryCard({
   return (
     <Card className="card-interactive relative overflow-hidden">
       <span className={cn("absolute inset-y-0 start-0 w-1", t.bar)} aria-hidden />
-      <CardContent className="pt-5 ps-5">
+      <CardContent className="pt-4 ps-4 sm:pt-5 sm:ps-5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-xs font-medium text-muted-foreground">{label}</div>
-            <div className="mt-1.5 text-2xl font-extrabold tabular-nums truncate">{value}</div>
+            <div className="mt-1.5 text-xl sm:text-2xl font-extrabold tabular-nums truncate">{value}</div>
             {sub && <div className="mt-1 text-[11px] text-muted-foreground truncate">{sub}</div>}
           </div>
           <div className={cn("grid h-9 w-9 place-items-center rounded-xl shrink-0", t.icon)}>
