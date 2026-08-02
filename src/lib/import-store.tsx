@@ -19,19 +19,36 @@ export type ImportFieldKey =
   | "__skip__";
 
 export const REQUIRED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget", "currentResult", "updatedAt"];
+
+/**
+ * Fields the import pipeline actually validates AND writes to the cloud. Every other
+ * (non-skip) field key exists only so a matching column can be recognized in the
+ * mapping UI — it is never persisted. Keeping these two lists explicit is what
+ * prevents a field from silently being "accepted" (mappable, validated) while its
+ * values are quietly discarded before the cloud write.
+ */
+export const PERSISTED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget", "currentResult", "updatedAt"];
+
+/** Recognized in a file's headers, but not yet backed by a column/pipeline that saves them. */
+export const UNSUPPORTED_FIELDS: ImportFieldKey[] = [
+  "prevMonthResult", "listeningCount", "lastListeningScore", "openTasks", "latePct", "talkTime", "upgradePct",
+];
+
+export const UNSUPPORTED_FIELD_REASON = "השדה מוצג להתאמה עתידית בלבד — הערכים בעמודה זו אינם נשמרים במערכת כיום.";
+
 export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   name: "שם הנציג",
   team: "צוות",
   monthlyTarget: "יעד חודשי",
   currentResult: "ביצוע נוכחי",
   updatedAt: "תאריך עדכון",
-  prevMonthResult: "ביצוע חודש קודם",
-  listeningCount: "מספר האזנות",
-  lastListeningScore: "ציון האזנה אחרון",
-  openTasks: "משימות פתוחות",
-  latePct: "איחורים",
-  talkTime: "זמן דיבור",
-  upgradePct: "אחוז שדרוגים",
+  prevMonthResult: "ביצוע חודש קודם (לא נשמר כרגע)",
+  listeningCount: "מספר האזנות (לא נשמר כרגע)",
+  lastListeningScore: "ציון האזנה אחרון (לא נשמר כרגע)",
+  openTasks: "משימות פתוחות (לא נשמר כרגע)",
+  latePct: "איחורים (לא נשמר כרגע)",
+  talkTime: "זמן דיבור (לא נשמר כרגע)",
+  upgradePct: "אחוז שדרוגים (לא נשמר כרגע)",
   __skip__: "— התעלם —",
 };
 
@@ -205,19 +222,16 @@ export function normalizeName(name: string): string {
     .join("");
 }
 
+// Only fields that are actually persisted (PERSISTED_FIELDS) are auto-mapped. A
+// column that merely looks like "listenings" or "late %" must never be silently
+// auto-assigned to a field that gets validated and then discarded — the user has to
+// see it's unsupported and, if they still map it, be told nothing will be saved.
 const AUTO_MAP: { field: ImportFieldKey; keywords: string[] }[] = [
   { field: "name", keywords: ["שם הנציג", "שם נציג", "שם עובד", "שם", "נציג", "name", "employee"] },
   { field: "team", keywords: ["צוות", "team", "מחלקה"] },
   { field: "monthlyTarget", keywords: ["יעד חודשי", "יעד", "target"] },
   { field: "currentResult", keywords: ["ביצוע נוכחי", "ביצוע", "תוצאה", "result", "actual"] },
   { field: "updatedAt", keywords: ["תאריך עדכון", "תאריך", "date", "updated"] },
-  { field: "prevMonthResult", keywords: ["ביצוע חודש קודם", "חודש קודם", "prev", "previous"] },
-  { field: "listeningCount", keywords: ["מספר האזנות", "האזנות", "listenings"] },
-  { field: "lastListeningScore", keywords: ["ציון האזנה", "ציון", "score"] },
-  { field: "openTasks", keywords: ["משימות פתוחות", "משימות", "tasks"] },
-  { field: "latePct", keywords: ["איחורים", "late"] },
-  { field: "talkTime", keywords: ["זמן דיבור", "talk"] },
-  { field: "upgradePct", keywords: ["אחוז שדרוגים", "שדרוגים", "upgrade"] },
 ];
 
 export function autoMap(headers: string[]): Record<string, ImportFieldKey> {

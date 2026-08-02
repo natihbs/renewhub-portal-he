@@ -54,16 +54,20 @@ type SettingsRow = {
   last_refresh_at: string | null;
   refresh_status: string;
   data_as_of: string | null;
+  /** @deprecated mislabeled as a renewal rate; replaced by yesterday_achievement_pct. */
   yesterday_renewal_pct: number;
+  /** @deprecated mislabeled as a renewal rate; replaced by monthly_avg_achievement_pct. */
   monthly_avg_renewal_pct: number;
+  yesterday_achievement_pct: number;
+  monthly_avg_achievement_pct: number;
 };
 
 type Ctx = {
   lastRefreshAt: string | null;
   refreshStatus: RefreshStatus;
   dataAsOf: string;
-  yesterdayRenewalPct: number;
-  monthlyAvgRenewalPct: number;
+  yesterdayAchievementPct: number;
+  monthlyAvgAchievementPct: number;
   managerCalls: ManagerCall[];
   underwriting: UnderwritingIssue[];
   savedUpdateTemplate: string | null;
@@ -106,8 +110,8 @@ export function MorningProvider({ children }: { children: ReactNode }) {
         lastRefreshAt: null,
         refreshStatus: "complete",
         dataAsOf: isoDate(new Date(Date.now() - 24 * 3600e3)),
-        yesterdayRenewalPct: 0,
-        monthlyAvgRenewalPct: 0,
+        yesterdayAchievementPct: 0,
+        monthlyAvgAchievementPct: 0,
         managerCalls: demoCalls,
         underwriting: demoIssues,
         savedUpdateTemplate: demoTemplate,
@@ -151,8 +155,10 @@ export function MorningProvider({ children }: { children: ReactNode }) {
       lastRefreshAt: s?.last_refresh_at ?? null,
       refreshStatus: (s?.refresh_status as RefreshStatus) ?? "complete",
       dataAsOf: s?.data_as_of ?? isoDate(new Date(Date.now() - 24 * 3600e3)),
-      yesterdayRenewalPct: s?.yesterday_renewal_pct ?? 0,
-      monthlyAvgRenewalPct: s?.monthly_avg_renewal_pct ?? 0,
+      // New column is authoritative; fall back to the deprecated renewal-named column
+      // for any row written before this migration, then to 0.
+      yesterdayAchievementPct: s?.yesterday_achievement_pct ?? s?.yesterday_renewal_pct ?? 0,
+      monthlyAvgAchievementPct: s?.monthly_avg_achievement_pct ?? s?.monthly_avg_renewal_pct ?? 0,
       managerCalls,
       underwriting,
       savedUpdateTemplate: s?.saved_update_template ?? null,

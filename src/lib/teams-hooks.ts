@@ -3,8 +3,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
 import { listRepresentatives } from "@/lib/rep-admin.functions";
+import { DEFAULT_KPI_PROFILE, type KpiProfile } from "@/lib/performance-domain";
 
-export type CloudTeam = { id: string; name: string; active: boolean };
+export type CloudTeam = { id: string; name: string; active: boolean; kpiProfile: KpiProfile };
 
 /**
  * Every active team visible to the signed-in user under RLS (admins see all
@@ -27,6 +28,13 @@ export function useCloudTeams() {
     staleTime: 30_000,
   });
 
-  const teams: CloudTeam[] = (query.data?.teams ?? []).filter((t) => t.active);
+  const teams: CloudTeam[] = (query.data?.teams ?? [])
+    .filter((t) => t.active)
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      active: t.active,
+      kpiProfile: (t.kpi_profile === "renewals" ? "renewals" : DEFAULT_KPI_PROFILE) as KpiProfile,
+    }));
   return { teams, isLoading: query.isLoading };
 }

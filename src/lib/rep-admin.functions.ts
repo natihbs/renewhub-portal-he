@@ -87,7 +87,7 @@ export const listRepresentatives = createServerFn({ method: "GET" })
         .from("representatives")
         .select("id, name, team_id, monthly_target, current_result, external_ref, user_id, active, deactivated_at, created_at, updated_at")
         .order("created_at", { ascending: false }),
-      ctx.supabase.from("teams").select("id, name, manager_id, active"),
+      ctx.supabase.from("teams").select("id, name, manager_id, active, kpi_profile"),
       ctx.supabase.from("profiles").select("id, full_name, email, active, team_id, representative_id"),
     ]);
     if (rErr) throw new Error(rErr.message);
@@ -112,7 +112,7 @@ export const listRepresentatives = createServerFn({ method: "GET" })
             : null,
         };
       }),
-      teams: (teams ?? []) as { id: string; name: string; manager_id: string | null; active: boolean }[],
+      teams: (teams ?? []) as { id: string; name: string; manager_id: string | null; active: boolean; kpi_profile: string }[],
       people: (profiles ?? []) as any[],
       isAdmin: roles.includes("admin"),
       isManager: roles.includes("manager"),

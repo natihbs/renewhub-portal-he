@@ -7,6 +7,7 @@ import {
   Mail, Megaphone, Sparkles,
 } from "lucide-react";
 import { useApp, useIsManager, teamSummary, teamsFromReps, competitionLeaderboard } from "@/lib/store";
+import { calculateAchievement } from "@/lib/performance-domain";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
 import { useComms, KIND_LABEL, type CommsKind, type CommsMessage } from "@/lib/comms-store";
 import { PageHeader } from "@/components/ui/page-header";
@@ -105,12 +106,12 @@ function useGenerationInputs() {
     const reps = state.reps;
     const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
     const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
-    const overall = totalTarget > 0 ? (totalResult / totalTarget) * 100 : 0;
+    const overall = calculateAchievement(totalResult, totalTarget);
     const teams = teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) }));
 
     const withPct = reps.map((r) => ({
       ...r,
-      pct: r.monthlyTarget > 0 ? (r.currentResult / r.monthlyTarget) * 100 : 0,
+      pct: calculateAchievement(r.currentResult, r.monthlyTarget),
     }));
     const above = withPct.filter((r) => r.pct >= 100).sort((a, b) => b.pct - a.pct);
     const below = withPct.filter((r) => r.pct < 80).sort((a, b) => a.pct - b.pct);
@@ -373,7 +374,7 @@ function EmailPreview({ title, body }: { title: string; body: string }) {
     <div className="rounded-xl border bg-card">
       <div className="border-b p-3 text-sm">
         <div><span className="text-muted-foreground">מאת: </span>ניהול Pulse</div>
-        <div><span className="text-muted-foreground">אל: </span>צוות חידושים</div>
+        <div><span className="text-muted-foreground">אל: </span>הצוות</div>
         <div><span className="text-muted-foreground">נושא: </span><b>{title}</b></div>
       </div>
       <div className="whitespace-pre-wrap p-4 text-[14px] leading-relaxed">{body}</div>
@@ -559,7 +560,7 @@ function generateMorning(i: Inputs): { title: string; body: string } {
   lines.push(`${greeting()} ☀️`);
   lines.push(`עדכון בוקר · ${date}`);
   lines.push("");
-  lines.push(`אחוז חידושים כללי: ${formatPct(i.overall)} (${formatNum(i.totalResult)} מתוך ${formatNum(i.totalTarget)})`);
+  lines.push(`אחוז עמידה ביעד כללי: ${formatPct(i.overall)} (${formatNum(i.totalResult)} מתוך ${formatNum(i.totalTarget)})`);
   lines.push(`נותרו ${i.workdaysLeft} ימי עבודה בחודש.`);
   lines.push("");
   for (const t of i.teams) {
@@ -577,7 +578,7 @@ function generateMorning(i: Inputs): { title: string; body: string } {
     lines.push(`• ליווי צמוד ל-${names}`);
   }
   lines.push("• סגירת שיחות פתוחות מאתמול לפני 10:00");
-  lines.push("• דגש על שדרוגים בשיחות חידוש");
+  lines.push("• דגש על שיחות איכותיות והצעת שדרוג בסיום השיחה");
   lines.push("");
   lines.push("בואו נעשה חודש מצוין 💪");
   return { title: `עדכון בוקר · ${date}`, body: lines.join("\n") };
@@ -588,7 +589,7 @@ function generateEvening(i: Inputs): { title: string; body: string } {
   const lines: string[] = [];
   lines.push(`סיכום יום · ${date} 🌙`);
   lines.push("");
-  lines.push(`סה"כ חידושים החודש: ${formatNum(i.totalResult)} (${formatPct(i.overall)} מהיעד)`);
+  lines.push(`סה"כ תוצאה החודש: ${formatNum(i.totalResult)} (${formatPct(i.overall)} מהיעד)`);
   lines.push(i.teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)}`).join(" · "));
   lines.push("");
   if (i.above.length) {
@@ -651,7 +652,7 @@ function generateCongrats(i: Inputs, repId: string): { title: string; body: stri
   lines.push("");
   if (rep.pct >= 100) {
     lines.push(`עמדת ביעד עם ${formatPct(rep.pct)} - זה הישג משמעותי.`);
-    lines.push(`${formatNum(rep.currentResult)} חידושים בצוות ${rep.teamName} מדברים בעד עצמם.`);
+    lines.push(`${formatNum(rep.currentResult)} תוצאות בצוות ${rep.teamName} מדברות בעד עצמן.`);
   } else if (rep.pct >= 80) {
     lines.push(`אתה בקצב מעולה - ${formatPct(rep.pct)} מהיעד ועדיין נותרו ${i.workdaysLeft} ימי עבודה.`);
     lines.push("ההתמדה שלך ניכרת בכל שיחה.");
@@ -685,7 +686,7 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   lines.push("הצעה קונקרטית:");
   lines.push("• נזמן פגישה קצרה של 15 דק' לעבור יחד על שיחה או שתיים.");
   lines.push("• נתמקד בשלב טיפול בהתנגדויות ובהצעת שדרוג בסיום.");
-  lines.push(`• יעד ביניים: ${Math.ceil(Math.max(gap, 5) / Math.max(i.workdaysLeft, 1))} חידושים ביום ב-${i.workdaysLeft} הימים הקרובים.`);
+  lines.push(`• יעד ביניים: ${Math.ceil(Math.max(gap, 5) / Math.max(i.workdaysLeft, 1))} יחידות ביום ב-${i.workdaysLeft} הימים הקרובים.`);
   lines.push("");
   // Encouragement
   lines.push("אני בטוח שיש לך את הכלים להגיע לשם, ואני כאן לכל שאלה או ליווי.");

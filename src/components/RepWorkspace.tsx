@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
+import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk } from "@/lib/performance-domain";
 import { toast } from "sonner";
 import {
   Headphones, Pencil, StickyNote, Plus,
@@ -29,14 +30,7 @@ function daysSince(dateStr: string) {
 // ---------- status / risk (derived entirely from real cloud data) ----------
 type Status = "above" | "onpace" | "attention";
 export function statusOf(rep: Rep): Status {
-  const workdays = workdaysInMonth();
-  const passed = Math.max(1, workdaysPassed());
-  const expected = (rep.monthlyTarget / workdays) * passed;
-  const paceDelta = rep.currentResult - expected;
-  const pct = rep.monthlyTarget ? (rep.currentResult / rep.monthlyTarget) * 100 : 0;
-  if (pct >= 100 || paceDelta >= rep.monthlyTarget * 0.05) return "above";
-  if (paceDelta >= -rep.monthlyTarget * 0.05) return "onpace";
-  return "attention";
+  return paceStatus(rep.currentResult, rep.monthlyTarget, workdaysInMonth(), workdaysPassed());
 }
 const STATUS_LABEL: Record<Status, string> = { above: "מעל היעד", onpace: "בקצב", attention: "דורש טיפול" };
 
@@ -46,17 +40,13 @@ type RiskLevel = "low" | "medium" | "high";
  * this rep — no random/fabricated signal (this used to be seeded from a hash of the
  * rep's id, which meant the same rep could be flagged or cleared for reasons that had
  * nothing to do with their actual data).
+ *
+ * Thin wrapper kept for its existing call sites/tests — thresholds live in the shared
+ * performance-domain module (also used by performance.tsx's computeRisk).
  */
 export function riskOf(rep: Rep, avgScore: number | null, daysSinceLastFeedback: number | null): { level: RiskLevel; reasons: string[] } {
-  const pct = rep.monthlyTarget ? (rep.currentResult / rep.monthlyTarget) * 100 : 0;
-  let score = 0;
-  const reasons: string[] = [];
-  if (pct < 80) { score += 2; reasons.push("ביצוע מתחת ל-80% מהיעד"); }
-  else if (pct < 95) { score += 1; reasons.push("ביצוע מתחת לצפוי"); }
-  if (avgScore !== null && avgScore < 60) { score += 2; reasons.push("ציון איכות ממוצע נמוך בהאזנות"); }
-  if (daysSinceLastFeedback === null) { score += 1; reasons.push("אין עדיין משוב מתועד"); }
-  else if (daysSinceLastFeedback > 30) { score += 1; reasons.push("אין משוב עדכני (מעל 30 יום)"); }
-  return { level: score >= 4 ? "high" : score >= 2 ? "medium" : "low", reasons };
+  const pct = calculateAchievement(rep.currentResult, rep.monthlyTarget);
+  return sharedComputeRisk(pct, avgScore, daysSinceLastFeedback);
 }
 
 // ---------- helpers ----------
@@ -119,12 +109,8 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   const { state } = useApp();
   const { getNotes, addNote, updateNote, deleteNote, getTasks, addTask, toggleTask, deleteTask } = useRepWorkspace();
   const status = statusOf(rep);
-  const pct = rep.monthlyTarget ? (rep.currentResult / rep.monthlyTarget) * 100 : 0;
-  const workdays = workdaysInMonth();
-  const passed = Math.max(1, workdaysPassed());
-  const remaining = workdaysRemaining();
-  const perDay = Math.max(0, Math.ceil((rep.monthlyTarget - rep.currentResult) / Math.max(1, remaining)));
-  const forecast = Math.round((rep.currentResult / passed) * workdays);
+  const pct = calculateAchievement(rep.currentResult, rep.monthlyTarget);
+  const { perDay, forecast } = sharedPaceInfo(rep.monthlyTarget, rep.currentResult, workdaysInMonth(), workdaysPassed(), workdaysRemaining());
 
   const repFeedback = useMemo(
     () => state.feedback.filter((f) => f.repId === rep.id).sort((a, b) => (a.date < b.date ? 1 : -1)),

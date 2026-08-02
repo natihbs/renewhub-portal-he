@@ -11,6 +11,7 @@ import type { Rep } from "@/lib/seed";
 import type { Feedback } from "@/lib/feedback-domain";
 import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth, workdaysPassed } from "@/lib/format";
+import { calculateAchievement } from "@/lib/performance-domain";
 import {
   Users2, TrendingUp, TrendingDown, Award, Trophy, PlusCircle, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, AlertTriangle, Bell, ListChecks, Lightbulb, Sparkles, Users, Clock,
@@ -48,7 +49,7 @@ function HomePage() {
 
   const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
   const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
-  const pct = totalTarget > 0 ? (totalResult / totalTarget) * 100 : 0;
+  const pct = calculateAchievement(totalResult, totalTarget);
 
   const wdRemaining = workdaysRemaining();
   const wdTotal = workdaysInMonth();
@@ -64,7 +65,7 @@ function HomePage() {
   const teamGroups = teamsFromReps(reps);
 
   const top3 = [...reps]
-    .map((r) => ({ ...r, pct: r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0 }))
+    .map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, r.monthlyTarget) }))
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 3);
 
@@ -118,15 +119,15 @@ function HomePage() {
       {/* KPI cards */}
       {isManager ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPICard icon={Target} label="יעד חודשי" value={formatNum(totalTarget)} sub={`סה"כ חידושים לצוותים`} trend={{ dir: "up", text: "יעד קבוע" }} />
+          <KPICard icon={Target} label="יעד חודשי" value={formatNum(totalTarget)} sub={`סה"כ יעד לצוותים`} trend={{ dir: "up", text: "יעד קבוע" }} />
           <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(totalResult)} sub={`${formatPct(pct)} מהיעד`} trend={{ dir: diff >= 0 ? "up" : "down", text: `${diff >= 0 ? "+" : ""}${diff} מול הצפוי` }} />
           <KPICard icon={TrendingUp} label="תחזית סוף חודש" value={formatNum(forecast)} sub={onTrack ? "צפוי לעמוד ביעד" : "מתחת ליעד"} trend={{ dir: onTrack ? "up" : "down", text: `${forecast - totalTarget >= 0 ? "+" : ""}${forecast - totalTarget}` }} tone={onTrack ? "success" : "danger"} />
           <KPICard icon={CalendarClock} label="ימי עבודה שנותרו" value={String(wdRemaining)} sub={`מתוך ${wdTotal} בחודש`} trend={{ dir: "up", text: `${perDayNeeded}/יום נדרש` }} />
         </div>
       ) : me ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPICard icon={Target} label="היעד שלי" value={formatNum(me.monthlyTarget)} sub="חידושים לחודש" />
-          <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(me.currentResult)} sub={`${formatPct((me.currentResult / me.monthlyTarget) * 100)} מהיעד`} tone={statusForRep(me).tone} />
+          <KPICard icon={Target} label="היעד שלי" value={formatNum(me.monthlyTarget)} sub="יחידות לחודש" />
+          <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(me.currentResult)} sub={`${formatPct(calculateAchievement(me.currentResult, me.monthlyTarget))} מהיעד`} tone={statusForRep(me).tone} />
           <KPICard icon={TrendingUp} label="נותר ליעד" value={formatNum(Math.max(0, me.monthlyTarget - me.currentResult))} sub={`~${wdRemaining > 0 ? Math.ceil(Math.max(0, me.monthlyTarget - me.currentResult) / wdRemaining) : 0}/יום`} />
           <KPICard icon={CalendarClock} label="ימי עבודה שנותרו" value={String(wdRemaining)} sub={`מתוך ${wdTotal} בחודש`} />
         </div>
@@ -361,7 +362,7 @@ function TeamStatusCard(props: {
               </div>
             </div>
             <div className="text-end text-sm text-muted-foreground">
-              <div>{formatNum(totalResult)} / {formatNum(totalTarget)} חידושים</div>
+              <div>{formatNum(totalResult)} / {formatNum(totalTarget)} יחידות</div>
               <div className="mt-0.5">צפוי להיום: {formatNum(expectedProgress)}</div>
             </div>
           </div>
@@ -369,7 +370,7 @@ function TeamStatusCard(props: {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatBlock label="נותר ליעד" value={formatNum(remainingToTarget)} sub="חידושים" />
+          <StatBlock label="נותר ליעד" value={formatNum(remainingToTarget)} sub="יחידות" />
           <StatBlock label="נדרש ליום" value={formatNum(perDayNeeded)} sub="בממוצע ליום עבודה" />
           <StatBlock
             label="פער מהצפוי"
@@ -559,8 +560,8 @@ function buildInsights(
   diff: number,
 ): string[] {
   const list: string[] = [];
-  if (diff >= 0) list.push(`הצוות מקדים את הקצב ב־${formatNum(diff)} חידושים.`);
-  else list.push(`הצוות מפגר אחרי הקצב ב־${formatNum(Math.abs(diff))} חידושים.`);
+  if (diff >= 0) list.push(`הצוות מקדים את הקצב ב־${formatNum(diff)} יחידות.`);
+  else list.push(`הצוות מפגר אחרי הקצב ב־${formatNum(Math.abs(diff))} יחידות.`);
 
   const groups = teamsFromReps(reps);
   if (groups.length >= 2) {
@@ -575,7 +576,7 @@ function buildInsights(
   }
 
   const withPct = (reps as { id: string; name: string; monthlyTarget: number; currentResult: number }[])
-    .map((r) => ({ ...r, pct: r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0 }))
+    .map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, r.monthlyTarget) }))
     .sort((a, b) => b.pct - a.pct);
   if (withPct[0]) list.push(`${withPct[0].name} מוביל את החודש עם ${formatPct(withPct[0].pct)} עמידה ביעד.`);
   const improved = withPct[Math.min(1, withPct.length - 1)];
