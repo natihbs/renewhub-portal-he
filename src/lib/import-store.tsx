@@ -9,6 +9,8 @@ export type ImportFieldKey =
   | "monthlyTarget"
   | "currentResult"
   | "updatedAt"
+  | "renewalOpportunities"
+  | "completedRenewals"
   | "prevMonthResult"
   | "listeningCount"
   | "lastListeningScore"
@@ -29,6 +31,16 @@ export const REQUIRED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget
  */
 export const PERSISTED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget", "currentResult", "updatedAt"];
 
+/**
+ * Persisted, but only to kpi_values, and only for a row whose resolved team has
+ * kpi_profile "renewals" — never to representatives, never for a generic team. See
+ * processRows()/applyImport() in data-import.tsx for the profile gate.
+ */
+export const RENEWAL_FIELDS: ImportFieldKey[] = ["renewalOpportunities", "completedRenewals"];
+
+export const RENEWAL_FIELDS_WRONG_PROFILE_REASON =
+  'שדות חידוש ממופים, אך הצוות אינו בעל פרופיל "חידושים" — הערכים לא יישמרו לשורה זו.';
+
 /** Recognized in a file's headers, but not yet backed by a column/pipeline that saves them. */
 export const UNSUPPORTED_FIELDS: ImportFieldKey[] = [
   "prevMonthResult", "listeningCount", "lastListeningScore", "openTasks", "latePct", "talkTime", "upgradePct",
@@ -42,6 +54,8 @@ export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   monthlyTarget: "יעד חודשי",
   currentResult: "ביצוע נוכחי",
   updatedAt: "תאריך עדכון",
+  renewalOpportunities: "הזדמנויות חידוש (רק לצוותי חידושים)",
+  completedRenewals: "חידושים שבוצעו (רק לצוותי חידושים)",
   prevMonthResult: "ביצוע חודש קודם (לא נשמר כרגע)",
   listeningCount: "מספר האזנות (לא נשמר כרגע)",
   lastListeningScore: "ציון האזנה אחרון (לא נשמר כרגע)",
@@ -232,6 +246,8 @@ const AUTO_MAP: { field: ImportFieldKey; keywords: string[] }[] = [
   { field: "monthlyTarget", keywords: ["יעד חודשי", "יעד", "target"] },
   { field: "currentResult", keywords: ["ביצוע נוכחי", "ביצוע", "תוצאה", "result", "actual"] },
   { field: "updatedAt", keywords: ["תאריך עדכון", "תאריך", "date", "updated"] },
+  { field: "renewalOpportunities", keywords: ["הזדמנויות חידוש", "הזדמנויות", "opportunities"] },
+  { field: "completedRenewals", keywords: ["חידושים שבוצעו", "חידושים בפועל", "completed renewals", "completedrenewals"] },
 ];
 
 export function autoMap(headers: string[]): Record<string, ImportFieldKey> {

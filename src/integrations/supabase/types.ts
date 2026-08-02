@@ -900,6 +900,7 @@ export type Database = {
           department: string | null
           description: string | null
           id: string
+          kpi_profile: string
           manager_id: string | null
           name: string
           updated_at: string
@@ -910,6 +911,7 @@ export type Database = {
           department?: string | null
           description?: string | null
           id?: string
+          kpi_profile?: string
           manager_id?: string | null
           name: string
           updated_at?: string
@@ -920,8 +922,45 @@ export type Database = {
           department?: string | null
           description?: string | null
           id?: string
+          kpi_profile?: string
           manager_id?: string | null
           name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      kpi_values: {
+        Row: {
+          completed_renewals: number | null
+          created_at: string
+          id: string
+          metric_date: string
+          renewal_opportunities: number | null
+          representative_id: string
+          source_import_id: string | null
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          completed_renewals?: number | null
+          created_at?: string
+          id?: string
+          metric_date: string
+          renewal_opportunities?: number | null
+          representative_id: string
+          source_import_id?: string | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          completed_renewals?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          renewal_opportunities?: number | null
+          representative_id?: string
+          source_import_id?: string | null
+          team_id?: string | null
           updated_at?: string
         }
         Relationships: []

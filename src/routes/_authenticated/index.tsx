@@ -6,12 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useApp, teamSummary, teamsFromReps, statusForRep } from "@/lib/store";
+import { useApp, useIsManager, teamSummary, teamsFromReps, statusForRep } from "@/lib/store";
 import type { Rep } from "@/lib/seed";
 import type { Feedback } from "@/lib/feedback-domain";
 import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth, workdaysPassed } from "@/lib/format";
-import { calculateAchievement } from "@/lib/performance-domain";
+import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
+import { useCloudTeams } from "@/lib/teams-hooks";
+import { renewalTotalsForTeam } from "@/lib/kpi-values";
+import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Users2, TrendingUp, TrendingDown, Award, Trophy, PlusCircle, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, AlertTriangle, Bell, ListChecks, Lightbulb, Sparkles, Users, Clock,
@@ -25,9 +29,9 @@ export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
       { title: "Pulse" },
-      { name: "description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
+      { name: "description", content: "מרכז שליטה ניהולי לצוותי המכירות - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
       { property: "og:title", content: "Pulse" },
-      { property: "og:description", content: "מרכז שליטה ניהולי לצוותי החידושים - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
+      { property: "og:description", content: "מרכז שליטה ניהולי לצוותי המכירות - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
     ],
   }),
   component: HomePage,
@@ -43,8 +47,13 @@ const DEFAULT_TASKS = [
 
 function HomePage() {
   const { state } = useApp();
-  const { reps, announcements, competitions, feedback, role, currentRepId } = state;
-  const isManager = role === "manager";
+  const { reps, announcements, competitions, feedback, currentRepId } = state;
+  // Real authorization gate (matches useIsManager everywhere else): Live Mode checks the
+  // signed-in user's actual Supabase roles, never the Demo-only role switcher directly.
+  // A previous version read state.role here, which defaults to "manager" and is never
+  // set from real auth in Live Mode — a signed-in representative would incorrectly see
+  // the full manager dashboard (all teams, admin actions) instead of just their own data.
+  const isManager = useIsManager();
   const me = reps.find((r) => r.id === currentRepId);
 
   const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
@@ -63,6 +72,10 @@ function HomePage() {
   const onTrack = forecast >= totalTarget;
 
   const teamGroups = teamsFromReps(reps);
+  const { teams: cloudTeams } = useCloudTeams();
+  const profileByTeamId = useMemo(() => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])), [cloudTeams]);
+  const [teamFilter, setTeamFilter] = useState<"all" | string>("all");
+  const visibleTeamGroups = teamFilter === "all" ? teamGroups : teamGroups.filter((t) => t.teamId === teamFilter);
 
   const top3 = [...reps]
     .map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, r.monthlyTarget) }))
@@ -143,10 +156,41 @@ function HomePage() {
 
       {/* Teams */}
       {teamGroups.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {teamGroups.map((t) => (
-            <TeamCard key={t.teamId} teamName={t.teamName} summary={teamSummary(reps, t.teamId)} />
-          ))}
+        <div className="space-y-3">
+          {isManager && teamGroups.length > 1 && (
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">צוותים</div>
+              <Select value={teamFilter} onValueChange={setTeamFilter}>
+                <SelectTrigger className="w-52" aria-label="סינון לפי צוות"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">כל הצוותים</SelectItem>
+                  {teamGroups.map((t) => (
+                    <SelectItem key={t.teamId} value={t.teamId}>
+                      {t.teamName}{(profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals" ? ` (${KPI_PROFILE_LABEL.renewals})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {visibleTeamGroups.map((t) => (
+              <TeamCard
+                key={t.teamId}
+                teamName={t.teamName}
+                summary={teamSummary(reps, t.teamId)}
+                kpiProfile={profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE}
+                renewal={
+                  (profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals"
+                    ? (() => {
+                        const totals = renewalTotalsForTeam(reps.filter((r) => r.teamId === t.teamId).map((r) => r.id), state.kpiValues);
+                        return { totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
+                      })()
+                    : null
+                }
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -229,7 +273,7 @@ function HomePage() {
             <Badge variant="outline">{state.articles.length} מאמרים</Badge>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">מאמרים, תסריטי שיחה והדרכות לצוותי החידושים.</p>
+            <p className="text-sm text-muted-foreground mb-4">מאמרים, תסריטי שיחה והדרכות לצוותי המכירות.</p>
             <Button asChild size="sm">
               <Link to="/knowledge"><BookOpen className="ms-1 h-4 w-4" />פתיחת מרכז הידע</Link>
             </Button>
@@ -472,7 +516,13 @@ function KPICard({
   );
 }
 
-function TeamCard({ teamName, summary }: { teamName: string; summary: ReturnType<typeof teamSummary> }) {
+type TeamCardRenewal = { totals: { opportunities: number | null; completed: number | null }; rate: ReturnType<typeof calculateRenewalRate> };
+
+function TeamCard({ teamName, summary, kpiProfile, renewal }: {
+  teamName: string; summary: ReturnType<typeof teamSummary>;
+  kpiProfile?: KpiProfile;
+  renewal?: TeamCardRenewal | null;
+}) {
   const Icon = Users2;
   const onTrack = summary.pct >= 80;
   return (
@@ -483,6 +533,7 @@ function TeamCard({ teamName, summary }: { teamName: string; summary: ReturnType
             <Icon className="h-4 w-4" />
           </div>
           <span className="truncate">{teamName}</span>
+          {kpiProfile && <Badge variant="secondary" className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[kpiProfile])}>{KPI_PROFILE_LABEL[kpiProfile]}</Badge>}
         </CardTitle>
         <div className="flex items-center gap-2 shrink-0">
           <Badge variant="outline">{summary.count} נציגים</Badge>
@@ -512,6 +563,28 @@ function TeamCard({ teamName, summary }: { teamName: string; summary: ReturnType
           </div>
         </div>
         <Progress value={Math.min(summary.pct, 150)} className="h-2" />
+        {renewal && (
+          <div className="rounded-lg border p-2.5 text-xs">
+            <div className="font-semibold mb-1.5">מדדי חידושים</div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-muted-foreground">הזדמנויות</div>
+                <div className="font-bold">{renewal.totals.opportunities == null ? "—" : formatNum(renewal.totals.opportunities)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">חידושים</div>
+                <div className="font-bold">{renewal.totals.completed == null ? "—" : formatNum(renewal.totals.completed)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">אחוז חידוש</div>
+                <div className="font-bold">{renewal.rate.available ? formatPct(renewal.rate.pct) : "לא זמין"}</div>
+              </div>
+            </div>
+            {!renewal.rate.available && (
+              <div className="mt-1.5 text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[renewal.rate.reason]}</div>
+            )}
+          </div>
+        )}
         <div className="pt-1">
           <Button asChild variant="ghost" size="sm" className="w-full justify-center">
             <Link to="/performance">צפייה בביצועי הצוות</Link>

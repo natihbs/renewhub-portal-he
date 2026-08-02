@@ -28,8 +28,10 @@ import {
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import {
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
-  PACE_STATUS_LABEL,
+  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, type KpiProfile,
 } from "@/lib/performance-domain";
+import { renewalTotalsForTeam, type RenewalTotals } from "@/lib/kpi-values";
+import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, type RenewalRateResult } from "@/lib/renewal-rate";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -42,9 +44,9 @@ export const Route = createFileRoute("/_authenticated/performance")({
   head: () => ({
     meta: [
       { title: "ביצועים · Pulse" },
-      { name: "description", content: "מרכז ניהול ביצועים לצוותי חידושים - מעקב יעדים, מגמות וסדר עדיפות לליווי" },
+      { name: "description", content: "מרכז ניהול ביצועים לצוותי מכירות - מעקב יעדים, מגמות וסדר עדיפות לליווי" },
       { property: "og:title", content: "ביצועים · Pulse" },
-      { property: "og:description", content: "מרכז ניהול ביצועים לצוותי חידושים" },
+      { property: "og:description", content: "מרכז ניהול ביצועים לצוותי מכירות" },
     ],
   }),
   component: PerformancePage,
@@ -120,11 +122,20 @@ function PerformancePage() {
   const isManager = useIsManager();
   const { open: openWorkspace } = useRepWorkspace();
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
+  const { teams: cloudTeams } = useCloudTeams();
+  const profileByTeamId = useMemo(() => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])), [cloudTeams]);
+  const profileFor = (teamId: string | null) => (teamId ? profileByTeamId.get(teamId) ?? DEFAULT_KPI_PROFILE : DEFAULT_KPI_PROFILE);
+  const renewalTeams = useMemo(
+    () => teamOptions.filter((t) => profileFor(t.teamId) === "renewals"),
+    [teamOptions, profileByTeamId]
+  );
 
   const [query, setQuery] = useState("");
   const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("pct_desc");
+
+  const selectedTeamProfile = teamFilter !== "all" ? profileFor(teamFilter) : null;
 
   const scoped = isManager ? state.reps : state.reps.filter((r) => r.id === state.currentRepId);
 
@@ -177,7 +188,27 @@ function PerformancePage() {
     return { total, above, onpace, attention, avgPct, teamTarget, teamForecast, forecastPct };
   }, [enriched]);
 
-  
+  // Renewal-specific KPIs, only ever computed for a team whose profile actually
+  // supports them — never derived from monthlyTarget/currentResult.
+  const selectedRenewal = useMemo(() => {
+    if (selectedTeamProfile !== "renewals") return null;
+    const repIds = filtered.map((e) => e.rep.id);
+    const totals = renewalTotalsForTeam(repIds, state.kpiValues);
+    const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
+    return { totals, rate };
+  }, [selectedTeamProfile, filtered, state.kpiValues]);
+
+  const renewalsByTeam = useMemo(() => {
+    if (teamFilter !== "all") return [];
+    return renewalTeams.map((t) => {
+      const repIds = state.reps.filter((r) => r.teamId === t.teamId).map((r) => r.id);
+      const totals = renewalTotalsForTeam(repIds, state.kpiValues);
+      const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
+      return { teamId: t.teamId, teamName: t.teamName, totals, rate };
+    });
+  }, [teamFilter, renewalTeams, state.reps, state.kpiValues]);
+
+
 
   const insights = useMemo(() => buildInsights(enriched), [enriched]);
   const coaching = useMemo(
@@ -239,7 +270,7 @@ function PerformancePage() {
 
       {/* Summary bar */}
       <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <SummaryCard tone="neutral" icon={Users} label="סך נציגים" value={formatNum(summary.total)} sub="בצוותי החידושים" />
+        <SummaryCard tone="neutral" icon={Users} label="סך נציגים" value={formatNum(summary.total)} sub="בכלל הצוותים" />
         <SummaryCard tone="success" icon={CheckCircle2} label="מעל היעד" value={formatNum(summary.above)} sub="נציגים מקדימים" />
         <SummaryCard tone="warning" icon={Gauge} label="בקצב" value={formatNum(summary.onpace)} sub="עומדים בקצב הצפוי" />
         <SummaryCard tone="danger" icon={AlertTriangle} label="דורש טיפול" value={formatNum(summary.attention)} sub="מתחת לקצב הנדרש" />
@@ -252,6 +283,39 @@ function PerformancePage() {
           sub={`מתוך יעד ${formatNum(summary.teamTarget)} · ${formatPct(summary.forecastPct)}`}
         />
       </div>
+
+      {/* Renewal-specific KPIs — only for a renewals-profile team, never mixed into the universal table */}
+      {selectedRenewal && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              מדדי חידושים · {teamOptions.find((t) => t.teamId === teamFilter)?.teamName}
+              <Badge variant="secondary" className="bg-primary/10 text-primary">{KPI_PROFILE_LABEL.renewals}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RenewalStatRow totals={selectedRenewal.totals} rate={selectedRenewal.rate} />
+          </CardContent>
+        </Card>
+      )}
+      {teamFilter === "all" && renewalsByTeam.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">חידושים לפי צוות</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              מוצג בנפרד מהטבלה הכללית — אחוז חידוש קיים רק לצוותים עם פרופיל "{KPI_PROFILE_LABEL.renewals}" ונתוני חידוש אמיתיים.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {renewalsByTeam.map((t) => (
+              <div key={t.teamId} className="rounded-xl border p-3">
+                <div className="font-semibold text-sm mb-2">{t.teamName}</div>
+                <RenewalStatRow totals={t.totals} rate={t.rate} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Insights + Coaching */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -343,7 +407,11 @@ function PerformancePage() {
               <SelectTrigger><SelectValue placeholder="צוות" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">כל הצוותים</SelectItem>
-                {teamOptions.map((t) => <SelectItem key={t.teamId} value={t.teamId}>{t.teamName}</SelectItem>)}
+                {teamOptions.map((t) => (
+                  <SelectItem key={t.teamId} value={t.teamId}>
+                    {t.teamName}{profileFor(t.teamId) === "renewals" ? ` (${KPI_PROFILE_LABEL.renewals})` : ""}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
@@ -524,6 +592,23 @@ function SummaryCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function RenewalStatRow({ totals, rate }: { totals: RenewalTotals; rate: RenewalRateResult }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <MobileStat label="הזדמנויות חידוש" value={totals.opportunities == null ? "אין נתונים" : formatNum(totals.opportunities)} />
+      <MobileStat label="חידושים שבוצעו" value={totals.completed == null ? "אין נתונים" : formatNum(totals.completed)} />
+      <MobileStat
+        label="אחוז חידוש"
+        value={rate.available ? formatPct(rate.pct) : "לא זמין"}
+        tone={rate.available ? (rate.pct >= 80 ? "success" : undefined) : undefined}
+      />
+      {!rate.available && (
+        <div className="sm:col-span-3 text-xs text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[rate.reason]}</div>
+      )}
+    </div>
   );
 }
 

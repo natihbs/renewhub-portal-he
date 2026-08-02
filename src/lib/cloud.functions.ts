@@ -30,6 +30,7 @@ export const CLOUD_TABLES = [
   "notifications",
   "morning_checklist",
   "morning_settings",
+  "kpi_values",
 ] as const;
 
 export type CloudTable = (typeof CLOUD_TABLES)[number];

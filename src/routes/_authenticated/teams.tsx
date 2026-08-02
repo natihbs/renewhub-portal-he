@@ -27,15 +27,16 @@ import { formatDateIL } from "@/lib/format";
 import {
   listTeams, getTeamDetails, createTeam, updateTeam, deleteTeam, setTeamActive, setUserTeam,
 } from "@/lib/team-admin.functions";
+import { type KpiProfile, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS } from "@/lib/performance-domain";
 
 export const Route = createFileRoute("/_authenticated/teams")({
   beforeLoad: () => requireRole(["admin", "manager"]),
   head: () => ({
     meta: [
       { title: "ניהול צוותים · Pulse" },
-      { name: "description", content: "ניהול צוותי חידושים, מנהלים ונציגים" },
+      { name: "description", content: "ניהול צוותי מכירות, מנהלים ונציגים" },
       { property: "og:title", content: "ניהול צוותים · Pulse" },
-      { property: "og:description", content: "ניהול צוותי חידושים, מנהלים ונציגים" },
+      { property: "og:description", content: "ניהול צוותי מכירות, מנהלים ונציגים" },
     ],
   }),
   component: TeamsPage,
@@ -48,6 +49,7 @@ type TeamRow = {
   description: string | null;
   manager_id: string | null;
   active: boolean;
+  kpi_profile: KpiProfile;
   created_at: string;
   member_count: number;
   rep_count: number;
@@ -83,6 +85,10 @@ function personName(p: { full_name: string | null; email: string | null } | unde
   return p?.full_name || p?.email || "—";
 }
 
+function KpiProfileBadge({ profile }: { profile: KpiProfile }) {
+  return <Badge variant="secondary" className={KPI_PROFILE_BADGE_CLASS[profile]}>{KPI_PROFILE_LABEL[profile]}</Badge>;
+}
+
 function TeamsPage() {
   const list = useServerFn(listTeams);
   const qc = useQueryClient();
@@ -98,6 +104,7 @@ function TeamsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [managerFilter, setManagerFilter] = useState("all");
+  const [profileFilter, setProfileFilter] = useState<"all" | KpiProfile>("all");
   const [sortBy, setSortBy] = useState<"name" | "created" | "members">("name");
   const [openTeamId, setOpenTeamId] = useState<string | null>(null);
   const [editTeam, setEditTeam] = useState<TeamRow | null>(null);
@@ -122,6 +129,7 @@ function TeamsPage() {
       if (statusFilter === "inactive" && t.active) return false;
       if (managerFilter === NONE && t.manager_id) return false;
       if (managerFilter !== "all" && managerFilter !== NONE && t.manager_id !== managerFilter) return false;
+      if (profileFilter !== "all" && (t.kpi_profile ?? DEFAULT_KPI_PROFILE) !== profileFilter) return false;
       return true;
     });
     rows = [...rows].sort((a, b) => {
@@ -130,7 +138,7 @@ function TeamsPage() {
       return a.name.localeCompare(b.name, "he");
     });
     return rows;
-  }, [teams, search, statusFilter, managerFilter, sortBy, peopleById]);
+  }, [teams, search, statusFilter, managerFilter, profileFilter, sortBy, peopleById]);
 
   const del = useServerFn(deleteTeam);
   const toggleActive = useServerFn(setTeamActive);
@@ -156,7 +164,7 @@ function TeamsPage() {
 
       <Card>
         <CardContent className="pt-5 space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="relative">
               <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -183,6 +191,14 @@ function TeamsPage() {
                 {managers.map((m) => (
                   <SelectItem key={m.id} value={m.id}>{personName(m)}</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={profileFilter} onValueChange={(v) => setProfileFilter(v as "all" | KpiProfile)}>
+              <SelectTrigger aria-label="סינון לפי פרופיל KPI"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">כל הפרופילים</SelectItem>
+                <SelectItem value="generic_sales">{KPI_PROFILE_LABEL.generic_sales}</SelectItem>
+                <SelectItem value="renewals">{KPI_PROFILE_LABEL.renewals}</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
@@ -224,6 +240,7 @@ function TeamsPage() {
                     <TableRow>
                       <TableHead>שם הצוות</TableHead>
                       <TableHead>מחלקה / פעילות</TableHead>
+                      <TableHead>פרופיל KPI</TableHead>
                       <TableHead>מנהל משויך</TableHead>
                       <TableHead>נציגים</TableHead>
                       <TableHead>סטטוס</TableHead>
@@ -236,6 +253,7 @@ function TeamsPage() {
                       <TableRow key={t.id} className="cursor-pointer" onClick={() => setOpenTeamId(t.id)}>
                         <TableCell className="font-semibold">{t.name}</TableCell>
                         <TableCell className="text-muted-foreground">{t.department || "—"}</TableCell>
+                        <TableCell><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></TableCell>
                         <TableCell>{t.manager_id ? personName(peopleById.get(t.manager_id)) : "—"}</TableCell>
                         <TableCell>{t.rep_count} / {t.member_count}</TableCell>
                         <TableCell>
@@ -272,6 +290,7 @@ function TeamsPage() {
                       <div>מנהל: {t.manager_id ? personName(peopleById.get(t.manager_id)) : "—"}</div>
                       <div>נציגים: {t.rep_count} / {t.member_count}</div>
                       <div>נוצר: {formatDateIL(t.created_at)}</div>
+                      <div><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></div>
                     </div>
                     <div className="mt-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
                       <RowActions
@@ -387,6 +406,7 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
   const [description, setDescription] = useState(team?.description ?? "");
   const [managerId, setManagerId] = useState(team?.manager_id ?? NONE);
   const [active, setActive] = useState(team?.active ?? true);
+  const [kpiProfile, setKpiProfile] = useState<KpiProfile>(team?.kpi_profile ?? DEFAULT_KPI_PROFILE);
 
   const m = useMutation({
     mutationFn: async () => {
@@ -396,6 +416,7 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
         description: description || null,
         manager_id: managerId === NONE ? null : managerId,
         active,
+        kpi_profile: kpiProfile,
       };
       if (team) return update({ data: { ...payload, team_id: team.id } });
       return create({ data: payload });
@@ -419,7 +440,7 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
           </div>
           <div className="space-y-1">
             <Label htmlFor="team-dep">מחלקה / פעילות</Label>
-            <Input id="team-dep" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="לדוגמה: חידושי רכב" />
+            <Input id="team-dep" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="לדוגמה: מכירות רכב" />
           </div>
           <div className="space-y-1">
             <Label>מנהל משויך</Label>
@@ -436,6 +457,21 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
           <div className="space-y-1">
             <Label htmlFor="team-desc">תיאור</Label>
             <Textarea id="team-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>פרופיל KPI</Label>
+            <Select value={kpiProfile} onValueChange={(v) => setKpiProfile(v as KpiProfile)}>
+              <SelectTrigger aria-label="בחירת פרופיל KPI"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="generic_sales">{KPI_PROFILE_LABEL.generic_sales}</SelectItem>
+                <SelectItem value="renewals">{KPI_PROFILE_LABEL.renewals}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {kpiProfile === "renewals"
+                ? "הצוות יציג גם הזדמנויות חידוש, חידושים שבוצעו ואחוז חידוש בנוסף למדדים הכלליים."
+                : "הצוות יציג יעד, ביצוע ואחוז עמידה ביעד בלבד."}
+            </p>
           </div>
           <div className="flex items-center justify-between rounded-xl border p-3">
             <div>
@@ -500,9 +536,26 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
         description: team!.description,
         manager_id: managerId,
         active: team!.active,
+        kpi_profile: team!.kpi_profile,
       },
     }),
     onSuccess: () => { toast.success("המנהל עודכן"); q.refetch(); onChanged(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const profileM = useMutation({
+    mutationFn: (kpiProfile: KpiProfile) => update({
+      data: {
+        team_id: team!.id,
+        name: team!.name,
+        department: team!.department,
+        description: team!.description,
+        manager_id: team!.manager_id,
+        active: team!.active,
+        kpi_profile: kpiProfile,
+      },
+    }),
+    onSuccess: () => { toast.success("פרופיל ה-KPI עודכן"); q.refetch(); onChanged(); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -543,6 +596,24 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
                 </Select>
               ) : (
                 <div className="text-sm">{team.manager_id ? personName(people.find((p) => p.id === team.manager_id)) : "—"}</div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>פרופיל KPI</Label>
+              {canManage ? (
+                <Select
+                  value={team.kpi_profile ?? DEFAULT_KPI_PROFILE}
+                  onValueChange={(v) => profileM.mutate(v as KpiProfile)}
+                >
+                  <SelectTrigger aria-label="שינוי פרופיל KPI"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="generic_sales">{KPI_PROFILE_LABEL.generic_sales}</SelectItem>
+                    <SelectItem value="renewals">{KPI_PROFILE_LABEL.renewals}</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <KpiProfileBadge profile={team.kpi_profile ?? DEFAULT_KPI_PROFILE} />
               )}
             </div>
 

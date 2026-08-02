@@ -7,7 +7,10 @@ import {
   Mail, Megaphone, Sparkles,
 } from "lucide-react";
 import { useApp, useIsManager, teamSummary, teamsFromReps, competitionLeaderboard } from "@/lib/store";
-import { calculateAchievement } from "@/lib/performance-domain";
+import { calculateAchievement, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
+import { useCloudTeams } from "@/lib/teams-hooks";
+import { renewalTotalsForTeam } from "@/lib/kpi-values";
+import { calculateRenewalRate } from "@/lib/renewal-rate";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
 import { useComms, KIND_LABEL, type CommsKind, type CommsMessage } from "@/lib/comms-store";
 import { PageHeader } from "@/components/ui/page-header";
@@ -102,12 +105,24 @@ function CommsPage() {
 
 function useGenerationInputs() {
   const { state } = useApp();
+  const { teams: cloudTeams } = useCloudTeams();
   return useMemo(() => {
     const reps = state.reps;
     const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
     const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
     const overall = calculateAchievement(totalResult, totalTarget);
     const teams = teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) }));
+
+    // Renewal-specific teams only — never a combined/derived rate across teams that
+    // don't share the metric, and never derived from target/result.
+    const profileByTeamId = new Map(cloudTeams.map((t) => [t.id, t.kpiProfile]));
+    const renewalTeams = teams
+      .filter((t) => (profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals")
+      .map((t) => {
+        const repIds = reps.filter((r) => r.teamId === t.teamId).map((r) => r.id);
+        const totals = renewalTotalsForTeam(repIds, state.kpiValues);
+        return { teamId: t.teamId, teamName: t.teamName, totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
+      });
 
     const withPct = reps.map((r) => ({
       ...r,
@@ -134,8 +149,9 @@ function useGenerationInputs() {
       activeComp, leaderboard,
       listeningsThisWeek,
       workdaysLeft: workdaysRemaining(),
+      renewalTeams,
     };
-  }, [state]);
+  }, [state, cloudTeams]);
 }
 
 function Generator() {
@@ -554,6 +570,22 @@ function EditForm({ msg, onSave }: { msg: CommsMessage; onSave: (p: { title: str
 
 type Inputs = ReturnType<typeof useGenerationInputs>;
 
+/**
+ * Renewal-specific lines, appended as a distinct section after the universal
+ * target/result summary — only for teams whose KPI profile is "renewals" and only
+ * when a real rate is available. Never fabricates a rate and never merges renewal
+ * teams into the universal team breakdown above.
+ */
+export function renewalSectionLines(renewalTeams: Inputs["renewalTeams"]): string[] {
+  const lines: string[] = [];
+  for (const t of renewalTeams) {
+    if (!t.rate.available) continue;
+    lines.push(`🔹 ${t.teamName}: ${formatPct(t.rate.pct)} אחוז חידוש · ${formatNum(t.totals.completed ?? 0)}/${formatNum(t.totals.opportunities ?? 0)}`);
+  }
+  if (lines.length === 0) return [];
+  return ["", "🔄 חידושים:", ...lines];
+}
+
 function generateMorning(i: Inputs): { title: string; body: string } {
   const date = formatDateIL(new Date());
   const lines: string[] = [];
@@ -566,6 +598,7 @@ function generateMorning(i: Inputs): { title: string; body: string } {
   for (const t of i.teams) {
     lines.push(`🔹 ${t.teamName}: ${formatPct(t.pct)} · ${formatNum(t.result)}/${formatNum(t.target)}`);
   }
+  lines.push(...renewalSectionLines(i.renewalTeams));
   lines.push("");
   if (i.top.length) {
     lines.push("⭐ מובילים כרגע:");
@@ -591,6 +624,7 @@ function generateEvening(i: Inputs): { title: string; body: string } {
   lines.push("");
   lines.push(`סה"כ תוצאה החודש: ${formatNum(i.totalResult)} (${formatPct(i.overall)} מהיעד)`);
   lines.push(i.teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)}`).join(" · "));
+  lines.push(...renewalSectionLines(i.renewalTeams));
   lines.push("");
   if (i.above.length) {
     lines.push(`🏆 ${i.above.length} נציגים מעל היעד:`);
@@ -677,7 +711,7 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   // Current challenge
   const gap = rep.monthlyTarget - rep.currentResult;
   if (rep.pct < 80) {
-    lines.push(`ראיתי בנתונים שאנחנו עומדים על ${formatPct(rep.pct)} מהיעד, ונותרו כ-${formatNum(Math.max(gap, 0))} חידושים למטרה החודשית.`);
+    lines.push(`ראיתי בנתונים שאנחנו עומדים על ${formatPct(rep.pct)} מהיעד, ונותרו כ-${formatNum(Math.max(gap, 0))} יחידות למטרה החודשית.`);
   } else {
     lines.push(`אתה נמצא ב-${formatPct(rep.pct)} מהיעד, ויש עוד מרחב לסגור את הפער ולעבור אותו.`);
   }
