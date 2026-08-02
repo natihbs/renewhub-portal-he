@@ -1,4 +1,4 @@
-// App metadata: version, build, changelog, mode toggle.
+// App metadata: version, build, changelog.
 
 export const APP_NAME = "Pulse";
 export const APP_DESCRIPTOR = "Sales Performance Platform";
@@ -22,7 +22,6 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: BUILD_DATE,
     title: "אמון ואמינות",
     items: [
-      'אינדיקציית "מצב הדגמה" קבועה בכותרת עם תזכורת שהנתונים נשמרים רק במחשב זה',
       "חסימת ייבוא קבצים המכילים מידע רגיש: תעודות זהות, טלפונים, אימיילים ומספרי פוליסה",
       "היסטוריית ייבוא מורחבת: תאריך, שעה, קובץ, נציגים שעודכנו, אזהרות ושגיאות",
       'חלון פירוט מלא לכל ייבוא בלחיצה על "פרטים"',
@@ -37,7 +36,6 @@ export const CHANGELOG: ChangelogEntry[] = [
       "חלונית 'אודות' עם גרסה ומספר בילד",
       "עמוד יומן שינויים",
       "כפתור צף לשליחת רעיונות ומשוב",
-      "מתג מצב דמו / מצב חי (בהכנה)",
       "אינדיקציית שמירה גלובלית ומסרים ידידותיים בעברית",
       "ליטוש כללי, נגישות RTL ותיקוני יציבות",
     ],

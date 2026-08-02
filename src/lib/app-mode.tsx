@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useAuth } from "@/lib/auth";
 
 export type AppMode = "demo" | "live";
 
@@ -11,7 +10,7 @@ const DEMO_SESSION_KEY = "renewhub_demo_session";
 type Ctx = {
   mode: AppMode;
   isDemo: boolean;
-  /** True only when demo mode was explicitly requested by a developer/admin. */
+  /** True only in a dev build, with demo mode explicitly requested. Always false in production. */
   canUseDemo: boolean;
   exitDemo: () => void;
 };
@@ -26,7 +25,6 @@ function purgeLegacyModeState() {
 }
 
 export function AppModeProvider({ children }: { children: ReactNode }) {
-  const { isAdmin } = useAuth();
   const [demoRequested, setDemoRequested] = useState(false);
 
   useEffect(() => {
@@ -48,9 +46,11 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<Ctx>(() => {
-    // Demo Mode is allowed only for an explicit request, and only in dev or for admins.
-    const canUseDemo = demoRequested && (import.meta.env.DEV || isAdmin);
-    // Everyone else — including every authenticated production user — is in Live Mode.
+    // Demo Mode is a development-only utility: allowed only for an explicit request
+    // AND only in a dev build. A production build always has import.meta.env.DEV
+    // false, so this branch — and everything gated on isDemo — is unreachable no
+    // matter what URL params or admin status a production visitor has.
+    const canUseDemo = demoRequested && import.meta.env.DEV;
     const mode: AppMode = canUseDemo ? "demo" : "live";
 
     return {
@@ -62,7 +62,7 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
         setDemoRequested(false);
       },
     };
-  }, [demoRequested, isAdmin]);
+  }, [demoRequested]);
 
   return <ModeCtx.Provider value={value}>{children}</ModeCtx.Provider>;
 }
