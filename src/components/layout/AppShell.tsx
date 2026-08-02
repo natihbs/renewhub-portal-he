@@ -145,7 +145,7 @@ function RoleSwitcher() {
   return (
     <div className="flex items-center gap-2">
       <Select value={state.role} onValueChange={(v) => setRole(v as "manager" | "rep")}>
-        <SelectTrigger className="h-9 w-28" aria-label="החלפת תפקיד (הדגמה בלבד)">
+        <SelectTrigger className="h-9 w-28" aria-label="החלפת תפקיד (למפתחים בלבד)">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -448,9 +448,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               <SheetContent side="right" className="p-0 sm:w-80 sm:max-w-[85vw] bg-sidebar text-sidebar-foreground">
                 <SheetTitle className="sr-only">תפריט ניווט</SheetTitle>
                 <Brand onDark />
-                <div className="px-3 pt-3 lg:hidden">
-                  <ModeToggle />
-                </div>
+                {import.meta.env.DEV && (
+                  <div className="px-3 pt-3 lg:hidden">
+                    <ModeToggle />
+                  </div>
+                )}
                 <NavList onNavigate={() => setOpen(false)} />
               </SheetContent>
             </Sheet>
@@ -473,9 +475,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <div className="flex items-center gap-1 shrink-0 sm:gap-2">
-            <div className="hidden lg:block">
-              <ModeToggle />
-            </div>
+            {import.meta.env.DEV && (
+              <div className="hidden lg:block">
+                <ModeToggle />
+              </div>
+            )}
             <div className="hidden md:block">
               <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
             </div>

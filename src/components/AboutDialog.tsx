@@ -33,7 +33,7 @@ export function AboutDialog({ trigger }: { trigger?: ReactNode }) {
             <span className="font-mono">{BUILD_DATE}</span>
           </div>
           <p className="text-xs text-muted-foreground pt-2 border-t">
-            נתוני הדגמה בלבד. אין להזין נתוני לקוחות אמיתיים, מספרי פוליסות או נתונים אישיים.
+            המערכת מיועדת לנתוני ביצועים ניהוליים בלבד. אין להזין נתוני לקוחות אמיתיים, מספרי פוליסות או נתונים אישיים.
           </p>
         </div>
         <DialogFooter className="sm:justify-between gap-2">

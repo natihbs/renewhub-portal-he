@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useApp, useIsManager } from "@/lib/store";
+import { useAppMode } from "@/lib/app-mode";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
 function AdminPage() {
   const isManager = useIsManager();
   const { state, resetAll } = useApp();
+  const { isDemo } = useAppMode();
 
   if (!isManager) {
     return (
@@ -61,21 +63,26 @@ function AdminPage() {
         title="ניהול המערכת"
         description="אזור מרוכז לפעולות ניהול, תכנים ונציגים"
         actions={
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm"><RotateCcw className="ms-1 h-4 w-4" />איפוס נתוני הדגמה</Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>לאפס לנתוני ההדגמה?</AlertDialogTitle>
-                <AlertDialogDescription>כל השינויים שביצעתם יימחקו ותוצג הגרסה ההתחלתית.</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>ביטול</AlertDialogCancel>
-                <AlertDialogAction onClick={() => { resetAll(); toast.success("הנתונים אופסו"); }}>איפוס</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          // Development-only utility: resetAll() only does anything in Demo Mode
+          // (a no-op in Live Mode — see store.tsx), and Demo Mode itself is only ever
+          // reachable in a dev build (see app-mode.tsx). Never rendered in production.
+          isDemo ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm"><RotateCcw className="ms-1 h-4 w-4" />איפוס נתוני הדגמה (למפתחים)</Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>לאפס לנתוני ההדגמה?</AlertDialogTitle>
+                  <AlertDialogDescription>כל השינויים שביצעתם יימחקו ותוצג הגרסה ההתחלתית.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>ביטול</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => { resetAll(); toast.success("הנתונים אופסו"); }}>איפוס</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : undefined
         }
       />
 
