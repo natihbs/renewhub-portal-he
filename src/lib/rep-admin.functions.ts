@@ -284,6 +284,33 @@ export const setRepresentativeTeam = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export type LinkRepresentativeResult = { rep_name: string; from: string | null; to: string | null };
+
+/**
+ * Core of the User ↔ Representative link, factored out of linkRepresentativeUser so
+ * other admin server-function files (e.g. user-admin.functions.ts) can establish/clear
+ * the authoritative representatives.user_id link without duplicating this logic. This
+ * is the ONLY place that should write representatives.user_id — callers must not
+ * update that column directly.
+ */
+export async function linkRepresentativeToUserCore(
+  admin: any,
+  repId: string,
+  userId: string | null,
+): Promise<LinkRepresentativeResult> {
+  const { data: rep } = await admin.from("representatives").select("user_id, name, team_id").eq("id", repId).maybeSingle();
+  if (!rep) throw new Error("הנציג לא נמצא");
+  if (userId) await assertUserFree(admin, userId, repId);
+
+  const { error } = await admin.from("representatives").update({ user_id: userId }).eq("id", repId);
+  if (error) throw new Error(error.message);
+  // Newly-linked user inherits the rep's current team. Unlinking must NOT touch the
+  // previous user's profile — their team membership as a login account stands on its
+  // own regardless of representative linkage.
+  if (userId) await syncLinkedProfileTeam(admin, userId, rep.team_id);
+  return { rep_name: rep.name, from: rep.user_id, to: userId };
+}
+
 export const linkRepresentativeUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { rep_id: string; user_id: string | null }) => {
@@ -294,19 +321,10 @@ export const linkRepresentativeUser = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     await assertAdmin(ctx);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rep } = await supabaseAdmin.from("representatives").select("user_id, name, team_id").eq("id", data.rep_id).maybeSingle();
-    if (!rep) throw new Error("הנציג לא נמצא");
-    if (data.user_id) await assertUserFree(supabaseAdmin, data.user_id, data.rep_id);
-
-    const { error } = await supabaseAdmin.from("representatives").update({ user_id: data.user_id }).eq("id", data.rep_id);
-    if (error) throw new Error(error.message);
-    // Newly-linked user inherits the rep's current team. Unlinking must NOT touch the
-    // previous user's profile — their team membership as a login account stands on its
-    // own regardless of representative linkage.
-    if (data.user_id) await syncLinkedProfileTeam(supabaseAdmin, data.user_id, rep.team_id);
+    const result = await linkRepresentativeToUserCore(supabaseAdmin, data.rep_id, data.user_id);
     await logAudit(supabaseAdmin, ctx, data.user_id ? "rep.user_linked" : "rep.user_unlinked", {
-      rep_id: data.rep_id, name: rep.name, from: rep.user_id, to: data.user_id,
-    }, data.user_id ?? rep.user_id ?? null);
+      rep_id: data.rep_id, name: result.rep_name, from: result.from, to: result.to,
+    }, data.user_id ?? result.from ?? null);
     return { ok: true };
   });
 
