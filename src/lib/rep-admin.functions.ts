@@ -49,7 +49,7 @@ async function assertCanEdit(ctx: Ctx, repId: string) {
  * unlinked/removed from a representative — that profile's team_id must be left alone
  * (a login account's team membership doesn't depend on having a linked representative).
  */
-async function syncLinkedProfileTeam(admin: any, userId: string, teamId: string | null) {
+export async function syncLinkedProfileTeam(admin: any, userId: string, teamId: string | null) {
   let managerId: string | null = null;
   if (teamId) {
     const { data: team } = await admin.from("teams").select("manager_id").eq("id", teamId).maybeSingle();
