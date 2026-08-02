@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { visibleFeedback } from "@/lib/store";
-import type { Feedback } from "@/lib/seed";
+import type { Feedback } from "@/lib/feedback-domain";
 
 // Regression coverage for the Feedback & Listening production-readiness audit,
 // Phase 5 (permissions): a representative must never see draft feedback, another

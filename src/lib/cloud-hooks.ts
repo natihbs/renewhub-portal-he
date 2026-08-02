@@ -15,8 +15,14 @@ import {
 
 type ListOpts = {
   eq?: Record<string, string | number | boolean | null>;
+  /** Match a column against any value in the given list (SQL `IN`). */
+  in?: Record<string, (string | number)[]>;
   order?: { column: string; ascending?: boolean };
   limit?: number;
+  /** Set false to hold the query off even in Live Mode (e.g. a dependent
+   * filter value hasn't resolved yet) — combined with the live check, never
+   * used to override it. */
+  enabled?: boolean;
 };
 
 /**
@@ -36,12 +42,12 @@ export function useCloudCollection<T>(table: string, opts: ListOpts = {}) {
   const deleteFn = useServerFn(cloudDelete);
   const deleteWhereFn = useServerFn(cloudDeleteWhere);
 
-  const live = !isDemo && !!user;
+  const live = !isDemo && !!user && (opts.enabled ?? true);
   const key = useMemo(() => ["cloud", table, opts] as const, [table, opts]);
 
   const query = useQuery({
     queryKey: key,
-    queryFn: async () => (await list({ data: { table, ...opts } })) as T[],
+    queryFn: async () => (await list({ data: { table, eq: opts.eq, in: opts.in, order: opts.order, limit: opts.limit } })) as T[],
     enabled: live,
     staleTime: 15_000,
   });
@@ -97,6 +103,8 @@ export function useCloudCollection<T>(table: string, opts: ListOpts = {}) {
     live,
     rows: (query.data ?? []) as T[],
     isLoading: live && query.isLoading,
+    isError: live && query.isError,
+    error: query.error as Error | null,
     insert,
     update,
     upsert,

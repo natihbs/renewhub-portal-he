@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import type { Feedback, Rep } from "@/lib/seed";
+import type { Rep } from "@/lib/seed";
+import { type Feedback, scoreTone, SCORE_TEXT_CLASS } from "@/lib/feedback-domain";
 import { useRepWorkspace, type WorkspaceNote } from "@/lib/rep-workspace";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   const [openListening, setOpenListening] = useState<Feedback | null>(null);
   const [editingNote, setEditingNote] = useState<WorkspaceNote | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [noteVisibleToRep, setNoteVisibleToRep] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
 
   const summary = useMemo(() => {
@@ -235,7 +237,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                         <TableCell className="text-xs tabular-nums whitespace-nowrap">{formatDateIL(f.date)}</TableCell>
                         <TableCell className="text-xs">{f.listener}</TableCell>
                         <TableCell className="text-end">
-                          <span className={cn("font-bold tabular-nums", f.score >= 85 ? "text-[color:var(--success)]" : f.score >= 70 ? "text-foreground" : "text-primary")}>{f.score}</span>
+                          <span className={cn("font-bold tabular-nums", SCORE_TEXT_CLASS[scoreTone(f.score)])}>{f.score}</span>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate">{f.managerSummary || f.keep || "—"}</TableCell>
                         <TableCell>
@@ -253,7 +255,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
 
           {/* Section 4 - Manager notes */}
           <Section icon={StickyNote} title="הערות מנהל" right={
-            <Button size="sm" variant="outline" onClick={() => { setEditingNote(null); setNoteText(""); }}>
+            <Button size="sm" variant="outline" onClick={() => { setEditingNote(null); setNoteText(""); setNoteVisibleToRep(false); }}>
               <Plus className="ms-1 h-4 w-4" />הוסף הערה
             </Button>
           }>
@@ -261,6 +263,12 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
               <div className="rounded-xl border p-3">
                 <Label className="text-xs">{editingNote ? "עריכת הערה" : "הערה חדשה"}</Label>
                 <Textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="הערה פרטית לתיק הנציג..." className="mt-2 min-h-20" />
+                {!editingNote && (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <Checkbox checked={noteVisibleToRep} onCheckedChange={(v) => setNoteVisibleToRep(v === true)} />
+                    הצג הערה זו גם לנציג/ה (ברירת מחדל: פרטית למנהלים בלבד)
+                  </label>
+                )}
                 <div className="mt-2 flex justify-end gap-2">
                   {editingNote && (
                     <Button variant="ghost" size="sm" onClick={() => { setEditingNote(null); setNoteText(""); }}>ביטול</Button>
@@ -268,8 +276,11 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                   <Button size="sm" onClick={() => {
                     if (!noteText.trim()) return toast.error("יש להזין טקסט");
                     if (editingNote) { updateNote(rep.id, editingNote.id, noteText.trim()); toast.success("ההערה עודכנה"); }
-                    else { addNote(rep.id, noteText.trim()); toast.success("ההערה נוספה"); }
-                    setEditingNote(null); setNoteText("");
+                    else {
+                      addNote(rep.id, noteText.trim(), { isPrivate: !noteVisibleToRep });
+                      toast.success(noteVisibleToRep ? "ההערה נוספה וגלויה לנציג/ה" : "ההערה נוספה כהערה פרטית");
+                    }
+                    setEditingNote(null); setNoteText(""); setNoteVisibleToRep(false);
                   }}>{editingNote ? "שמירה" : "הוספה"}</Button>
                 </div>
               </div>
@@ -280,7 +291,10 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                   <div key={n.id} className="rounded-xl border p-3">
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
                       <span className="inline-flex items-center gap-1"><User className="h-3 w-3" />{n.author} · {formatDateIL(n.date)}</span>
-                      <div className="flex gap-1">
+                      <div className="flex items-center gap-1.5">
+                        {n.isPrivate
+                          ? <Badge variant="outline" className="text-[10px]">פרטי</Badge>
+                          : <Badge className="text-[10px] bg-primary/10 text-primary border-transparent hover:bg-primary/10">גלוי לנציג/ה</Badge>}
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setEditingNote(n); setNoteText(n.text); }}><Pencil className="h-3 w-3" /></Button>
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { deleteNote(rep.id, n.id); toast.success("ההערה נמחקה"); }}><Trash2 className="h-3 w-3" /></Button>
                       </div>

@@ -59,6 +59,7 @@ export const cloudList = createServerFn({ method: "POST" })
     (d: {
       table: string;
       eq?: Filters;
+      in?: Record<string, (string | number)[]>;
       order?: { column: string; ascending?: boolean };
       limit?: number;
     }) => d,
@@ -67,6 +68,9 @@ export const cloudList = createServerFn({ method: "POST" })
     let q = db(context.supabase).from(table(data.table)).select("*");
     for (const [k, v] of Object.entries(data.eq ?? {})) {
       q = v === null ? q.is(k, null) : q.eq(k, v);
+    }
+    for (const [k, v] of Object.entries(data.in ?? {})) {
+      q = q.in(k, v);
     }
     if (data.order) q = q.order(data.order.column, { ascending: data.order.ascending ?? false });
     if (data.limit) q = q.limit(data.limit);
