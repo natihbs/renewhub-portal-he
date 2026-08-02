@@ -26,6 +26,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
+import {
+  calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
+  PACE_STATUS_LABEL,
+} from "@/lib/performance-domain";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -65,49 +69,29 @@ type RiskLevel = "low" | "medium" | "high";
  * the removed version this never fabricates a trend — and the previous
  * "missing feedback"/"missing listening" reasons here were seeded from
  * hash(rep.id) rather than the rep's real feedback history, so two reps with
- * identical real data could get different risk levels purely by id. Fixed the
- * same way RepWorkspace's equivalent (riskOf) was fixed.
+ * identical real data could get different risk levels purely by id.
+ *
+ * Thin wrapper kept for its existing call sites/tests — the actual thresholds live
+ * in the shared performance-domain module (also used by RepWorkspace's riskOf) so
+ * both screens can never drift apart again.
  */
-export function computeRisk(rep: Rep, pct: number, avgScore: number | null, daysSinceLastFeedback: number | null): {
+export function computeRisk(_rep: Rep, pct: number, avgScore: number | null, daysSinceLastFeedback: number | null): {
   level: RiskLevel;
   reasons: string[];
 } {
-  let score = 0;
-  const reasons: string[] = [];
-  if (pct < 80) { score += 2; reasons.push("ביצוע מתחת ל-80%"); }
-  else if (pct < 95) { score += 1; reasons.push("ביצוע מתחת לצפוי"); }
-  if (avgScore !== null && avgScore < 60) { score += 2; reasons.push("ציון איכות ממוצע נמוך בהאזנות"); }
-  if (daysSinceLastFeedback === null) { score += 1; reasons.push("אין עדיין משוב מתועד"); }
-  else if (daysSinceLastFeedback > 30) { score += 1; reasons.push("אין משוב עדכני (מעל 30 יום)"); }
-  const level: RiskLevel = score >= 4 ? "high" : score >= 2 ? "medium" : "low";
-  return { level, reasons };
+  return sharedComputeRisk(pct, avgScore, daysSinceLastFeedback);
 }
 
 function paceInfo(rep: Rep) {
-  const workdays = workdaysInMonth();
-  const passed = Math.max(1, workdaysPassed());
-  const remaining = workdaysRemaining();
-  const expected = (rep.monthlyTarget / workdays) * passed;
-  const forecast = Math.round((rep.currentResult / passed) * workdays);
-  const perDay = Math.max(0, Math.ceil((rep.monthlyTarget - rep.currentResult) / Math.max(1, remaining)));
-  const paceDelta = rep.currentResult - expected;
-  return { expected, forecast, perDay, paceDelta, remaining };
+  return sharedPaceInfo(rep.monthlyTarget, rep.currentResult, workdaysInMonth(), workdaysPassed(), workdaysRemaining());
 }
 
 type Status = "above" | "onpace" | "attention";
 function statusOf(rep: Rep): Status {
-  const { paceDelta } = paceInfo(rep);
-  const pct = rep.monthlyTarget ? (rep.currentResult / rep.monthlyTarget) * 100 : 0;
-  if (pct >= 100 || paceDelta >= rep.monthlyTarget * 0.05) return "above";
-  if (paceDelta >= -rep.monthlyTarget * 0.05) return "onpace";
-  return "attention";
+  return paceStatus(rep.currentResult, rep.monthlyTarget, workdaysInMonth(), workdaysPassed());
 }
 
-const STATUS_LABEL: Record<Status, string> = {
-  above: "מעל היעד",
-  onpace: "בקצב",
-  attention: "דורש טיפול",
-};
+const STATUS_LABEL: Record<Status, string> = PACE_STATUS_LABEL;
 
 function statusBadgeClass(s: Status) {
   if (s === "above") return "bg-[color:var(--success)]/12 text-[color:var(--success)] border border-[color:var(--success)]/25";
@@ -147,13 +131,13 @@ function PerformancePage() {
   const enriched = useMemo(
     () =>
       scoped.map((r) => {
-        const pct = r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0;
+        const pct = calculateAchievement(r.currentResult, r.monthlyTarget);
         const status = statusOf(r);
         const { avgScore, daysSinceLast } = feedbackStatsFor(r.id, state.feedback);
         return {
           rep: r,
           pct,
-          gap: r.currentResult - r.monthlyTarget,
+          gap: calculateGap(r.currentResult, r.monthlyTarget),
           status,
           pace: paceInfo(r),
           remaining: Math.max(0, r.monthlyTarget - r.currentResult),

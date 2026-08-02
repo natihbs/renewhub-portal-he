@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useApp, teamSummary, teamsFromReps } from "@/lib/store";
+import { calculateAchievement } from "@/lib/performance-domain";
 import { useMorning, type UnderwritingIssue, type UnderwritingPriority, type UnderwritingStatus, type ManagerCall } from "@/lib/morning-store";
 import { formatDateIL, formatNum, formatPct, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import type { Rep } from "@/lib/seed";
@@ -27,7 +28,7 @@ import { useRepWorkspace } from "@/lib/rep-workspace";
 
 const CHECKLIST = [
   "בדיקת רענון נתונים",
-  "בדיקת אחוז חידוש",
+  "בדיקת אחוז עמידה ביעד",
   "בדיקת נציגים מתחת לקצב",
   "תכנון האזנות",
   "מעבר על שיחות מנהל",
@@ -46,7 +47,7 @@ export function MorningRoutine() {
 
   const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
   const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
-  const renewalPct = totalTarget > 0 ? (totalResult / totalTarget) * 100 : 0;
+  const achievementPct = calculateAchievement(totalResult, totalTarget);
   const teamRows = useMemo(
     () => teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) })),
     [reps],
@@ -73,7 +74,7 @@ export function MorningRoutine() {
   const openCalls = morning.managerCalls.filter((c) => c.status !== "completed");
   const openUnderwriting = morning.underwriting.filter((u) => u.status !== "הושלם");
 
-  const change = renewalPct - morning.yesterdayRenewalPct;
+  const change = achievementPct - morning.yesterdayAchievementPct;
 
   return (
     <Card className="overflow-hidden border-primary/20">
@@ -88,10 +89,10 @@ export function MorningRoutine() {
         </Badge>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Row 1: Data status + Renewal KPI */}
+        {/* Row 1: Data status + Target achievement */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DataStatusCard completeness={completeness} withCount={repsWithData.length} missingCount={repsMissingData.length} />
-          <RenewalCard renewalPct={renewalPct} change={change} teams={teamRows} />
+          <AchievementCard achievementPct={achievementPct} change={change} teams={teamRows} />
         </div>
 
         {/* Row 2: Quality check + Priorities */}
@@ -120,7 +121,7 @@ export function MorningRoutine() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <MorningUpdateCard
-              renewalPct={renewalPct}
+              achievementPct={achievementPct}
               teams={teamRows}
               reps={reps}
               wdRemaining={wdRemaining}
@@ -243,8 +244,8 @@ function QualityCheckCard({ reps, repsMissingData }: { reps: Rep[]; repsMissingD
   );
 }
 
-/* ============ Renewal KPI ============ */
-function RenewalCard({ renewalPct, change, teams }: { renewalPct: number; change: number; teams: { teamId: string; teamName: string; pct: number }[] }) {
+/* ============ Target Achievement ============ */
+function AchievementCard({ achievementPct, change, teams }: { achievementPct: number; change: number; teams: { teamId: string; teamName: string; pct: number }[] }) {
   const m = useMorning();
   const up = change >= 0;
   return (
@@ -252,15 +253,15 @@ function RenewalCard({ renewalPct, change, teams }: { renewalPct: number; change
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <Percent className="h-4 w-4 text-primary" />
-          <div className="font-semibold">אחוז חידוש</div>
+          <div className="font-semibold">אחוז עמידה ביעד</div>
         </div>
         <Badge variant="outline" className={cn("gap-1", up ? "text-[color:var(--success)]" : "text-primary")}>
           {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
           {up ? "+" : ""}{change.toFixed(1)}%
         </Badge>
       </div>
-      <div className="mt-2 text-4xl font-extrabold tracking-tight">{formatPct(renewalPct)}</div>
-      <div className="text-xs text-muted-foreground">מול {formatPct(m.yesterdayRenewalPct)} אתמול · ממוצע חודשי {formatPct(m.monthlyAvgRenewalPct)}</div>
+      <div className="mt-2 text-4xl font-extrabold tracking-tight">{formatPct(achievementPct)}</div>
+      <div className="text-xs text-muted-foreground">מול {formatPct(m.yesterdayAchievementPct)} אתמול · ממוצע חודשי {formatPct(m.monthlyAvgAchievementPct)}</div>
       {teams.length > 0 && (
         <div className="mt-4 grid grid-cols-2 gap-3">
           {teams.slice(0, 4).map((t) => <MiniStat key={t.teamId} label={t.teamName} value={formatPct(t.pct)} />)}
@@ -707,8 +708,8 @@ function AddUwDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChange
 }
 
 /* ============ Morning Update Generator ============ */
-function MorningUpdateCard({ renewalPct, teams, reps, wdRemaining, totalTarget, totalResult }: {
-  renewalPct: number; teams: { teamId: string; teamName: string; pct: number; result: number; target: number }[];
+function MorningUpdateCard({ achievementPct, teams, reps, wdRemaining, totalTarget, totalResult }: {
+  achievementPct: number; teams: { teamId: string; teamName: string; pct: number; result: number; target: number }[];
   reps: Rep[]; wdRemaining: number; totalTarget: number; totalResult: number;
 }) {
   const m = useMorning();
@@ -716,7 +717,7 @@ function MorningUpdateCard({ renewalPct, teams, reps, wdRemaining, totalTarget, 
   const [editing, setEditing] = useState(false);
 
   const generate = () => {
-    const withPct = reps.map((r) => ({ ...r, pct: r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0 }))
+    const withPct = reps.map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, r.monthlyTarget) }))
       .sort((a, b) => b.pct - a.pct);
     const leaders = withPct.slice(0, 3).map((r) => `${r.name} (${formatPct(r.pct)})`).join(", ");
     const focus = withPct.slice(-2).reverse().map((r) => r.name).join(", ");
@@ -727,13 +728,13 @@ function MorningUpdateCard({ renewalPct, teams, reps, wdRemaining, totalTarget, 
 `בוקר טוב לצוות ☀️
 עדכון בוקר ${formatDateIL(new Date())}
 
-📊 אחוז חידוש כללי: ${formatPct(renewalPct)}
+📊 אחוז עמידה ביעד כללי: ${formatPct(achievementPct)}
 ${teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)} (${formatNum(t.result)}/${formatNum(t.target)})`).join("\n")}
 
 ⭐ מובילים: ${leaders}
 🎯 פוקוס להיום: ${focus}
 
-💪 יעד להיום: ${formatNum(perDay)} חידושים לנציג בממוצע
+💪 יעד להיום: ${formatNum(perDay)} יחידות לנציג בממוצע
 בואו נצא לדרך - יום מצוין ומוצלח!`;
     setText(msg);
     setEditing(false);

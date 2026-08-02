@@ -29,7 +29,8 @@ import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-adm
 import {
   useImport, autoMap, normalizeName, resolveTeam, parseNumber, parseDate,
   detectPii, PII_LABEL, type PiiHit,
-  FIELD_LABEL, REQUIRED_FIELDS, type ImportFieldKey, type ImportHistoryEntry,
+  FIELD_LABEL, REQUIRED_FIELDS, UNSUPPORTED_FIELDS, UNSUPPORTED_FIELD_REASON,
+  type ImportFieldKey, type ImportHistoryEntry,
 } from "@/lib/import-store";
 
 import type { Rep } from "@/lib/seed";
@@ -213,15 +214,6 @@ function processRows(
         issues.push({ severity: "error", message: err.message });
       }
     }
-    // optional percentage-like fields
-    const latePct = fieldToCol.latePct ? parseNumber(raw[fieldToCol.latePct]) : null;
-    const upgradePct = fieldToCol.upgradePct ? parseNumber(raw[fieldToCol.upgradePct]) : null;
-    for (const [label, v] of [["איחורים", latePct], ["אחוז שדרוגים", upgradePct]] as const) {
-      if (v != null && (v < 0 || v > 100)) {
-        issues.push({ severity: "warning", message: `${label} מחוץ לטווח 0–100` });
-      }
-    }
-
     // duplicate detection
     if (rawName) {
       const key = normalizeName(rawName);
@@ -677,7 +669,7 @@ function MappingStep({
                     <SelectContent>
                       {(Object.keys(FIELD_LABEL) as ImportFieldKey[]).map((f) => (
                         <SelectItem key={f} value={f}
-                          disabled={f !== "__skip__" && f !== mapping[h] && usedFields.has(f)}>
+                          disabled={(f !== "__skip__" && f !== mapping[h] && usedFields.has(f)) || UNSUPPORTED_FIELDS.includes(f)}>
                           {FIELD_LABEL[f]} {REQUIRED_FIELDS.includes(f) && f !== "__skip__" && <span className="text-primary">*</span>}
                         </SelectItem>
                       ))}
@@ -689,6 +681,8 @@ function MappingStep({
           </TableBody>
         </Table>
       </div>
+
+      <ColumnPlan headers={headers} mapping={mapping} />
 
       {missingRequired.length > 0 && (
         <Alert variant="destructive">
@@ -710,6 +704,45 @@ function MappingStep({
           <Button onClick={onNext} disabled={missingRequired.length > 0}>המשך לבדיקה <ArrowLeft className="ms-1 h-4 w-4" /></Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Explicit, visible accounting of what will happen to every column before the user
+ * can proceed — required so a mapped column can never be silently validated and then
+ * discarded without the user being told. Three buckets only: persisted, skipped
+ * (mapped to "— התעלם —" or left unmapped), or unsupported (mapped to a recognized
+ * field that isn't backed by a persistence path yet).
+ */
+function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<string, ImportFieldKey> }) {
+  const persisted = headers.filter((h) => {
+    const f = mapping[h];
+    return f && f !== "__skip__" && !UNSUPPORTED_FIELDS.includes(f);
+  });
+  const unsupported = headers.filter((h) => {
+    const f = mapping[h];
+    return !!f && UNSUPPORTED_FIELDS.includes(f);
+  });
+  const skipped = headers.filter((h) => !mapping[h] || mapping[h] === "__skip__");
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">מה יקרה לכל עמודה בייבוא</div>
+      <div>
+        <span className="font-medium text-[color:var(--success)]">יישמרו במערכת:</span>{" "}
+        {persisted.length > 0 ? persisted.join(", ") : "—"}
+      </div>
+      <div>
+        <span className="font-medium text-muted-foreground">ידולגו (לא נבחר שדה):</span>{" "}
+        {skipped.length > 0 ? skipped.join(", ") : "—"}
+      </div>
+      {unsupported.length > 0 && (
+        <div>
+          <span className="font-medium text-amber-700">לא ייכתבו למערכת:</span> {unsupported.join(", ")}
+          <div className="text-xs text-muted-foreground">{UNSUPPORTED_FIELD_REASON}</div>
+        </div>
+      )}
     </div>
   );
 }

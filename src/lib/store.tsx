@@ -12,6 +12,7 @@ import {
   UNASSIGNED_TEAM_LABEL,
 } from "./seed";
 import { CRITERIA, type Feedback, type CriterionValue } from "./feedback-domain";
+import { calculateAchievement, achievementStatus, ACHIEVEMENT_STATUS_LABEL, ACHIEVEMENT_STATUS_TONE } from "./performance-domain";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
@@ -466,10 +467,8 @@ export function visibleFeedback(list: Feedback[], isManager: boolean, currentRep
 }
 
 export function statusForRep(rep: Rep) {
-  const pct = rep.monthlyTarget > 0 ? (rep.currentResult / rep.monthlyTarget) * 100 : 0;
-  if (pct >= 100) return { label: "מעל היעד", tone: "success" as const };
-  if (pct >= 80) return { label: "בקצב הנדרש", tone: "warning" as const };
-  return { label: "דורש שיפור", tone: "danger" as const };
+  const status = achievementStatus(calculateAchievement(rep.currentResult, rep.monthlyTarget));
+  return { label: ACHIEVEMENT_STATUS_LABEL[status], tone: ACHIEVEMENT_STATUS_TONE[status] };
 }
 
 /** Aggregates target/result for one team, identified by its cloud team id (null = unassigned reps). */
@@ -477,7 +476,7 @@ export function teamSummary(reps: Rep[], teamId: string | null) {
   const filtered = reps.filter((r) => r.teamId === teamId);
   const target = filtered.reduce((a, r) => a + r.monthlyTarget, 0);
   const result = filtered.reduce((a, r) => a + r.currentResult, 0);
-  const pct = target > 0 ? (result / target) * 100 : 0;
+  const pct = calculateAchievement(result, target);
   return { target, result, pct, count: filtered.length };
 }
 
