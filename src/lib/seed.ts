@@ -1,4 +1,5 @@
 import type { Feedback } from "./feedback-domain";
+import type { KpiValueRow } from "./kpi-values";
 
 export const UNASSIGNED_TEAM_LABEL = "ללא צוות";
 
@@ -75,6 +76,12 @@ export type AppState = {
   feedbackLoading: boolean;
   /** Set when the Live Mode feedback query failed. Always null in Demo Mode. */
   feedbackError: string | null;
+  /**
+   * Dated renewal-specific values (see src/lib/kpi-values.ts). Always empty in Demo
+   * Mode — there is no fabricated renewal data; Demo Mode's teams have no real KPI
+   * profile, so renewal sections correctly never render for them.
+   */
+  kpiValues: KpiValueRow[];
 };
 
 const today = new Date();
@@ -95,6 +102,7 @@ export const SEED: AppState = {
   currentRepId: "r1",
   feedbackLoading: false,
   feedbackError: null,
+  kpiValues: [],
   reps: [
     { id: "r1", name: "יעל כהן", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 98 },
     { id: "r2", name: "אורי לוי", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 132 },

@@ -15,7 +15,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
-import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk } from "@/lib/performance-domain";
+import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
+import { useCloudTeams } from "@/lib/teams-hooks";
+import { renewalTotalsForMonth } from "@/lib/kpi-values";
+import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
 import { toast } from "sonner";
 import {
   Headphones, Pencil, StickyNote, Plus,
@@ -120,6 +123,16 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   const daysSinceLast = repFeedback[0] ? daysSince(repFeedback[0].date) : null;
   const risk = riskOf(rep, repFeedback.length ? avgListen : null, daysSinceLast);
 
+  // Renewal-specific section: only ever shown for a team whose KPI profile is
+  // explicitly "renewals" — never inferred from the team's name — and only when
+  // real dated values exist. calculateRenewalRate never derives from target/result.
+  const { teams: cloudTeams } = useCloudTeams();
+  const kpiProfile = rep.teamId
+    ? cloudTeams.find((t) => t.id === rep.teamId)?.kpiProfile ?? DEFAULT_KPI_PROFILE
+    : DEFAULT_KPI_PROFILE;
+  const renewalTotals = renewalTotalsForMonth(rep.id, state.kpiValues);
+  const renewalRate = calculateRenewalRate(kpiProfile, renewalTotals.completed, renewalTotals.opportunities);
+
   const notes = getNotes(rep.id);
   const tasks = getTasks(rep.id);
   const openTasks = tasks.filter((t) => !t.done);
@@ -200,6 +213,24 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
             </div>
             <div className="mt-2 text-xs text-muted-foreground text-end">תחזית סוף חודש: {formatNum(forecast)}</div>
           </Section>
+
+          {/* Section 2b - Renewal KPIs: only for a real "renewals" profile team */}
+          {kpiProfile === "renewals" && (
+            <Section icon={LineChartIcon} title="מדדי חידושים">
+              <div className="grid grid-cols-3 gap-3">
+                <AnalyticStat label="הזדמנויות חידוש" value={renewalTotals.opportunities == null ? "אין נתונים" : formatNum(renewalTotals.opportunities)} />
+                <AnalyticStat label="חידושים שבוצעו" value={renewalTotals.completed == null ? "אין נתונים" : formatNum(renewalTotals.completed)} />
+                <AnalyticStat
+                  label="אחוז חידוש"
+                  value={renewalRate.available ? formatPct(renewalRate.pct) : "לא זמין"}
+                  tone={renewalRate.available ? (renewalRate.pct >= 80 ? "success" : "warning") : undefined}
+                />
+              </div>
+              {!renewalRate.available && (
+                <p className="mt-2 text-xs text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[renewalRate.reason]}</p>
+              )}
+            </Section>
+          )}
 
           {/* Section 3 - Listening history (real feedback records for this rep) */}
           <Section icon={Headphones} title="היסטוריית האזנות" right={repFeedback.length > 0 ? <span className="text-xs text-muted-foreground">ממוצע: <span className="font-semibold text-foreground">{avgListen}</span></span> : undefined}>

@@ -152,3 +152,13 @@ export function computeRisk(
 
 export type KpiProfile = "generic_sales" | "renewals";
 export const DEFAULT_KPI_PROFILE: KpiProfile = "generic_sales";
+
+export const KPI_PROFILE_LABEL: Record<KpiProfile, string> = {
+  generic_sales: "מכירות כלליות",
+  renewals: "חידושים",
+};
+
+export const KPI_PROFILE_BADGE_CLASS: Record<KpiProfile, string> = {
+  generic_sales: "bg-accent text-foreground",
+  renewals: "bg-primary/10 text-primary",
+};

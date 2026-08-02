@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { DEFAULT_KPI_PROFILE, type KpiProfile } from "@/lib/performance-domain";
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
@@ -93,7 +94,7 @@ export const listTeams = createServerFn({ method: "GET" })
       await Promise.all([
         ctx.supabase
           .from("teams")
-          .select("id, name, department, description, manager_id, active, created_at, updated_at")
+          .select("id, name, department, description, manager_id, active, kpi_profile, created_at, updated_at")
           .order("created_at", { ascending: false }),
         ctx.supabase.from("profiles").select("id, full_name, email, team_id, manager_id, representative_id, active"),
         ctx.supabase.from("user_roles").select("user_id, role"),
@@ -142,7 +143,7 @@ export const getTeamDetails = createServerFn({ method: "POST" })
     const [{ data: team, error: tErr }, { data: members, error: mErr }, { data: userRoles }, { data: reps, error: repErr }] = await Promise.all([
       ctx.supabase
         .from("teams")
-        .select("id, name, department, description, manager_id, active, created_at, updated_at")
+        .select("id, name, department, description, manager_id, active, kpi_profile, created_at, updated_at")
         .eq("id", data.team_id)
         .maybeSingle(),
       ctx.supabase
@@ -213,16 +214,23 @@ type TeamInput = {
   description: string | null;
   manager_id: string | null;
   active: boolean;
+  /** Optional on input so existing callers keep working; defaults to generic_sales. Never inferred from name. */
+  kpi_profile?: KpiProfile;
 };
+
+const KPI_PROFILES: KpiProfile[] = ["generic_sales", "renewals"];
 
 function validateTeam(data: TeamInput) {
   if (!data?.name?.trim()) throw new Error("יש להזין שם צוות");
   if (data.name.trim().length > 80) throw new Error("שם הצוות ארוך מדי");
+  const kpi_profile = data.kpi_profile ?? DEFAULT_KPI_PROFILE;
+  if (!KPI_PROFILES.includes(kpi_profile)) throw new Error("פרופיל KPI לא חוקי");
   return {
     ...data,
     name: data.name.trim(),
     department: data.department?.trim() || null,
     description: data.description?.trim() || null,
+    kpi_profile,
   };
 }
 
@@ -241,11 +249,12 @@ export const createTeam = createServerFn({ method: "POST" })
         description: data.description,
         manager_id: data.manager_id,
         active: data.active,
+        kpi_profile: data.kpi_profile,
       })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
-    await logAudit(supabaseAdmin, ctx, "team.create", { team_id: created.id, name: data.name, manager_id: data.manager_id });
+    await logAudit(supabaseAdmin, ctx, "team.create", { team_id: created.id, name: data.name, manager_id: data.manager_id, kpi_profile: data.kpi_profile });
     return { team_id: created.id };
   });
 
@@ -259,7 +268,7 @@ export const updateTeam = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     await assertAdmin(ctx);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: before } = await supabaseAdmin.from("teams").select("manager_id, active, name").eq("id", data.team_id).maybeSingle();
+    const { data: before } = await supabaseAdmin.from("teams").select("manager_id, active, name, kpi_profile").eq("id", data.team_id).maybeSingle();
     const { error } = await supabaseAdmin
       .from("teams")
       .update({
@@ -268,6 +277,7 @@ export const updateTeam = createServerFn({ method: "POST" })
         description: data.description,
         manager_id: data.manager_id,
         active: data.active,
+        kpi_profile: data.kpi_profile,
       })
       .eq("id", data.team_id);
     if (error) throw new Error(error.message);
@@ -278,6 +288,9 @@ export const updateTeam = createServerFn({ method: "POST" })
     }
     if (before && before.active !== data.active) {
       await logAudit(supabaseAdmin, ctx, data.active ? "team.activate" : "team.deactivate", { team_id: data.team_id });
+    }
+    if (before && before.kpi_profile !== data.kpi_profile) {
+      await logAudit(supabaseAdmin, ctx, "team.kpi_profile_changed", { team_id: data.team_id, from: before.kpi_profile, to: data.kpi_profile });
     }
     return { ok: true };
   });

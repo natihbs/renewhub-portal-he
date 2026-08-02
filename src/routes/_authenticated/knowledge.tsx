@@ -23,9 +23,9 @@ export const Route = createFileRoute("/_authenticated/knowledge")({
   head: () => ({
     meta: [
       { title: "מרכז ידע · Pulse" },
-      { name: "description", content: "מאמרים, תסריטים והדרכות לצוותי החידושים" },
+      { name: "description", content: "מאמרים, תסריטים והדרכות לצוותי המכירות" },
       { property: "og:title", content: "מרכז ידע · Pulse" },
-      { property: "og:description", content: "מאמרים, תסריטים והדרכות לצוותי החידושים" },
+      { property: "og:description", content: "מאמרים, תסריטים והדרכות לצוותי המכירות" },
     ],
   }),
   component: KnowledgePage,
@@ -49,7 +49,7 @@ function KnowledgePage() {
     <div className="space-y-6">
       <PageHeader
         title="מרכז ידע"
-        description="מאמרים, תסריטי שיחה והדרכות לצוותי החידושים"
+        description="מאמרים, תסריטי שיחה והדרכות לצוותי המכירות"
         actions={
           <ManagerOnly>
             <ArticleFormDialog trigger={<Button><Plus className="ms-1 h-4 w-4" />הוספת מאמר</Button>} />

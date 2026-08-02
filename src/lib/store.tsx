@@ -13,6 +13,7 @@ import {
 } from "./seed";
 import { CRITERIA, type Feedback, type CriterionValue } from "./feedback-domain";
 import { calculateAchievement, achievementStatus, ACHIEVEMENT_STATUS_LABEL, ACHIEVEMENT_STATUS_TONE } from "./performance-domain";
+import type { KpiValueRow } from "./kpi-values";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
@@ -134,6 +135,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     in: !isRepOnly && repIds.length > 0 ? { representative_id: repIds } : undefined,
     enabled: isRepOnly ? !!currentRepId : repIds.length > 0,
   });
+  // Same scoping as feedback — never fetched for renewal calculations elsewhere;
+  // only ever read via src/lib/kpi-values.ts's aggregation helpers.
+  const kpiValues = useCloudCollection<KpiValueRow>("kpi_values", {
+    order: { column: "metric_date" },
+    eq: isRepOnly && currentRepId ? { representative_id: currentRepId } : undefined,
+    in: !isRepOnly && repIds.length > 0 ? { representative_id: repIds } : undefined,
+    enabled: isRepOnly ? !!currentRepId : repIds.length > 0,
+  });
 
   const live = announcements.live;
 
@@ -203,8 +212,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })),
       feedbackLoading: feedback.isLoading,
       feedbackError: feedback.isError ? (feedback.error?.message ?? "שגיאה בטעינת נתוני משוב") : null,
+      kpiValues: kpiValues.rows,
     };
-  }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error]);
+  }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error, kpiValues.rows]);
 
   const value: Ctx = useMemo(() => {
     const shared = {

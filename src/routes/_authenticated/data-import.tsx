@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
-import { z } from "zod";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -24,14 +23,17 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { useIsManager, useApp, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
-import { useCloudTeams, type CloudTeam } from "@/lib/teams-hooks";
+import { useCloudCollection } from "@/lib/cloud-hooks";
+import { useCloudTeams } from "@/lib/teams-hooks";
+import type { KpiValueRow } from "@/lib/kpi-values";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
 import {
-  useImport, autoMap, normalizeName, resolveTeam, parseNumber, parseDate,
-  detectPii, PII_LABEL, type PiiHit,
+  useImport, autoMap, detectPii, PII_LABEL, type PiiHit,
   FIELD_LABEL, REQUIRED_FIELDS, UNSUPPORTED_FIELDS, UNSUPPORTED_FIELD_REASON,
+  RENEWAL_FIELDS, RENEWAL_FIELDS_WRONG_PROFILE_REASON,
   type ImportFieldKey, type ImportHistoryEntry,
 } from "@/lib/import-store";
+import { processRows, type ProcessedRow, type ResolvedAction, type RawRow } from "@/lib/import-processing";
 
 import type { Rep } from "@/lib/seed";
 import { formatDateIL } from "@/lib/format";
@@ -51,30 +53,6 @@ export const Route = createFileRoute("/_authenticated/data-import")({
   }),
   component: DataImportPage,
 });
-
-type RawRow = Record<string, unknown>;
-
-type Severity = "error" | "warning";
-type RowIssue = { severity: Severity; message: string };
-
-type ResolvedAction = "update" | "create" | "skip";
-
-type ProcessedRow = {
-  index: number;
-  raw: RawRow;
-  name: string;
-  /** Resolved against the real cloud teams list — never a car/home guess. Null = unassigned or unrecognized. */
-  teamId: string | null;
-  teamName: string | null;
-  /** Raw text from the file, kept for display when it couldn't be resolved to a known team. */
-  teamRaw: string;
-  monthlyTarget: number | null;
-  currentResult: number | null;
-  updatedAt: string | null;
-  issues: RowIssue[];
-  matchRepId: string | null;
-  action: ResolvedAction;
-};
 
 const STEPS = ["העלאת קובץ", "מיפוי עמודות", "בדיקת נתונים", "אישור", "סיכום"] as const;
 
@@ -116,9 +94,9 @@ function PrivacyNotice() {
 function downloadTemplate(kind: "xlsx" | "csv") {
   const headers = ["שם הנציג", "צוות", "יעד חודשי", "ביצוע נוכחי", "תאריך עדכון"];
   const rows = [
-    ["דנה כהן", "חידושי רכב", 120, 84, formatDateIL(new Date())],
-    ["איתי לוי", "חידושי דירה", 90, 71, formatDateIL(new Date())],
-    ["מיה שטרן", "חידושי רכב", 110, 45, formatDateIL(new Date())],
+    ["דנה כהן", "צוות מכירות צפון", 120, 84, formatDateIL(new Date())],
+    ["איתי לוי", "צוות מכירות דרום", 90, 71, formatDateIL(new Date())],
+    ["מיה שטרן", "צוות מכירות צפון", 110, 45, formatDateIL(new Date())],
   ];
   if (kind === "csv") {
     const csv = Papa.unparse({ fields: headers, data: rows });
@@ -164,76 +142,6 @@ async function parseFile(file: File): Promise<{ headers: string[]; rows: RawRow[
   return { headers, rows: json };
 }
 
-// zod schema for validation (per-row). Team is resolved separately against the
-// real cloud teams list (resolveTeam) rather than a fixed car/home enum — an
-// unrecognized team text is a warning, not a blocking error, since a rep can
-// still be created/updated without a team assignment.
-const rowSchema = z.object({
-  name: z.string().trim().min(1, "שם הנציג חסר").max(80, "שם ארוך מדי"),
-  monthlyTarget: z.number({ message: "יעד חודשי חייב להיות מספר" }).positive("יעד חייב להיות חיובי"),
-  currentResult: z.number({ message: "ביצוע נוכחי חייב להיות מספר" }).min(0, "ביצוע לא יכול להיות שלילי"),
-  updatedAt: z.string().min(1, "תאריך עדכון לא תקין"),
-});
-
-function processRows(
-  rows: RawRow[],
-  mapping: Record<string, ImportFieldKey>,
-  reps: Rep[],
-  teams: CloudTeam[] | { id: string; name: string }[],
-): ProcessedRow[] {
-  // reverse mapping: field -> column
-  const fieldToCol: Partial<Record<ImportFieldKey, string>> = {};
-  for (const [col, field] of Object.entries(mapping)) {
-    if (field !== "__skip__" && !fieldToCol[field]) fieldToCol[field] = col;
-  }
-  const repByNorm = new Map<string, Rep>();
-  reps.forEach((r) => repByNorm.set(normalizeName(r.name), r));
-
-  const seenNames = new Map<string, number>();
-  const out: ProcessedRow[] = [];
-
-  rows.forEach((raw, i) => {
-    const issues: RowIssue[] = [];
-    const rawName = fieldToCol.name ? String(raw[fieldToCol.name] ?? "").trim() : "";
-    const teamRaw = fieldToCol.team ? String(raw[fieldToCol.team] ?? "").trim() : "";
-    const { teamId, teamName } = resolveTeam(fieldToCol.team ? raw[fieldToCol.team] : null, teams);
-    if (teamRaw && !teamId) {
-      issues.push({ severity: "warning", message: `הצוות "${teamRaw}" אינו מזוהה מול צוותי הענן — הנציג יישמר ללא שיוך צוות` });
-    }
-    const target = fieldToCol.monthlyTarget ? parseNumber(raw[fieldToCol.monthlyTarget]) : null;
-    const current = fieldToCol.currentResult ? parseNumber(raw[fieldToCol.currentResult]) : null;
-    const upd = fieldToCol.updatedAt ? parseDate(raw[fieldToCol.updatedAt]) : null;
-
-    const check = rowSchema.safeParse({
-      name: rawName,
-      monthlyTarget: target ?? undefined, currentResult: current ?? undefined,
-      updatedAt: upd ?? undefined,
-    });
-    if (!check.success) {
-      for (const err of check.error.issues) {
-        issues.push({ severity: "error", message: err.message });
-      }
-    }
-    // duplicate detection
-    if (rawName) {
-      const key = normalizeName(rawName);
-      if (seenNames.has(key)) {
-        issues.push({ severity: "warning", message: `כפילות – מופיע גם בשורה ${seenNames.get(key)! + 1}` });
-      } else seenNames.set(key, i);
-    }
-
-    const match = rawName ? repByNorm.get(normalizeName(rawName)) : undefined;
-    const hasErrors = issues.some((x) => x.severity === "error");
-    out.push({
-      index: i, raw, name: rawName, teamId, teamName, teamRaw, monthlyTarget: target, currentResult: current, updatedAt: upd,
-      issues,
-      matchRepId: match?.id ?? null,
-      action: hasErrors ? "skip" : match ? "update" : "create",
-    });
-  });
-  return out;
-}
-
 function DataImportPage() {
   const isManager = useIsManager();
   const { state, updateRep, addRep, replaceReps } = useApp();
@@ -243,6 +151,7 @@ function DataImportPage() {
   const demoTeams = useMemo(() => teamsFromReps(state.reps).map((t) => ({ id: t.teamId, name: t.teamName })), [state.reps]);
   const teamsForResolution = isDemo ? demoTeams : cloudTeams;
   const importStore = useImport();
+  const kpiValuesCloud = useCloudCollection<KpiValueRow>("kpi_values");
   const qc = useQueryClient();
   const createRepFn = useServerFn(createRepresentative);
   const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
@@ -324,6 +233,7 @@ function DataImportPage() {
           continue;
         }
         const updatedAt = r.updatedAt ?? now;
+        let repIdForRenewal: string | null = null;
         try {
           if (r.action === "update" && r.matchRepId) {
             const existing = byId.get(r.matchRepId);
@@ -346,6 +256,7 @@ function DataImportPage() {
                 },
               });
             }
+            repIdForRenewal = existing.id;
             updated++;
           } else if (r.action === "create") {
             if (isDemo) {
@@ -354,12 +265,13 @@ function DataImportPage() {
                 monthlyTarget: r.monthlyTarget!, currentResult: r.currentResult!, lastUpdatedAt: updatedAt,
               });
             } else {
-              await createRepFn({
+              const createdRep = await createRepFn({
                 data: {
                   name: r.name, team_id: r.teamId, monthly_target: r.monthlyTarget!, current_result: r.currentResult!,
                   external_ref: null, user_id: null, active: true,
                 },
               });
+              repIdForRenewal = createdRep.rep_id;
             }
             created++;
           }
@@ -367,6 +279,29 @@ function DataImportPage() {
           cloudFailed++;
           errs++;
           errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`] });
+          continue;
+        }
+
+        // Renewal values are a second, independent write — a failure here must never
+        // be reported as import success, but also must not undo the target/result
+        // write that already succeeded above.
+        if (!isDemo && repIdForRenewal && (r.renewalOpportunities != null || r.completedRenewals != null)) {
+          try {
+            await kpiValuesCloud.upsert(
+              {
+                representative_id: repIdForRenewal,
+                team_id: r.teamId,
+                metric_date: updatedAt,
+                renewal_opportunities: r.renewalOpportunities,
+                completed_renewals: r.completedRenewals,
+                source_import_id: null,
+              },
+              "representative_id,metric_date",
+            );
+          } catch (e) {
+            errs++;
+            errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירת נתוני חידוש: ${(e as Error).message ?? e}`] });
+          }
         }
       }
 
@@ -718,7 +653,11 @@ function MappingStep({
 function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<string, ImportFieldKey> }) {
   const persisted = headers.filter((h) => {
     const f = mapping[h];
-    return f && f !== "__skip__" && !UNSUPPORTED_FIELDS.includes(f);
+    return f && f !== "__skip__" && !UNSUPPORTED_FIELDS.includes(f) && !RENEWAL_FIELDS.includes(f);
+  });
+  const renewal = headers.filter((h) => {
+    const f = mapping[h];
+    return !!f && RENEWAL_FIELDS.includes(f);
   });
   const unsupported = headers.filter((h) => {
     const f = mapping[h];
@@ -733,6 +672,13 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
         <span className="font-medium text-[color:var(--success)]">יישמרו במערכת:</span>{" "}
         {persisted.length > 0 ? persisted.join(", ") : "—"}
       </div>
+      {renewal.length > 0 && (
+        <div>
+          <span className="font-medium text-primary">יישמרו כנתוני חידוש — רק לשורות בצוות "חידושים":</span>{" "}
+          {renewal.join(", ")}
+          <div className="text-xs text-muted-foreground">{RENEWAL_FIELDS_WRONG_PROFILE_REASON}</div>
+        </div>
+      )}
       <div>
         <span className="font-medium text-muted-foreground">ידולגו (לא נבחר שדה):</span>{" "}
         {skipped.length > 0 ? skipped.join(", ") : "—"}
@@ -758,6 +704,9 @@ function PreviewStep({
   criticalCount: number; warnCount: number;
 }) {
   const shown = processed.slice(0, 20);
+  const showRenewalColumns = processed.some(
+    (p) => p.renewalOpportunities != null || p.completedRenewals != null || p.renewalFieldsSkipped,
+  );
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -786,6 +735,8 @@ function PreviewStep({
               <TableHead>צוות</TableHead>
               <TableHead>יעד</TableHead>
               <TableHead>ביצוע</TableHead>
+              {showRenewalColumns && <TableHead>הזדמנויות חידוש</TableHead>}
+              {showRenewalColumns && <TableHead>חידושים שבוצעו</TableHead>}
               <TableHead>תאריך</TableHead>
               <TableHead>סטטוס</TableHead>
               <TableHead>פעולה</TableHead>
@@ -801,6 +752,16 @@ function PreviewStep({
                   <TableCell>{r.teamName ? r.teamName : <span className="text-amber-700">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
                   <TableCell>{r.monthlyTarget ?? "—"}</TableCell>
                   <TableCell>{r.currentResult ?? "—"}</TableCell>
+                  {showRenewalColumns && (
+                    <TableCell className={cn(r.renewalFieldsSkipped && "text-amber-700")}>
+                      {r.renewalOpportunities ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
+                    </TableCell>
+                  )}
+                  {showRenewalColumns && (
+                    <TableCell className={cn(r.renewalFieldsSkipped && "text-amber-700")}>
+                      {r.completedRenewals ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
+                    </TableCell>
+                  )}
                   <TableCell>{r.updatedAt ?? <span className="text-destructive">—</span>}</TableCell>
                   <TableCell className="space-y-1">
                     {r.issues.length === 0 ? (
