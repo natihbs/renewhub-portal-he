@@ -344,7 +344,7 @@ export type Database = {
           representative_id: string
           schedule_id: string | null
           score: number
-          team_key: string
+          team_key: string | null
           updated_at: string
         }
         Insert: {
@@ -364,7 +364,7 @@ export type Database = {
           representative_id: string
           schedule_id?: string | null
           score?: number
-          team_key?: string
+          team_key?: string | null
           updated_at?: string
         }
         Update: {
@@ -384,7 +384,7 @@ export type Database = {
           representative_id?: string
           schedule_id?: string | null
           score?: number
-          team_key?: string
+          team_key?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -512,6 +512,64 @@ export type Database = {
         }
         Relationships: []
       }
+      kpi_values: {
+        Row: {
+          completed_renewals: number | null
+          created_at: string
+          id: string
+          metric_date: string
+          renewal_opportunities: number | null
+          representative_id: string
+          source_import_id: string | null
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          completed_renewals?: number | null
+          created_at?: string
+          id?: string
+          metric_date: string
+          renewal_opportunities?: number | null
+          representative_id: string
+          source_import_id?: string | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          completed_renewals?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          renewal_opportunities?: number | null
+          representative_id?: string
+          source_import_id?: string | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kpi_values_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kpi_values_source_import_id_fkey"
+            columns: ["source_import_id"]
+            isOneToOne: false
+            referencedRelation: "import_history"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kpi_values_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       listening_schedules: {
         Row: {
           created_at: string
@@ -638,33 +696,39 @@ export type Database = {
           created_at: string
           data_as_of: string | null
           last_refresh_at: string | null
+          monthly_avg_achievement_pct: number
           monthly_avg_renewal_pct: number
           refresh_status: string
           saved_update_template: string | null
           updated_at: string
           user_id: string
+          yesterday_achievement_pct: number
           yesterday_renewal_pct: number
         }
         Insert: {
           created_at?: string
           data_as_of?: string | null
           last_refresh_at?: string | null
+          monthly_avg_achievement_pct?: number
           monthly_avg_renewal_pct?: number
           refresh_status?: string
           saved_update_template?: string | null
           updated_at?: string
           user_id: string
+          yesterday_achievement_pct?: number
           yesterday_renewal_pct?: number
         }
         Update: {
           created_at?: string
           data_as_of?: string | null
           last_refresh_at?: string | null
+          monthly_avg_achievement_pct?: number
           monthly_avg_renewal_pct?: number
           refresh_status?: string
           saved_update_template?: string | null
           updated_at?: string
           user_id?: string
+          yesterday_achievement_pct?: number
           yesterday_renewal_pct?: number
         }
         Relationships: []
@@ -925,42 +989,6 @@ export type Database = {
           kpi_profile?: string
           manager_id?: string | null
           name?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      kpi_values: {
-        Row: {
-          completed_renewals: number | null
-          created_at: string
-          id: string
-          metric_date: string
-          renewal_opportunities: number | null
-          representative_id: string
-          source_import_id: string | null
-          team_id: string | null
-          updated_at: string
-        }
-        Insert: {
-          completed_renewals?: number | null
-          created_at?: string
-          id?: string
-          metric_date: string
-          renewal_opportunities?: number | null
-          representative_id: string
-          source_import_id?: string | null
-          team_id?: string | null
-          updated_at?: string
-        }
-        Update: {
-          completed_renewals?: number | null
-          created_at?: string
-          id?: string
-          metric_date?: string
-          renewal_opportunities?: number | null
-          representative_id?: string
-          source_import_id?: string | null
-          team_id?: string | null
           updated_at?: string
         }
         Relationships: []
