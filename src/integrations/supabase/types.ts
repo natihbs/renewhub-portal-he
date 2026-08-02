@@ -1069,6 +1069,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      set_user_team_with_representative_sync: {
+        Args: { _team_id: string; _user_id: string }
+        Returns: {
+          previous_profile_team_id: string
+          previous_representative_team_id: string
+          representative_id: string
+        }[]
+      }
       touch_last_login: { Args: never; Returns: undefined }
     }
     Enums: {
