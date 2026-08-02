@@ -1,8 +1,9 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAuth } from "@/lib/auth";
+import { useApp } from "@/lib/store";
 
-export type WorkspaceNote = { id: string; author: string; date: string; text: string };
+export type WorkspaceNote = { id: string; author: string; date: string; text: string; isPrivate: boolean };
 export type WorkspaceTask = {
   id: string;
   title: string;
@@ -17,6 +18,7 @@ type NoteRow = {
   author_name: string;
   text: string;
   created_at: string;
+  is_private: boolean;
 };
 type TaskRow = {
   id: string;
@@ -32,13 +34,17 @@ type Ctx = {
   open: (repId: string) => void;
   close: () => void;
   getNotes: (repId: string) => WorkspaceNote[];
-  addNote: (repId: string, text: string, author?: string) => void;
+  /** isPrivate defaults to true (manager-only) — a note is only ever shown to the
+   * representative it's about when explicitly marked otherwise. */
+  addNote: (repId: string, text: string, opts?: { author?: string; isPrivate?: boolean }) => void;
   updateNote: (repId: string, noteId: string, text: string) => void;
   deleteNote: (repId: string, noteId: string) => void;
   getTasks: (repId: string) => WorkspaceTask[];
   addTask: (repId: string, t: Omit<WorkspaceTask, "id" | "done">) => void;
   toggleTask: (repId: string, taskId: string) => void;
   deleteTask: (repId: string, taskId: string) => void;
+  isLoading: boolean;
+  isError: boolean;
 };
 
 const RepWorkspaceCtx = createContext<Ctx | null>(null);
@@ -49,10 +55,20 @@ type DemoStore = { notes: Record<string, WorkspaceNote[]>; tasks: Record<string,
 export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
   const [openRepId, setOpenRepId] = useState<string | null>(null);
   const [demo, setDemo] = useState<DemoStore>({ notes: {}, tasks: {} });
-  const { profile } = useAuth();
+  const { profile, isAdmin, isManager } = useAuth();
+  const { state } = useApp();
 
-  const notes = useCloudCollection<NoteRow>("rep_notes", { order: { column: "created_at" } });
-  const tasks = useCloudCollection<TaskRow>("rep_tasks", { order: { column: "created_at" } });
+  // Same scoping rationale as feedback/listening_schedules: a rep only needs their own
+  // notes/tasks, a manager/admin needs every rep they can manage (= state.reps).
+  const isRepOnly = !isAdmin && !isManager;
+  const repIds = useMemo(() => state.reps.map((r) => r.id), [state.reps]);
+  const scopeOpts = {
+    eq: isRepOnly && state.currentRepId ? { representative_id: state.currentRepId } : undefined,
+    in: !isRepOnly && repIds.length > 0 ? { representative_id: repIds } : undefined,
+    enabled: isRepOnly ? !!state.currentRepId : repIds.length > 0,
+  };
+  const notes = useCloudCollection<NoteRow>("rep_notes", { order: { column: "created_at" }, ...scopeOpts });
+  const tasks = useCloudCollection<TaskRow>("rep_tasks", { order: { column: "created_at" }, ...scopeOpts });
 
   const value = useMemo<Ctx>(() => {
     const base = { openRepId, open: (id: string) => setOpenRepId(id), close: () => setOpenRepId(null) };
@@ -60,14 +76,22 @@ export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
     if (!notes.live) {
       return {
         ...base,
+        isLoading: false,
+        isError: false,
         getNotes: (repId) => demo.notes[repId] ?? [],
-        addNote: (repId, text, author = "מנהל") =>
+        addNote: (repId, text, opts) =>
           setDemo((s) => ({
             ...s,
             notes: {
               ...s.notes,
               [repId]: [
-                { id: uid(), author, date: new Date().toISOString().slice(0, 10), text },
+                {
+                  id: uid(),
+                  author: opts?.author ?? "מנהל",
+                  date: new Date().toISOString().slice(0, 10),
+                  text,
+                  isPrivate: opts?.isPrivate ?? true,
+                },
                 ...(s.notes[repId] ?? []),
               ],
             },
@@ -106,6 +130,8 @@ export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
 
     return {
       ...base,
+      isLoading: notes.isLoading || tasks.isLoading,
+      isError: notes.isError || tasks.isError,
       getNotes: (repId) =>
         notes.rows
           .filter((n) => n.representative_id === repId)
@@ -114,14 +140,15 @@ export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
             author: n.author_name || "מנהל",
             date: n.created_at.slice(0, 10),
             text: n.text,
+            isPrivate: n.is_private,
           })),
-      addNote: (repId, text, author) =>
+      addNote: (repId, text, opts) =>
         void notes.insert(
           {
             representative_id: repId,
             text,
-            author_name: author ?? profile?.full_name ?? "מנהל",
-            is_private: true,
+            author_name: opts?.author ?? profile?.full_name ?? "מנהל",
+            is_private: opts?.isPrivate ?? true,
           },
           "author_id",
         ),

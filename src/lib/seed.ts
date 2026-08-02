@@ -1,3 +1,5 @@
+import type { Feedback } from "./feedback-domain";
+
 export const UNASSIGNED_TEAM_LABEL = "ללא צוות";
 
 export type Rep = {
@@ -59,42 +61,6 @@ export type Article = {
   important: boolean;
 };
 
-export type CriterionValue = "done" | "partial" | "not_done" | "na";
-// Must stay a superset of every criteriaKeys entry in feedback.tsx's SECTIONS —
-// a key present in the form but missing here is silently excluded from the
-// score (it's captured in the criteria jsonb but never counted).
-export const CRITERIA: { key: string; label: string }[] = [
-  { key: "opening", label: "פתיחת שיחה ברורה ומקצועית" },
-  { key: "needs", label: "אימות צורכי הלקוח" },
-  { key: "benefits", label: "הצגת יתרונות המוצר" },
-  { key: "value", label: "יצירת ערך" },
-  { key: "objections", label: "טיפול בהתנגדויות" },
-  { key: "upsell", label: "הצעת שדרוג" },
-  { key: "summary", label: "סיכום השיחה" },
-  { key: "regulation", label: "עמידה ברגולציה" },
-  { key: "service", label: "שירותיות" },
-  { key: "closing", label: "הנעה לסגירה" },
-  { key: "knowledge", label: "ידע מקצועי" },
-  { key: "impression", label: "התרשמות מנהל" },
-];
-
-export type Feedback = {
-  id: string;
-  repId: string;
-  date: string;
-  callId: string;
-  callType: string;
-  listener: string;
-  criteria: Record<string, CriterionValue>;
-  score: number;
-  keep: string;
-  improve: string;
-  managerSummary: string;
-  nextTask: string;
-  published: boolean;
-  scheduleId: string | null;
-};
-
 export type Role = "manager" | "rep";
 
 export type AppState = {
@@ -105,6 +71,10 @@ export type AppState = {
   competitions: Competition[];
   articles: Article[];
   feedback: Feedback[];
+  /** True while the Live Mode feedback query is still in flight. Always false in Demo Mode. */
+  feedbackLoading: boolean;
+  /** Set when the Live Mode feedback query failed. Always null in Demo Mode. */
+  feedbackError: string | null;
 };
 
 const today = new Date();
@@ -123,6 +93,8 @@ const daysFromNow = (n: number) => {
 export const SEED: AppState = {
   role: "manager",
   currentRepId: "r1",
+  feedbackLoading: false,
+  feedbackError: null,
   reps: [
     { id: "r1", name: "יעל כהן", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 98 },
     { id: "r2", name: "אורי לוי", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 132 },

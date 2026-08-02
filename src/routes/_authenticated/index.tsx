@@ -7,6 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useApp, teamSummary, teamsFromReps, statusForRep } from "@/lib/store";
+import type { Rep } from "@/lib/seed";
+import type { Feedback } from "@/lib/feedback-domain";
 import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth, workdaysPassed } from "@/lib/format";
 import {
@@ -148,7 +150,7 @@ function HomePage() {
       )}
 
       {/* Insights */}
-      {isManager && <InsightsCard />}
+      {isManager && <InsightsCard reps={reps} feedback={feedback} diff={diff} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Top 3 */}
@@ -252,30 +254,6 @@ function HomePage() {
 
     </div>
   );
-
-  function InsightsCard() {
-    const insights = useMemo(() => buildInsights(reps, feedback, diff), []);
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Lightbulb className="h-4 w-4 text-primary" />
-            תובנות
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {insights.map((t, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-xl border p-3 bg-accent/30">
-                <Sparkles className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-                <p className="text-sm leading-relaxed">{t}</p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   function ManagerAlerts({ className }: { className?: string }) {
     const underPace = reps.filter((r) => {
@@ -544,9 +522,40 @@ function TeamCard({ teamName, summary }: { teamName: string; summary: ReturnType
 }
 
 
+/**
+ * Was previously a component defined inside HomePage's render body with
+ * useMemo(..., []) — an always-empty dependency array that never actually
+ * recomputed on prop changes (only ever refreshed because redefining the
+ * component every render forced a full remount, not a real memoized update).
+ * Lifted to a real top-level component with correct dependencies.
+ */
+function InsightsCard({ reps, feedback, diff }: { reps: Rep[]; feedback: Feedback[]; diff: number }) {
+  const insights = useMemo(() => buildInsights(reps, feedback, diff), [reps, feedback, diff]);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Lightbulb className="h-4 w-4 text-primary" />
+          תובנות
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {insights.map((t, i) => (
+            <div key={i} className="flex items-start gap-3 rounded-xl border p-3 bg-accent/30">
+              <Sparkles className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <p className="text-sm leading-relaxed">{t}</p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function buildInsights(
-  reps: ReturnType<typeof Object>["prototype"] extends never ? never : any,
-  _feedback: any,
+  reps: Rep[],
+  _feedback: Feedback[],
   diff: number,
 ): string[] {
   const list: string[] = [];

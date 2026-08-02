@@ -8,12 +8,10 @@ import {
   type CompetitionCategory,
   type Article,
   type ArticleCategory,
-  type Feedback,
   type Role,
   UNASSIGNED_TEAM_LABEL,
-  CRITERIA,
-  type CriterionValue,
 } from "./seed";
+import { CRITERIA, type Feedback, type CriterionValue } from "./feedback-domain";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
@@ -121,14 +119,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     order: { column: "created_at", ascending: true },
   });
   const compScores = useCloudCollection<CompetitionScoreRow>("competition_scores", {});
-  // A plain representative (no manager/admin role) only ever needs their own feedback —
-  // scope the query to it. Managers/admins need every rep they can manage, which the
-  // simple equality filter here can't express, so they stay unscoped and rely on RLS
-  // (can_manage_rep) as they already do.
+  // A plain representative only ever needs their own feedback — eq-scope it. A
+  // manager/admin needs every rep they can manage; `reps` is already exactly that set
+  // (listRepresentatives is RLS-scoped the same way — manager's own team, admin sees
+  // all), so we reuse it as an `in` filter instead of fetching the whole table. Gated
+  // on the relevant id(s) actually being resolved yet, so this never briefly
+  // over-fetches (rep) or queries an empty `in: []` (manager) while reps are still loading.
   const isRepOnly = !isAdmin && !isManager;
+  const repIds = useMemo(() => reps.map((r) => r.id), [reps]);
   const feedback = useCloudCollection<FeedbackRow>("feedback", {
     order: { column: "feedback_date" },
     eq: isRepOnly && currentRepId ? { representative_id: currentRepId } : undefined,
+    in: !isRepOnly && repIds.length > 0 ? { representative_id: repIds } : undefined,
+    enabled: isRepOnly ? !!currentRepId : repIds.length > 0,
   });
 
   const live = announcements.live;
@@ -197,8 +200,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         published: f.published,
         scheduleId: f.schedule_id,
       })),
+      feedbackLoading: feedback.isLoading,
+      feedbackError: feedback.isError ? (feedback.error?.message ?? "שגיאה בטעינת נתוני משוב") : null,
     };
-  }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows]);
+  }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error]);
 
   const value: Ctx = useMemo(() => {
     const shared = {

@@ -7,6 +7,7 @@ import { useAppMode } from "@/lib/app-mode";
 import { useCloudTeams } from "@/lib/teams-hooks";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
 import type { Rep } from "@/lib/seed";
+import type { Feedback } from "@/lib/feedback-domain";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
@@ -19,10 +20,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
-  Pencil, Plus, TrendingDown, TrendingUp, Minus, Search,
+  Pencil, Plus, Search,
   Users, CheckCircle2, AlertTriangle, Target, Gauge, LineChart as LineChartIcon,
   FileSpreadsheet, FileText, Printer, Headphones, StickyNote, Lightbulb,
-  Sparkles, ArrowUpRight,
+  Sparkles,
 } from "lucide-react";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import { toast } from "sonner";
@@ -45,61 +46,29 @@ export const Route = createFileRoute("/_authenticated/performance")({
   component: PerformancePage,
 });
 
-// -------- deterministic per-rep demo data --------
-function hash(id: string) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-function pick<T>(id: string, salt: number, arr: T[]): T {
-  return arr[(hash(id) + salt) % arr.length];
+function daysSince(dateStr: string) {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
 
-const MONTHS_HE = ["ינו׳", "פבר׳", "מרץ", "אפר׳", "מאי", "יוני", "יולי", "אוג׳", "ספט׳", "אוק׳", "נוב׳", "דצמ׳"];
-
-function monthlyHistory(rep: Rep) {
-  // 6 months ending with current pace
-  const seed = hash(rep.id);
-  const now = new Date();
-  const points: { month: string; value: number; target: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const label = MONTHS_HE[d.getMonth()];
-    const noise = ((seed >> (i * 3)) & 0x1f) / 31; // 0..1
-    const base = rep.monthlyTarget * (0.55 + noise * 0.75);
-    const value = i === 0 ? rep.currentResult : Math.round(base);
-    points.push({ month: label, value, target: rep.monthlyTarget });
-  }
-  return points;
-}
-
-function repTrend(rep: Rep): "up" | "down" | "flat" {
-  const h = monthlyHistory(rep);
-  const prev = h[h.length - 2].value;
-  const cur = h[h.length - 1].value;
-  const diff = cur - prev;
-  const threshold = Math.max(3, prev * 0.05);
-  if (diff > threshold) return "up";
-  if (diff < -threshold) return "down";
-  return "flat";
-}
-
-function repTrendPct(rep: Rep): number {
-  const h = monthlyHistory(rep);
-  const prev = h[h.length - 2].value;
-  const cur = h[h.length - 1].value;
-  if (!prev) return 0;
-  return ((cur - prev) / prev) * 100;
-}
-
-function last3MonthsAvg(rep: Rep): number {
-  const h = monthlyHistory(rep);
-  const last3 = h.slice(-3);
-  return last3.reduce((s, p) => s + p.value, 0) / 3;
+export function feedbackStatsFor(repId: string, feedback: Feedback[]): { avgScore: number | null; daysSinceLast: number | null } {
+  const list = feedback.filter((f) => f.repId === repId);
+  if (list.length === 0) return { avgScore: null, daysSinceLast: null };
+  const avgScore = Math.round(list.reduce((s, f) => s + f.score, 0) / list.length);
+  const last = [...list].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  return { avgScore, daysSinceLast: daysSince(last.date) };
 }
 
 type RiskLevel = "low" | "medium" | "high";
-function computeRisk(rep: Rep, pct: number, trendPct: number): {
+/**
+ * Derived entirely from real data: target/result pace, and the rep's actual
+ * feedback records. No historical monthly snapshot exists in the schema, so unlike
+ * the removed version this never fabricates a trend — and the previous
+ * "missing feedback"/"missing listening" reasons here were seeded from
+ * hash(rep.id) rather than the rep's real feedback history, so two reps with
+ * identical real data could get different risk levels purely by id. Fixed the
+ * same way RepWorkspace's equivalent (riskOf) was fixed.
+ */
+export function computeRisk(rep: Rep, pct: number, avgScore: number | null, daysSinceLastFeedback: number | null): {
   level: RiskLevel;
   reasons: string[];
 } {
@@ -107,13 +76,9 @@ function computeRisk(rep: Rep, pct: number, trendPct: number): {
   const reasons: string[] = [];
   if (pct < 80) { score += 2; reasons.push("ביצוע מתחת ל-80%"); }
   else if (pct < 95) { score += 1; reasons.push("ביצוע מתחת לצפוי"); }
-  if (trendPct <= -5) { score += 2; reasons.push("מגמת ירידה"); }
-  else if (trendPct < 0) { score += 1; reasons.push("ירידה קלה במגמה"); }
-  const h = hash(rep.id);
-  const missingFeedback = h % 5 === 0;
-  const missingListening = ((h >> 2) % 4) === 0;
-  if (missingFeedback) { score += 1; reasons.push("חסר משוב עדכני"); }
-  if (missingListening) { score += 1; reasons.push("ללא האזנה השבוע"); }
+  if (avgScore !== null && avgScore < 60) { score += 2; reasons.push("ציון איכות ממוצע נמוך בהאזנות"); }
+  if (daysSinceLastFeedback === null) { score += 1; reasons.push("אין עדיין משוב מתועד"); }
+  else if (daysSinceLastFeedback > 30) { score += 1; reasons.push("אין משוב עדכני (מעל 30 יום)"); }
   const level: RiskLevel = score >= 4 ? "high" : score >= 2 ? "medium" : "low";
   return { level, reasons };
 }
@@ -150,62 +115,21 @@ function statusBadgeClass(s: Status) {
   return "bg-primary/10 text-primary border border-primary/25";
 }
 
-const KEEP_LIST = [
-  "עמידה גבוהה בסטנדרט השירות",
-  "בירור צרכים יסודי לפני הצעה",
-  "פתיחת שיחה מסודרת ומקצועית",
-  "התמדה ורצף חידושים יציב",
-  "הצעת שדרוגים בטבעיות",
-];
-const IMPROVE_LIST = [
-  "חיזוק שלב הסגירה בשיחה",
-  "העמקת הצעת שדרוגי כיסוי",
-  "טיפול בהתנגדות מחיר",
-  "ניהול זמן שיחה",
-  "מעקב אחר לידים חוזרים",
-];
-const TASK_LIST = [
-  "צפייה בהדרכת שדרוג",
-  "פגישת 1:1 עם ראש צוות",
-  "תרגול תרחישי התנגדות",
-  "האזנה עצמית לשתי שיחות",
-  "שיחת שיקוף עם עמית מוביל",
-];
-
-function repDemoNotes(rep: Rep) {
-  return {
-    achievements: [
-      pick(rep.id, 1, KEEP_LIST),
-      pick(rep.id, 5, KEEP_LIST),
-    ],
-    improvements: [
-      pick(rep.id, 2, IMPROVE_LIST),
-      pick(rep.id, 7, IMPROVE_LIST),
-    ],
-    tasks: [
-      pick(rep.id, 3, TASK_LIST),
-      pick(rep.id, 9, TASK_LIST),
-    ],
-    lastListen: (hash(rep.id) % 12) + 1, // days ago
-    scores: [
-      60 + (hash(rep.id) % 35),
-      55 + ((hash(rep.id) >> 3) % 40),
-      65 + ((hash(rep.id) >> 5) % 30),
-    ],
-    managerNote: pick(rep.id, 11, [
-      "נציג יציב, מומלץ לחזק סגירות מורכבות.",
-      "פוטנציאל גבוה, כדאי לשבץ בהדרכת עמיתים.",
-      "יש לעקוב מקרוב אחרי שבועיים הקרובים.",
-      "משתפר משמעותית, לחזק את המומנטום.",
-    ]),
-  };
-}
-
 // -------- component --------
 
 type SortKey = "pct_desc" | "pct_asc" | "target" | "result" | "name";
 type StatusFilter = "all" | Status;
 type TeamFilter = "all" | string;
+
+type EnrichedRep = {
+  rep: Rep;
+  pct: number;
+  gap: number;
+  status: Status;
+  pace: ReturnType<typeof paceInfo>;
+  remaining: number;
+  risk: ReturnType<typeof computeRisk>;
+};
 
 function PerformancePage() {
   const { state } = useApp();
@@ -224,22 +148,19 @@ function PerformancePage() {
     () =>
       scoped.map((r) => {
         const pct = r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0;
-        const trendPct = repTrendPct(r);
         const status = statusOf(r);
+        const { avgScore, daysSinceLast } = feedbackStatsFor(r.id, state.feedback);
         return {
           rep: r,
           pct,
           gap: r.currentResult - r.monthlyTarget,
           status,
-          trend: repTrend(r),
-          trendPct,
           pace: paceInfo(r),
           remaining: Math.max(0, r.monthlyTarget - r.currentResult),
-          risk: computeRisk(r, pct, trendPct),
-          avg3: last3MonthsAvg(r),
+          risk: computeRisk(r, pct, avgScore, daysSinceLast),
         };
       }),
-    [scoped]
+    [scoped, state.feedback]
   );
 
   const filtered = useMemo(() => {
@@ -484,7 +405,6 @@ function PerformancePage() {
                       <TableHead className="min-w-[220px]">%</TableHead>
                       <TableHead className="text-end">קצב/יום</TableHead>
                       <TableHead className="text-end">נותרו</TableHead>
-                      <TableHead>מגמה</TableHead>
                       <TableHead>סטטוס</TableHead>
                       <TableHead>רמת סיכון</TableHead>
                       <TableHead className="text-end">פעולות</TableHead>
@@ -527,7 +447,6 @@ function PerformancePage() {
                             </span>
                           )}
                         </TableCell>
-                        <TableCell><TrendCell trend={e.trend} pct={e.trendPct} /></TableCell>
                         <TableCell>
                           <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium", statusBadgeClass(e.status))}>
                             <StatusDot status={e.status} />
@@ -575,8 +494,7 @@ function PerformancePage() {
                         tone={e.gap >= 0 ? "success" : "danger"}
                       />
                     </div>
-                    <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <TrendCell trend={e.trend} pct={e.trendPct} />
+                    <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
                       <RiskBadge level={e.risk.level} />
                     </div>
                     <div className="mt-2 text-xs text-muted-foreground">
@@ -628,28 +546,6 @@ function SummaryCard({
 function StatusDot({ status }: { status: Status }) {
   const c = status === "above" ? "bg-[color:var(--success)]" : status === "onpace" ? "bg-[color:var(--warning)]" : "bg-primary";
   return <span className={cn("h-1.5 w-1.5 rounded-full", c)} aria-hidden />;
-}
-
-function TrendCell({ trend, pct }: { trend: "up" | "down" | "flat"; pct?: number }) {
-  const pctLabel = pct !== undefined && Math.abs(pct) >= 0.5 ? `${pct > 0 ? "+" : ""}${Math.round(pct)}%` : null;
-  if (trend === "up") return (
-    <span className="inline-flex items-center gap-1 text-[color:var(--success)] text-sm">
-      <TrendingUp className="h-4 w-4" />
-      <span className="tabular-nums">{pctLabel ?? "משתפר"}</span>
-    </span>
-  );
-  if (trend === "down") return (
-    <span className="inline-flex items-center gap-1 text-primary text-sm">
-      <TrendingDown className="h-4 w-4" />
-      <span className="tabular-nums">{pctLabel ?? "בירידה"}</span>
-    </span>
-  );
-  return (
-    <span className="inline-flex items-center gap-1 text-muted-foreground text-sm">
-      <Minus className="h-4 w-4" />
-      <span className="tabular-nums">{pctLabel ?? "יציב"}</span>
-    </span>
-  );
 }
 
 function ColoredBar({ pct, status, className }: { pct: number; status: Status; className?: string }) {
@@ -718,7 +614,7 @@ function MobileStat({ label, value, tone }: { label: string; value: string; tone
 
 // -------- insights --------
 
-function buildInsights(items: ReturnType<typeof enrich>[]) {
+function buildInsights(items: EnrichedRep[]) {
   if (items.length === 0) return [];
   const out: string[] = [];
   const sorted = [...items].sort((a, b) => b.pct - a.pct);
@@ -748,266 +644,11 @@ function buildInsights(items: ReturnType<typeof enrich>[]) {
   const needCoaching = items.filter((e) => e.status === "attention").length;
   if (needCoaching > 0) out.push(`${needCoaching === 1 ? "נציג אחד דורש" : `${needCoaching} נציגים דורשים`} ליווי צמוד השבוע.`);
 
-  const improving = items.filter((e) => e.trend === "up");
-  if (improving.length >= 1) {
-    const pickImp = improving[hash("imp") % improving.length];
-    const delta = 10 + (hash(pickImp.rep.id) % 15);
-    out.push(`${pickImp.rep.name} השתפר ב-${delta}% לעומת החודש הקודם.`);
-  }
-
   const above = items.filter((e) => e.status === "above").length;
   if (above > 0) out.push(`${above} נציגים כבר מעל היעד החודשי.`);
 
   return out.slice(0, 5);
 }
-// helper to type buildInsights parameter
-function enrich(r: Rep) {
-  const pct = r.monthlyTarget ? (r.currentResult / r.monthlyTarget) * 100 : 0;
-  const trendPct = repTrendPct(r);
-  const status = statusOf(r);
-  return {
-    rep: r, pct, gap: r.currentResult - r.monthlyTarget,
-    status, trend: repTrend(r), trendPct, pace: paceInfo(r),
-    remaining: Math.max(0, r.monthlyTarget - r.currentResult),
-    risk: computeRisk(r, pct, trendPct),
-    avg3: last3MonthsAvg(r),
-  };
-}
-
-// -------- side panel --------
-
-function RepDetailsSheet({
-  open, onClose, item,
-}: { open: boolean; onClose: () => void; item: ReturnType<typeof enrich> | null }) {
-  if (!item) {
-    return (
-      <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-        <SheetContent side="left" className="w-full sm:max-w-lg" />
-      </Sheet>
-    );
-  }
-  const rep = item.rep;
-  const notes = repDemoNotes(rep);
-  const history = monthlyHistory(rep);
-
-  return (
-    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-      <SheetContent side="left" className="w-full sm:max-w-lg overflow-y-auto p-0">
-        <SheetHeader className="p-6 pb-4 border-b">
-          <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary font-bold shrink-0">
-              {rep.name.slice(0, 1)}
-            </div>
-            <div className="min-w-0">
-              <SheetTitle className="text-lg truncate text-start">{rep.name}</SheetTitle>
-              <SheetDescription className="text-start">
-                {rep.teamName} · <span className={cn("inline-flex items-center gap-1", statusBadgeClass(item.status), "rounded-full px-2 py-0.5 text-xs")}>
-                  <StatusDot status={item.status} />{STATUS_LABEL[item.status]}
-                </span>
-              </SheetDescription>
-            </div>
-          </div>
-        </SheetHeader>
-
-        <div className="p-6 space-y-6">
-          {/* KPI mini */}
-          <div className="grid grid-cols-3 gap-3">
-            <MiniKpi label="יעד חודשי" value={formatNum(rep.monthlyTarget)} />
-            <MiniKpi label="ביצוע נוכחי" value={formatNum(rep.currentResult)} />
-            <MiniKpi label="אחוז עמידה" value={formatPct(item.pct)} tone={item.status === "above" ? "success" : item.status === "attention" ? "danger" : "warning"} />
-          </div>
-          <div>
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-              <span>התקדמות ליעד</span>
-              <span>{item.remaining > 0 ? `${formatNum(item.remaining)} נותרו · ${formatNum(item.pace.perDay)}/יום` : `+${formatNum(item.gap)} מעל היעד`}</span>
-            </div>
-            <ColoredBar pct={item.pct} status={item.status} />
-            <div className="mt-2 flex items-center justify-between text-xs">
-              <TrendCell trend={item.trend} pct={item.trendPct} />
-              <span className="text-muted-foreground">תחזית סוף חודש: <span className="font-semibold text-foreground tabular-nums">{formatNum(item.pace.forecast)}</span></span>
-            </div>
-          </div>
-
-          {/* 3-month trend + Risk */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border p-3">
-              <div className="text-[11px] text-muted-foreground">ממוצע 3 חודשים אחרונים</div>
-              <div className="mt-1 text-lg font-extrabold tabular-nums">{formatNum(Math.round(item.avg3))}</div>
-              <div className="mt-0.5 text-[11px]"><TrendCell trend={item.trend} pct={item.trendPct} /></div>
-            </div>
-            <div className="rounded-xl border p-3">
-              <div className="flex items-center justify-between">
-                <div className="text-[11px] text-muted-foreground">רמת סיכון</div>
-                <RiskBadge level={item.risk.level} />
-              </div>
-              <ul className="mt-2 space-y-0.5 text-[11px] text-muted-foreground">
-                {item.risk.reasons.length ? item.risk.reasons.slice(0, 3).map((r, i) => (
-                  <li key={i}>• {r}</li>
-                )) : <li>אין דגלים אדומים</li>}
-              </ul>
-            </div>
-          </div>
-
-          {/* Goals */}
-          <div>
-            <div className="text-sm font-semibold mb-2">יעדים</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl border p-3">
-                <div className="text-[11px] text-muted-foreground">יעד חודשי</div>
-                <div className="text-base font-bold tabular-nums">{formatNum(rep.monthlyTarget)}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-[11px] text-muted-foreground">קצב יומי נדרש</div>
-                <div className="text-base font-bold tabular-nums">{formatNum(item.pace.perDay)}/יום</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-[11px] text-muted-foreground">ימי עבודה שנותרו</div>
-                <div className="text-base font-bold tabular-nums">{formatNum(item.pace.remaining)}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-[11px] text-muted-foreground">תחזית סוף חודש</div>
-                <div className={cn("text-base font-bold tabular-nums", item.pace.forecast >= rep.monthlyTarget ? "text-[color:var(--success)]" : "text-primary")}>
-                  {formatNum(item.pace.forecast)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Performance summary */}
-          <div>
-            <div className="text-sm font-semibold mb-2">סיכום ביצועים</div>
-            <p className="rounded-xl border bg-muted/30 p-3 text-sm text-foreground/85 leading-relaxed">
-              {rep.name} נמצא כעת על <span className="font-semibold">{formatPct(item.pct)}</span> מהיעד החודשי
-              {item.trendPct >= 0.5 ? ` עם שיפור של ${Math.round(item.trendPct)}% ` : item.trendPct <= -0.5 ? ` עם ירידה של ${Math.round(Math.abs(item.trendPct))}% ` : " במגמה יציבה "}
-              לעומת החודש הקודם. {item.risk.level === "high" ? "רמת הסיכון גבוהה - מומלץ ליווי צמוד." : item.risk.level === "medium" ? "יש דגלים בודדים - כדאי לעקוב השבוע." : "אין דגלים אדומים - להמשיך במגמה."}
-            </p>
-          </div>
-
-          {/* Chart */}
-          <Card className="border-dashed">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><LineChartIcon className="h-4 w-4 text-primary" />מגמה חודשית (6 חודשים)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={history} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>
-                    <XAxis dataKey="month" reversed tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={10} tickLine={false} axisLine={false} />
-                    <YAxis hide />
-                    <Tooltip
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                      formatter={(v: number) => [formatNum(v), "חידושים"]}
-                      labelFormatter={(l) => `חודש ${l}`}
-                    />
-                    <ReferenceLine y={rep.monthlyTarget} stroke="var(--muted-foreground)" strokeDasharray="4 4" opacity={0.5} />
-                    <Line type="monotone" dataKey="value" stroke="var(--primary)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick actions */}
-          <div>
-            <div className="text-sm font-semibold mb-2">פעולות מהירות</div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" size="sm" onClick={() => toast.success("פתיחת טופס האזנה חדש")}>
-                <Headphones className="ms-1 h-4 w-4" />הוסף האזנה
-              </Button>
-              <ManagerOnly>
-                <RepFormDialog rep={rep} trigger={
-                  <Button variant="outline" size="sm"><Pencil className="ms-1 h-4 w-4" />ערוך יעד</Button>
-                } />
-              </ManagerOnly>
-              <Button variant="outline" size="sm" onClick={() => toast.success("הערה נוספה לתיק הנציג")}>
-                <StickyNote className="ms-1 h-4 w-4" />הוסף הערה
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => toast.success("פותח דוח ביצועים מלא")}>
-                <ArrowUpRight className="ms-1 h-4 w-4" />פתח ביצועים
-              </Button>
-            </div>
-          </div>
-
-          {/* Feedback + scores */}
-          <div>
-            <div className="text-sm font-semibold mb-2">האזנות אחרונות</div>
-            <div className="rounded-xl border p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>האזנה אחרונה</span>
-                <span>לפני {notes.lastListen} ימים · {formatDateIL(new Date(Date.now() - notes.lastListen * 86400000))}</span>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-3 gap-2 text-center">
-                {notes.scores.map((s, i) => (
-                  <div key={i} className="rounded-lg bg-muted/40 py-2">
-                    <div className="text-[11px] text-muted-foreground">האזנה {i + 1}</div>
-                    <div className={cn("text-lg font-bold tabular-nums", s >= 85 ? "text-[color:var(--success)]" : s >= 70 ? "text-foreground" : "text-primary")}>{s}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <div className="text-sm font-semibold mb-2">הערות מנהל</div>
-            <p className="rounded-xl border bg-muted/30 p-3 text-sm text-foreground/85 leading-relaxed">
-              {notes.managerNote}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <NoteList title="הישגים" tone="success" items={notes.achievements} />
-            <NoteList title="נקודות לשיפור" tone="danger" items={notes.improvements} />
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold mb-2">משימות קרובות</div>
-            <ul className="space-y-1.5">
-              {notes.tasks.map((t, i) => (
-                <li key={i} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" aria-hidden />
-                  {t}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-function MiniKpi({ label, value, tone }: { label: string; value: string; tone?: "success" | "warning" | "danger" }) {
-  return (
-    <div className="rounded-xl border p-3 text-center">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={cn(
-        "mt-1 text-lg font-extrabold tabular-nums",
-        tone === "success" && "text-[color:var(--success)]",
-        tone === "warning" && "text-[color:oklch(0.45_0.14_75)]",
-        tone === "danger" && "text-primary"
-      )}>{value}</div>
-    </div>
-  );
-}
-
-function NoteList({ title, tone, items }: { title: string; tone: "success" | "danger"; items: string[] }) {
-  return (
-    <div>
-      <div className="text-sm font-semibold mb-2">{title}</div>
-      <ul className="space-y-1.5">
-        {items.map((t, i) => (
-          <li key={i} className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm">
-            <span className={cn("mt-1.5 h-1.5 w-1.5 rounded-full shrink-0", tone === "success" ? "bg-[color:var(--success)]" : "bg-primary")} aria-hidden />
-            <span>{t}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // -------- add/edit dialog --------
 
 function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }) {

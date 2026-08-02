@@ -1,5 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { useCloudCollection } from "@/lib/cloud-hooks";
+import { useApp } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 
 // Single source of truth for supported statuses — must stay in sync with the
 // listening_schedules_status_check CHECK constraint added in
@@ -31,6 +33,8 @@ type Ctx = {
   updateSchedule: (id: string, p: Partial<Schedule>) => void;
   removeSchedule: (id: string) => void;
   completeSchedule: (id: string) => void;
+  isLoading: boolean;
+  isError: boolean;
 };
 
 const C = createContext<Ctx | null>(null);
@@ -47,8 +51,19 @@ function toRow(p: Partial<Schedule>) {
 }
 
 export function ListeningProvider({ children }: { children: ReactNode }) {
+  const { state } = useApp();
+  const { isAdmin, isManager } = useAuth();
+  const isRepOnly = !isAdmin && !isManager;
+  const repIds = useMemo(() => state.reps.map((r) => r.id), [state.reps]);
+
+  // Same scoping rationale as the feedback query in store.tsx: a rep only ever needs
+  // their own schedules, a manager/admin needs every rep they can manage (= state.reps,
+  // already RLS-scoped that way).
   const cloud = useCloudCollection<ScheduleRow>("listening_schedules", {
     order: { column: "scheduled_on", ascending: true },
+    eq: isRepOnly && state.currentRepId ? { representative_id: state.currentRepId } : undefined,
+    in: !isRepOnly && repIds.length > 0 ? { representative_id: repIds } : undefined,
+    enabled: isRepOnly ? !!state.currentRepId : repIds.length > 0,
   });
   const [demo, setDemo] = useState<Schedule[]>([]);
 
@@ -61,6 +76,8 @@ export function ListeningProvider({ children }: { children: ReactNode }) {
         removeSchedule: (id) => setDemo((st) => st.filter((s) => s.id !== id)),
         completeSchedule: (id) =>
           setDemo((st) => st.map((s) => (s.id === id ? { ...s, status: "completed" } : s))),
+        isLoading: false,
+        isError: false,
       };
     }
     const schedules: Schedule[] = cloud.rows.map((r) => ({
@@ -78,6 +95,8 @@ export function ListeningProvider({ children }: { children: ReactNode }) {
       updateSchedule: (id, p) => void cloud.update(id, toRow(p)),
       removeSchedule: (id) => void cloud.remove(id),
       completeSchedule: (id) => void cloud.update(id, { status: "completed" }),
+      isLoading: cloud.isLoading,
+      isError: cloud.isError,
     };
   }, [cloud, demo]);
 

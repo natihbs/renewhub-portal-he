@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useApp, useIsManager, computeScore, teamsFromReps, visibleFeedback } from "@/lib/store";
-import { CRITERIA, type CriterionValue, type Feedback, type Rep } from "@/lib/seed";
+import type { Rep, Article } from "@/lib/seed";
+import { CRITERIA, type CriterionValue, type Feedback, scoreTone, SCORE_TEXT_CLASS, SCORE_BADGE_CLASS } from "@/lib/feedback-domain";
 import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useAuth } from "@/lib/auth";
@@ -21,6 +22,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -66,19 +68,20 @@ const VALUES: { key: CriterionValue; label: string }[] = [
   { key: "na", label: "לא רלוונטי" },
 ];
 
-// Article recommendations per weak section
-const RECOMMENDED_ARTICLES: Record<SectionKey, { title: string; category: string }> = {
-  opening:    { title: "פתיחת שיחת חידוש אפקטיבית", category: "תסריטי שיחה" },
-  needs:      { title: "שאלות שחובה לשאול בחידוש דירה", category: "ביטוח דירה" },
-  value:      { title: "כיצד להציג ערך בחידוש ביטוח רכב", category: "תסריטי שיחה" },
-  objections: { title: "טיפול בהתנגדות מחיר", category: "טיפול בהתנגדויות" },
-  upsell:     { title: "יתרונות מנורה ON", category: "מנורה ON" },
-  closing:    { title: "כיצד לסכם שיחת מכירה בצורה נכונה", category: "הדרכות" },
-  compliance: { title: "רגולציה בשיחות מכירה", category: "הדרכות" },
-  service:    { title: "שירותיות בשיחת חידוש", category: "הדרכות" },
-  knowledge:  { title: "ההבדל בין ביטוח מקיף לביטוח צד ג'", category: "ביטוח רכב" },
-  impression: { title: "מבנה שיחה מקצועי", category: "הדרכות" },
-};
+/**
+ * Recommends a real article from the org's own knowledge base (state.articles) for a
+ * weak section, instead of a hardcoded title tied to one specific business's product
+ * line (the previous version recommended articles like "יתרונות מנורה ON" regardless
+ * of whether that article — or anything like it — actually existed in the cloud
+ * articles table). Matches on the section's own generic label against the article's
+ * title/category; returns null when nothing in the knowledge base is relevant, which
+ * callers must handle instead of assuming a recommendation always exists.
+ */
+function recommendedArticleFor(section: SectionKey, articles: Article[]): Article | null {
+  const label = SECTIONS.find((s) => s.key === section)?.label;
+  if (!label) return null;
+  return articles.find((a) => a.title.includes(label) || a.category.includes(label) || label.includes(a.category)) ?? null;
+}
 
 // -------------------- Helpers --------------------
 const criteriaValueToNum = (v?: CriterionValue): number | null => {
@@ -226,11 +229,14 @@ function ListeningCenter() {
             <CalendarTab openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="history" className="mt-4">
-            <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} />
+            <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} isLoading={state.feedbackLoading} isError={!!state.feedbackError} />
           </TabsContent>
         </Tabs>
       ) : (
-        <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} />
+        <div className="space-y-4">
+          <MyTasksAndNotes />
+          <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} />
+        </div>
       )}
 
       {isManager && (
@@ -427,9 +433,7 @@ function RecentSessions({ list, onView }: { list: Feedback[]; onView: (id: strin
                 <button onClick={() => onView(f.id)} className="w-full flex items-center gap-3 py-3 hover:bg-accent/30 transition-colors -mx-2 px-2 rounded">
                   <div className={cn(
                     "grid h-10 w-10 shrink-0 place-items-center rounded-full font-bold text-sm",
-                    f.score >= 80 ? "bg-[color:var(--success)]/15 text-[color:var(--success)]"
-                      : f.score >= 60 ? "bg-[color:var(--warning)]/15 text-[color:var(--warning)]"
-                      : "bg-primary/15 text-primary"
+                    SCORE_BADGE_CLASS[scoreTone(f.score)]
                   )}>{f.score}</div>
                   <div className="min-w-0 flex-1 text-start">
                     <div className="font-medium text-sm">{nameOf(f.repId)} <span className="text-muted-foreground font-normal">· {f.callType}</span></div>
@@ -645,17 +649,20 @@ function AnalysisTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {weaknesses.map((w) => (
+                {weaknesses.map((w) => {
+                  const article = recommendedArticleFor(w.key as SectionKey, state.articles);
+                  return (
                   <div key={w.key} className="flex items-center justify-between rounded-lg border p-2">
                     <div>
                       <div className="text-sm font-medium">{w.section}</div>
                       <div className="text-xs text-muted-foreground mt-0.5">
-                        המלצה: {RECOMMENDED_ARTICLES[w.key as SectionKey].title}
+                        {article ? `המלצה: ${article.title}` : "אין מאמר מומלץ זמין במרכז הידע"}
                       </div>
                     </div>
                     <Badge className="bg-primary/15 text-primary border-0">{w.avg}</Badge>
                   </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           </div>
@@ -792,9 +799,11 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
     parts.push(`ב-${list.length} ההאזנות האחרונות ציון האיכות הממוצע של ${rep.name} עומד על ${currentAvg}.`);
     if (strong) parts.push(`נקודת חוזק בולטת: ${strong.section.label} (${strong.avg}).`);
     if (weak && weak.avg < 70) parts.push(`עדיין קיימת חולשה ב${weak.section.label} (${weak.avg}).`);
-    parts.push(`מומלץ לבצע האזנה נוספת ${frequencyRec === "פעמיים בשבוע" ? "בתוך 3 ימים" : "בעוד שבוע"} ולהקצות את מאמר "${weak ? RECOMMENDED_ARTICLES[weak.section.key].title : "מבנה שיחה מקצועי"}".`);
+    parts.push(`מומלץ לבצע האזנה נוספת ${frequencyRec === "פעמיים בשבוע" ? "בתוך 3 ימים" : "בעוד שבוע"}.`);
+    const weakArticle = weak ? recommendedArticleFor(weak.section.key, state.articles) : null;
+    if (weakArticle) parts.push(`מומלץ להקצות את מאמר "${weakArticle.title}" מתוך מרכז הידע.`);
     return parts.join(" ");
-  }, [rep, list.length, currentAvg, weakest, frequencyRec, withData]);
+  }, [rep, list.length, currentAvg, weakest, frequencyRec, withData, state.articles]);
 
   return (
     <div className="space-y-4">
@@ -834,7 +843,9 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
               <CardContent className="space-y-2">
                 {weakest.length === 0 ? (
                   <p className="text-sm text-muted-foreground">אין נתונים מספיקים לגיבוש יעדים.</p>
-                ) : weakest.map((w, i) => (
+                ) : weakest.map((w, i) => {
+                  const article = recommendedArticleFor(w.section.key, state.articles);
+                  return (
                   <div key={w.section.key} className="rounded-lg border p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-semibold text-sm flex items-center gap-2">
@@ -843,12 +854,15 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                       </div>
                       <Badge variant="outline">ציון נוכחי: {w.avg}</Badge>
                     </div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                      <BookOpen className="h-3.5 w-3.5" />
-                      מאמר מומלץ: {RECOMMENDED_ARTICLES[w.section.key].title}
-                    </div>
+                    {article && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <BookOpen className="h-3.5 w-3.5" />
+                        מאמר מומלץ: {article.title}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
 
@@ -967,7 +981,7 @@ function RepBadges({ list, currentAvg }: { list: Feedback[]; currentAvg: number 
 // -------------------- Calendar tab --------------------
 function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?: string) => void }) {
   const { state } = useApp();
-  const { schedules, updateSchedule, removeSchedule } = useListening();
+  const { schedules, updateSchedule, removeSchedule, isLoading, isError } = useListening();
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
 
   const grouped = useMemo(() => {
@@ -989,7 +1003,13 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {grouped.length === 0 ? (
+        {isLoading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />)}
+          </div>
+        ) : isError ? (
+          <p className="text-sm text-destructive text-center py-4">שגיאה בטעינת יומן ההאזנות. נסו לרענן את הדף.</p>
+        ) : grouped.length === 0 ? (
           <EmptyState icon={CalendarIcon} title="אין האזנות מתוכננות" description="תזמנו האזנה כדי להוסיף ליומן." compact />
         ) : (
           <div className="space-y-4">
@@ -1070,8 +1090,114 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
   );
 }
 
+// -------------------- Representative self-service: my tasks & notes --------------------
+/**
+ * Reps land here with real, reachable capability: rep_tasks RLS already allows a rep
+ * to toggle (not add/delete) their own tasks, and rep_notes already lets them read
+ * non-private notes about them — but until now nothing in the UI exposed either to a
+ * representative session. Scoped to state.currentRepId; toggleTask/getTasks/getNotes
+ * are themselves scoped identically at the query level (see rep-workspace.tsx).
+ */
+function MyTasksAndNotes() {
+  const { state } = useApp();
+  const { getTasks, toggleTask, getNotes, isLoading, isError } = useRepWorkspace();
+  const repId = state.currentRepId;
+
+  if (!repId) return null;
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card><CardContent className="pt-6"><div className="h-20 animate-pulse rounded-lg bg-muted" /></CardContent></Card>
+        <Card><CardContent className="pt-6"><div className="h-20 animate-pulse rounded-lg bg-muted" /></CardContent></Card>
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <Card><CardContent className="pt-6 text-sm text-destructive">שגיאה בטעינת המשימות וההערות שלך.</CardContent></Card>
+    );
+  }
+
+  const tasks = getTasks(repId);
+  const notes = getNotes(repId);
+  const openTasks = tasks.filter((t) => !t.done);
+  const doneTasks = tasks.filter((t) => t.done);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card>
+        <CardHeader><CardTitle className="text-base">המשימות שלי</CardTitle></CardHeader>
+        <CardContent>
+          {tasks.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">אין לך משימות פתוחות כרגע.</p>
+          ) : (
+            <div className="space-y-3">
+              {openTasks.length > 0 && (
+                <ul className="space-y-1.5">
+                  {openTasks.map((t) => (
+                    <li key={t.id} className="flex items-center gap-2 rounded-xl border px-3 py-2">
+                      <Checkbox checked={t.done} onCheckedChange={() => toggleTask(repId, t.id)} aria-label={`סימון המשימה ${t.title} כבוצעה`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm truncate">{t.title}</div>
+                        <div className="text-[11px] text-muted-foreground">{t.due ? formatDateIL(t.due) : "ללא תאריך"}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {doneTasks.length > 0 && (
+                <ul className="space-y-1.5">
+                  {doneTasks.map((t) => (
+                    <li key={t.id} className="flex items-center gap-2 rounded-xl border px-3 py-2 opacity-60">
+                      <Checkbox checked={t.done} onCheckedChange={() => toggleTask(repId, t.id)} aria-label={`סימון המשימה ${t.title} כלא בוצעה`} />
+                      <div className="text-sm line-through truncate">{t.title}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-base">הערות עבורי</CardTitle></CardHeader>
+        <CardContent>
+          {notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">אין הערות שהמנהל שלך שיתף איתך.</p>
+          ) : (
+            <ul className="space-y-2">
+              {notes.map((n) => (
+                <li key={n.id} className="rounded-xl border p-3">
+                  <div className="text-[11px] text-muted-foreground mb-1">{n.author} · {formatDateIL(n.date)}</div>
+                  <p className="text-sm leading-relaxed">{n.text}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // -------------------- History table --------------------
-function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; nameOf: (id: string) => string; teamNameOf: (id: string) => string; onView: (id: string) => void }) {
+function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: {
+  list: Feedback[]; nameOf: (id: string) => string; teamNameOf: (id: string) => string; onView: (id: string) => void;
+  isLoading?: boolean; isError?: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <Card><CardContent className="pt-6 space-y-2">
+        {[0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-lg bg-muted" />)}
+      </CardContent></Card>
+    );
+  }
+  if (isError) {
+    return (
+      <Card><CardContent className="pt-6 text-sm text-destructive text-center">שגיאה בטעינת היסטוריית ההאזנות. נסו לרענן את הדף.</CardContent></Card>
+    );
+  }
   if (list.length === 0) {
     return (
       <Card><CardContent className="pt-6">
@@ -1112,9 +1238,7 @@ function HistoryTable({ list, nameOf, teamNameOf, onView }: { list: Feedback[]; 
                   <TableCell className="max-w-40 truncate text-xs text-muted-foreground">{f.keep}</TableCell>
                   <TableCell className="max-w-40 truncate text-xs text-muted-foreground">{f.improve}</TableCell>
                   <TableCell>
-                    <span className={cn("font-bold",
-                      f.score >= 80 ? "text-[color:var(--success)]" : f.score >= 60 ? "text-[color:var(--warning)]" : "text-primary"
-                    )}>{f.score}</span>
+                    <span className={cn("font-bold", SCORE_TEXT_CLASS[scoreTone(f.score)])}>{f.score}</span>
                   </TableCell>
                   <TableCell>
                     {f.published

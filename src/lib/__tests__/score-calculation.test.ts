@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeScore } from "@/lib/store";
-import { CRITERIA } from "@/lib/seed";
+import { CRITERIA } from "@/lib/feedback-domain";
 
 // Regression coverage for the Feedback & Listening production-readiness audit:
 // score must be (sum of applicable criteria) / (count of applicable criteria) * 100,
