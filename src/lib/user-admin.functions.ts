@@ -38,15 +38,24 @@ async function assertAdmin(ctx: { supabase: any; userId: string; claims: any }) 
   if (!data) throw new Error("אין הרשאה לפעולה זו");
 }
 
+// Audit logging is best-effort and must never be able to fail (or delay the
+// response of) the operation it's recording -- an admin action like deleting
+// a user has already taken effect by the time we log it, and a broken audit
+// insert must not turn that success into a client-visible error.
 async function logAudit(admin: any, actorId: string, actorEmail: string | null, action: string, targetUserId: string | null, targetEmail: string | null, details: Record<string, unknown> = {}) {
-  await admin.from("audit_log").insert({
-    actor_id: actorId,
-    actor_email: actorEmail,
-    action,
-    target_user_id: targetUserId,
-    target_email: targetEmail,
-    details,
-  });
+  try {
+    const { error } = await admin.from("audit_log").insert({
+      actor_id: actorId,
+      actor_email: actorEmail,
+      action,
+      target_user_id: targetUserId,
+      target_email: targetEmail,
+      details,
+    });
+    if (error) console.error("[audit_log] insert failed", action, error);
+  } catch (e) {
+    console.error("[audit_log] insert threw", action, e);
+  }
 }
 
 export const listUsers = createServerFn({ method: "GET" })
@@ -412,8 +421,15 @@ export const deleteUser = createServerFn({ method: "POST" })
 
     // profiles + user_roles cascade-delete automatically (ON DELETE CASCADE on
     // auth.users) — audit_log rows are untouched (no FK) so the trail survives.
+    //
+    // Idempotent by design: if the account is already gone — e.g. an admin
+    // retrying after a connection drop hid a first attempt's (successful)
+    // response — Supabase's admin API reports "not found" here. Treat that
+    // as success rather than a scary error: the caller's desired end state
+    // (this account no longer exists) is already true.
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.user_id);
-    if (error) throw new Error(error.message);
+    const alreadyGone = error && (error.status === 404 || /not.?found/i.test(error.message));
+    if (error && !alreadyGone) throw new Error(error.message);
 
     await logAudit(supabaseAdmin, context.userId, (context.claims as any).email ?? null, "user.delete", data.user_id, check.user.email, {
       full_name: check.user.full_name,

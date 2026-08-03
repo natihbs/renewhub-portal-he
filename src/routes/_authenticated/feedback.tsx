@@ -8,6 +8,7 @@ import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
 import { useWorkspace } from "@/lib/workspace-context";
+import { useUx } from "@/lib/ux-store";
 import { useServerFn } from "@tanstack/react-start";
 import { previewUnpublishedFeedback, publishFeedbackBulk, toBulkPublishFilters, BULK_PUBLISH_NONE } from "@/lib/feedback-admin.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -135,6 +136,7 @@ function ListeningCenter() {
   const isManager = useIsManager();
   const { isAdmin } = useAuth();
   const { isDemo } = useAppMode();
+  const { pushActivity } = useUx();
   const [openForm, setOpenForm] = useState(false);
   const [openSchedule, setOpenSchedule] = useState(false);
   const [openBulkPublish, setOpenBulkPublish] = useState(false);
@@ -176,6 +178,8 @@ function ListeningCenter() {
   };
   const publish = (id: string) => {
     updateFeedback(id, { published: true });
+    const f = state.feedback.find((x) => x.id === id);
+    if (f) pushActivity({ kind: "feedback", text: `משוב פורסם עבור ${nameOf(f.repId)}` });
     toast.success("המשוב פורסם לנציג");
   };
 
@@ -1550,6 +1554,7 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
  */
 function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { state } = useApp();
+  const { pushActivity } = useUx();
   const preview = useServerFn(previewUnpublishedFeedback);
   const bulkPublish = useServerFn(publishFeedbackBulk);
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
@@ -1592,6 +1597,7 @@ function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenC
     setPublishing(true);
     try {
       const res = await bulkPublish({ data: filters });
+      if (res.updated > 0) pushActivity({ kind: "feedback", text: `פורסמו ${res.updated} רשומות משוב קיימות` });
       toast.success(`פורסמו ${res.updated} רשומות משוב ליעדים שנבחרו.`);
       close(false);
     } catch (e) {
