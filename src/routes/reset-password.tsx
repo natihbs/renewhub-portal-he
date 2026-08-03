@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { hebrewAuthError } from "@/lib/auth";
@@ -22,20 +22,26 @@ export const Route = createFileRoute("/reset-password")({
   component: ResetPasswordPage,
 });
 
+type LinkStatus = "verifying" | "ready" | "invalid";
+
 function ResetPasswordPage() {
   const navigate = useNavigate();
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<LinkStatus>("verifying");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
+  const ready = status === "ready";
 
   useEffect(() => {
     // Supabase auto-consumes the recovery token from the URL hash and emits PASSWORD_RECOVERY
-    supabase.auth.getSession().then(({ data }) => setReady(!!data.session));
+    supabase.auth.getSession().then(({ data }) => { if (data.session) setStatus("ready"); });
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") setReady(true);
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") setStatus("ready");
     });
-    return () => sub.subscription.unsubscribe();
+    // A missing/expired/already-used recovery token never fires PASSWORD_RECOVERY,
+    // so without this the page would show "מאמת קישור..." forever with no way out.
+    const timeout = setTimeout(() => setStatus((s) => (s === "verifying" ? "invalid" : s)), 6000);
+    return () => { sub.subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -63,22 +69,35 @@ function ResetPasswordPage() {
         <Card>
           <CardHeader className="text-center">
             <CardTitle>איפוס סיסמה</CardTitle>
-            <CardDescription>{ready ? "בחר סיסמה חדשה" : "מאמת קישור..."}</CardDescription>
+            <CardDescription>
+              {status === "ready" ? "בחר סיסמה חדשה" : status === "invalid" ? "הקישור אינו תקף" : "מאמת קישור..."}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={onSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="p1">סיסמה חדשה</Label>
-                <Input id="p1" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" disabled={!ready} />
+            {status === "invalid" ? (
+              <div className="space-y-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  קישור האיפוס אינו תקף או שפג תוקפו. יש לבקש קישור חדש ממסך ההתחברות.
+                </p>
+                <Button asChild className="w-full">
+                  <Link to="/auth">חזרה להתחברות</Link>
+                </Button>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="p2">אימות סיסמה</Label>
-                <Input id="p2" type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} dir="ltr" disabled={!ready} />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading || !ready}>
-                {loading ? "מעדכן..." : "עדכן סיסמה"}
-              </Button>
-            </form>
+            ) : (
+              <form onSubmit={onSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="p1">סיסמה חדשה</Label>
+                  <Input id="p1" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" disabled={!ready} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="p2">אימות סיסמה</Label>
+                  <Input id="p2" type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} dir="ltr" disabled={!ready} />
+                </div>
+                <Button type="submit" className="w-full" disabled={loading || !ready}>
+                  {loading ? "מעדכן..." : "עדכן סיסמה"}
+                </Button>
+              </form>
+            )}
           </CardContent>
         </Card>
       </div>

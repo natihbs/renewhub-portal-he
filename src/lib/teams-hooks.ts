@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { listRepresentatives } from "@/lib/rep-admin.functions";
 import { DEFAULT_KPI_PROFILE, type KpiProfile } from "@/lib/performance-domain";
 
-export type CloudTeam = { id: string; name: string; active: boolean; kpiProfile: KpiProfile };
+export type CloudTeam = { id: string; name: string; active: boolean; kpiProfile: KpiProfile; managerId: string | null };
 
 /**
  * Every active team visible to the signed-in user under RLS (admins see all
@@ -35,6 +35,7 @@ export function useCloudTeams() {
       name: t.name,
       active: t.active,
       kpiProfile: (t.kpi_profile === "renewals" ? "renewals" : DEFAULT_KPI_PROFILE) as KpiProfile,
+      managerId: t.manager_id,
     }));
   return { teams, isLoading: query.isLoading };
 }

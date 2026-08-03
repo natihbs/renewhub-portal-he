@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ import { formatDateIL } from "@/lib/format";
 import {
   listTeams, getTeamDetails, createTeam, updateTeam, deleteTeam, setTeamActive, setUserTeam,
 } from "@/lib/team-admin.functions";
+import { useWorkspace } from "@/lib/workspace-context";
 import { type KpiProfile, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS } from "@/lib/performance-domain";
 
 export const Route = createFileRoute("/_authenticated/teams")({
@@ -109,6 +110,21 @@ function TeamsPage() {
   const [openTeamId, setOpenTeamId] = useState<string | null>(null);
   const [editTeam, setEditTeam] = useState<TeamRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+
+  // A single-team manager's Workspace is locked to exactly one option — RLS
+  // already limits this whole page to that one row for them, so open its
+  // detail sheet directly instead of making them click their own only row.
+  // Fires once (a ref, not a state guard) so closing the sheet afterwards
+  // never re-triggers it.
+  const { options: workspaceOptions } = useWorkspace();
+  const autoOpenedWorkspaceTeam = useRef(false);
+  useEffect(() => {
+    if (autoOpenedWorkspaceTeam.current) return;
+    if (workspaceOptions.length === 1 && workspaceOptions[0].type === "team") {
+      autoOpenedWorkspaceTeam.current = true;
+      setOpenTeamId(workspaceOptions[0].teamId);
+    }
+  }, [workspaceOptions]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["admin", "teams"] });

@@ -18,7 +18,7 @@ import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, wo
 import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
 import { useCloudTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForMonth } from "@/lib/kpi-values";
-import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
+import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone } from "@/lib/renewal-rate";
 import { toast } from "sonner";
 import {
   Headphones, Pencil, StickyNote, Plus,
@@ -223,7 +223,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                 <AnalyticStat
                   label="אחוז חידוש"
                   value={renewalRate.available ? formatPct(renewalRate.pct) : "לא זמין"}
-                  tone={renewalRate.available ? (renewalRate.pct >= 80 ? "success" : "warning") : undefined}
+                  tone={renewalRateTone(renewalRate)}
                 />
               </div>
               {!renewalRate.available && (

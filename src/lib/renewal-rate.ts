@@ -10,7 +10,7 @@
 // so a future import/data source can plug in without another correctness pass — and
 // so nothing in the meantime can accidentally show a fabricated renewal rate.
 
-import type { KpiProfile } from "./performance-domain";
+import type { KpiProfile, Tone } from "./performance-domain";
 
 export type RenewalRateUnavailableReason =
   | "profile_not_supported"
@@ -26,6 +26,15 @@ export const RENEWAL_RATE_UNAVAILABLE_LABEL: Record<RenewalRateUnavailableReason
   no_opportunities: "אין עדיין נתוני הזדמנויות חידוש לצוות זה",
   no_completed_data: "אין עדיין נתוני חידושים שהושלמו לצוות זה",
 };
+
+/** Below this, a renewal rate reads as needing attention rather than healthy — the single source of truth, never re-typed at each call site. */
+export const RENEWAL_RATE_GOOD_THRESHOLD = 80;
+
+/** Tone for displaying an available renewal rate — undefined only when the rate isn't available at all (the caller decides what "unavailable" looks like). */
+export function renewalRateTone(rate: RenewalRateResult): Tone | undefined {
+  if (!rate.available) return undefined;
+  return rate.pct >= RENEWAL_RATE_GOOD_THRESHOLD ? "success" : "warning";
+}
 
 /**
  * Only ever returns a value when the team's KPI profile explicitly supports it AND

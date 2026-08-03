@@ -59,3 +59,31 @@ describe("processRows — renewal-field profile gating", () => {
     expect(row.renewalFieldsSkipped).toBe(true);
   });
 });
+
+describe("processRows — unresolved-team warning must match what applyImport actually does", () => {
+  // applyImport() only ever sends team_id on an UPDATE when a real team was
+  // resolved (existing.teamId preserved otherwise) — a typo in the file can
+  // never wipe a rep's real team assignment. A CREATE has no prior assignment
+  // to protect, so an unresolved team really is saved unassigned. The row's
+  // warning text must say whichever of those is actually about to happen.
+  const existingRep = { id: "rep-1", name: "Dana Cohen", teamId: "t-generic", teamName: "Sales North", monthlyTarget: 100, currentResult: 80, lastUpdatedAt: "2026-08-01" } as Rep;
+
+  it("tells the truth for a row that will UPDATE an existing rep: the existing team is kept, not cleared", () => {
+    const rows = [{ "שם": "Dana Cohen", "צוות": "Sales Nrth", "יעד": 100, "ביצוע": 85, "תאריך": "2026-08-01" }];
+    const [row] = processRows(rows, universalMapping, [existingRep], teams);
+    expect(row.action).toBe("update");
+    expect(row.teamId).toBeNull();
+    const warning = row.issues.find((i) => i.severity === "warning");
+    expect(warning?.message).toContain("יישאר ללא שינוי");
+    expect(warning?.message).not.toContain("ללא שיוך צוות");
+  });
+
+  it("tells the truth for a row that will CREATE a new rep: it really is saved unassigned", () => {
+    const rows = [{ "שם": "New Person", "צוות": "Sales Nrth", "יעד": 100, "ביצוע": 85, "תאריך": "2026-08-01" }];
+    const [row] = processRows(rows, universalMapping, [existingRep], teams);
+    expect(row.action).toBe("create");
+    expect(row.teamId).toBeNull();
+    const warning = row.issues.find((i) => i.severity === "warning");
+    expect(warning?.message).toContain("ללא שיוך צוות");
+  });
+});

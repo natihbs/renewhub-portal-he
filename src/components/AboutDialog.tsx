@@ -5,17 +5,29 @@ import { APP_NAME, APP_DESCRIPTOR, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_D
 import { Info } from "lucide-react";
 import { type ReactNode } from "react";
 
-export function AboutDialog({ trigger }: { trigger?: ReactNode }) {
+/**
+ * The single "About Pulse" surface — used both as a self-triggered dialog
+ * (pass `trigger`) and as a controlled dialog opened from elsewhere (pass
+ * `open`/`onOpenChange`, e.g. a DropdownMenuItem, matching how ProfileDialog/
+ * SettingsDialog are opened in AppShell's UserMenu). Previously duplicated as
+ * a second, slightly different "AboutContentDialog" defined locally in
+ * AppShell.tsx — that copy is gone; both entry points render this component now.
+ */
+export function AboutDialog({
+  trigger, open, onOpenChange,
+}: { trigger?: ReactNode; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button variant="ghost" size="sm" className="gap-2">
-            <Info className="h-4 w-4" />
-            אודות
-          </Button>
-        )}
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {trigger !== undefined && (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button variant="ghost" size="sm" className="gap-2">
+              <Info className="h-4 w-4" />
+              אודות
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent dir="rtl" className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>אודות {APP_NAME}</DialogTitle>

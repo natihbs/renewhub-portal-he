@@ -4,11 +4,15 @@ import type { User } from "@supabase/supabase-js";
 
 export type AppRole = "admin" | "manager" | "representative";
 
+// Deliberately does NOT include representative_id: that column is a legacy,
+// display-only field (see resolveBusinessIdentifier in team-admin.functions.ts)
+// that the real admin linking path (linkRepresentativeToUserCore) never writes,
+// so it must never be used to resolve "who is the current representative" —
+// see store.tsx's currentRepId resolution for the authoritative source.
 type Profile = {
   id: string;
   full_name: string | null;
   email: string | null;
-  representative_id: string | null;
   manager_id: string | null;
   team_id: string | null;
   active: boolean;
@@ -43,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const [{ data: prof }, { data: rs }] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email, representative_id, manager_id, team_id, active").eq("id", u.id).maybeSingle(),
+        supabase.from("profiles").select("id, full_name, email, manager_id, team_id, active").eq("id", u.id).maybeSingle(),
         supabase.from("user_roles").select("role").eq("user_id", u.id),
       ]);
       if (!mounted) return;

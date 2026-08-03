@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calculateRenewalRate } from "@/lib/renewal-rate";
+import { calculateRenewalRate, renewalRateTone, RENEWAL_RATE_GOOD_THRESHOLD } from "@/lib/renewal-rate";
 
 // Renewal rate (completed renewals / renewal opportunities) is a distinct metric
 // from target achievement (actual / target) and must never be derived from
@@ -33,5 +33,25 @@ describe("calculateRenewalRate", () => {
     // its own independent input shape (completed, opportunities), not (actual, target).
     const renewal = calculateRenewalRate("renewals", 45, 60);
     expect(renewal).toEqual({ available: true, pct: 75 });
+  });
+});
+
+// Single source of truth for the "is this renewal rate good" tone decision —
+// previously re-typed as `pct >= 80` independently in RepWorkspace.tsx and
+// performance.tsx (and briefly disagreed: one showed a warning below 80%, the
+// other showed no tone at all). Both now call this instead.
+describe("renewalRateTone", () => {
+  it("is success at or above the good threshold", () => {
+    expect(renewalRateTone({ available: true, pct: RENEWAL_RATE_GOOD_THRESHOLD })).toBe("success");
+    expect(renewalRateTone({ available: true, pct: 95 })).toBe("success");
+  });
+
+  it("is warning below the good threshold", () => {
+    expect(renewalRateTone({ available: true, pct: RENEWAL_RATE_GOOD_THRESHOLD - 1 })).toBe("warning");
+    expect(renewalRateTone({ available: true, pct: 0 })).toBe("warning");
+  });
+
+  it("is undefined when the rate isn't available at all — never fabricates a tone", () => {
+    expect(renewalRateTone({ available: false, reason: "no_opportunities" })).toBeUndefined();
   });
 });
