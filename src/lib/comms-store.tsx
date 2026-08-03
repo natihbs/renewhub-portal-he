@@ -3,6 +3,20 @@ import { useCloudCollection } from "@/lib/cloud-hooks";
 
 export type CommsKind = "morning" | "evening" | "competition" | "congrats" | "coaching" | "listening";
 
+/**
+ * Single source of truth for the valid kind set — mirrored by a DB CHECK
+ * constraint on comms_messages.kind / comms_templates.kind (see
+ * supabase/migrations/20260803200000_comms_kind_constraint.sql). The DB
+ * guarantees every row satisfies this today, but nothing here should ever
+ * trust that blindly a second time removed from the write path — see
+ * isCommsKind, used at every render-time lookup in communications.tsx.
+ */
+export const COMMS_KINDS: readonly CommsKind[] = ["morning", "evening", "competition", "congrats", "coaching", "listening"];
+
+export function isCommsKind(value: string): value is CommsKind {
+  return (COMMS_KINDS as readonly string[]).includes(value);
+}
+
 export const KIND_LABEL: Record<CommsKind, string> = {
   morning: "עדכון בוקר",
   evening: "סיכום ערב",

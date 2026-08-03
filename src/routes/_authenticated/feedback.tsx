@@ -7,6 +7,7 @@ import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
+import { useWorkspace } from "@/lib/workspace-context";
 import { useServerFn } from "@tanstack/react-start";
 import { previewUnpublishedFeedback, publishFeedbackBulk, toBulkPublishFilters, BULK_PUBLISH_NONE } from "@/lib/feedback-admin.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -145,7 +146,16 @@ function ListeningCenter() {
   // Reps only ever see their own published feedback — enforced by RLS and the cloud
   // query scope in store.tsx; this filter is a harmless extra safety net, not the
   // real boundary.
-  const feedbackList = visibleFeedback(state.feedback, isManager, state.currentRepId);
+  const { workspace } = useWorkspace();
+  const feedbackListAll = visibleFeedback(state.feedback, isManager, state.currentRepId);
+  // History tab only: narrow to the current Workspace team for a manager who
+  // manages more than one (workspace.type is only ever "team" for a manager —
+  // see WorkspaceProvider). A single-team manager's feedback was already
+  // scoped to just their team via the RLS-backed cloud query, so this is a
+  // no-op for them; it only matters for a multi-team manager.
+  const feedbackList = isManager && workspace.type === "team"
+    ? feedbackListAll.filter((f) => state.reps.find((r) => r.id === f.repId)?.teamId === workspace.teamId)
+    : feedbackListAll;
   const viewed = view ? state.feedback.find((f) => f.id === view) : null;
   const editing = editingId ? state.feedback.find((f) => f.id === editingId) ?? null : null;
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";

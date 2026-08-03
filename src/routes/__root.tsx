@@ -21,6 +21,7 @@ import { ListeningProvider } from "@/lib/listening-store";
 import { AppModeProvider } from "@/lib/app-mode";
 import { IdeasProvider } from "@/lib/ideas-store";
 import { AuthProvider } from "@/lib/auth";
+import { WorkspaceProvider } from "@/lib/workspace-context";
 
 import { RepWorkspace } from "@/components/RepWorkspace";
 import { AppShell } from "@/components/layout/AppShell";
@@ -138,29 +139,31 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AppModeProvider>
-          <AppProvider>
+          <WorkspaceProvider>
+            <AppProvider>
 
-            <UxProvider>
-              <IdeasProvider>
-                <ImportProvider>
-                  <RepWorkspaceProvider>
-                    <MorningProvider>
-                      <CommsProvider>
-                        <ListeningProvider>
-                          <AppShell>
-                            <Outlet />
-                          </AppShell>
-                          <RepWorkspace />
-                          <IdeaFeedbackButton />
-                          <Toaster position="top-center" richColors />
-                        </ListeningProvider>
-                      </CommsProvider>
-                    </MorningProvider>
-                  </RepWorkspaceProvider>
-                </ImportProvider>
-              </IdeasProvider>
-            </UxProvider>
-          </AppProvider>
+              <UxProvider>
+                <IdeasProvider>
+                  <ImportProvider>
+                    <RepWorkspaceProvider>
+                      <MorningProvider>
+                        <CommsProvider>
+                          <ListeningProvider>
+                            <AppShell>
+                              <Outlet />
+                            </AppShell>
+                            <RepWorkspace />
+                            <IdeaFeedbackButton />
+                            <Toaster position="top-center" richColors />
+                          </ListeningProvider>
+                        </CommsProvider>
+                      </MorningProvider>
+                    </RepWorkspaceProvider>
+                  </ImportProvider>
+                </IdeasProvider>
+              </UxProvider>
+            </AppProvider>
+          </WorkspaceProvider>
         </AppModeProvider>
       </AuthProvider>
 

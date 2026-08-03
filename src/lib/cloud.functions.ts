@@ -50,8 +50,19 @@ function db(client: unknown) {
   return client as SupabaseClient;
 }
 
-function fail(error: { message: string } | null) {
-  if (error) throw new Error(error.message || "שגיאה בגישה לנתוני הענן");
+/**
+ * Postgres error code 23514 = check_violation. Every closed-set text column in
+ * this schema (comms kind, listening_schedules status, teams kpi_profile, ...)
+ * is enforced by a CHECK constraint rather than a bespoke validator in this
+ * generic layer — see the migrations under supabase/migrations for the actual
+ * allowed values per column. This only replaces Postgres's raw constraint-name
+ * message with something a user can read; it never weakens the constraint.
+ */
+function fail(error: { message: string; code?: string } | null) {
+  if (error) {
+    if (error.code === "23514") throw new Error("הערך שהוזן אינו חוקי עבור שדה זה");
+    throw new Error(error.message || "שגיאה בגישה לנתוני הענן");
+  }
 }
 
 export const cloudList = createServerFn({ method: "POST" })

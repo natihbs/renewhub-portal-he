@@ -23,6 +23,7 @@ import { Users, Plus, Search, Pencil, Trash2, Power, Link2, Link2Off, ArrowLeftR
 import { requireRole } from "@/lib/require-role";
 import { useApp } from "@/lib/store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
+import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import {
   listRepresentatives, createRepresentative, updateRepresentative, setRepresentativeActive,
   setRepresentativeTeam, linkRepresentativeUser, deleteRepresentative, type DeleteBlocker,
@@ -54,7 +55,12 @@ function RepresentativesPage() {
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
-  const [teamFilter, setTeamFilter] = useState<string>("all");
+  // Team scope comes from the shared Workspace Context (header switcher)
+  // instead of a page-local filter — see src/lib/workspace-context.tsx. A
+  // single-team manager never needs to pick a team here at all; an admin's
+  // "🌍 כלל הארגון" workspace shows every representative, same as the old "all".
+  const { workspace } = useWorkspace();
+  const teamFilter = workspaceTeamId(workspace);
   const [managerFilter, setManagerFilter] = useState<string>("all");
 
   const [editing, setEditing] = useState<RepRow | null>(null);
@@ -106,7 +112,7 @@ function RepresentativesPage() {
 
       <Card>
         <CardContent className="pt-5 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div className="relative">
               <Search className="absolute top-1/2 -translate-y-1/2 start-3 h-4 w-4 text-muted-foreground" />
               <Input className="ps-9" placeholder="חיפוש נציג, מזהה או מייל" value={q} onChange={(e) => setQ(e.target.value)} aria-label="חיפוש נציגים" />
@@ -117,14 +123,6 @@ function RepresentativesPage() {
                 <SelectItem value="all">כל הסטטוסים</SelectItem>
                 <SelectItem value="active">פעילים</SelectItem>
                 <SelectItem value="inactive">מושבתים</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={teamFilter} onValueChange={setTeamFilter}>
-              <SelectTrigger aria-label="סינון לפי צוות"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל הצוותים</SelectItem>
-                <SelectItem value={NONE}>ללא צוות</SelectItem>
-                {teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={managerFilter} onValueChange={setManagerFilter}>

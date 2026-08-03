@@ -7,12 +7,12 @@ import {
   Mail, Megaphone, Sparkles,
 } from "lucide-react";
 import { useApp, useIsManager, teamSummary, teamsFromReps, competitionLeaderboard } from "@/lib/store";
-import { calculateAchievement, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
+import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
 import { useCloudTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForTeam } from "@/lib/kpi-values";
 import { calculateRenewalRate } from "@/lib/renewal-rate";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
-import { useComms, KIND_LABEL, type CommsKind, type CommsMessage } from "@/lib/comms-store";
+import { useComms, KIND_LABEL, isCommsKind, type CommsKind, type CommsMessage, type CommsTemplate } from "@/lib/comms-store";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -128,9 +128,11 @@ function useGenerationInputs() {
       ...r,
       pct: calculateAchievement(r.currentResult, r.monthlyTarget),
     }));
-    const above = withPct.filter((r) => r.pct >= 100).sort((a, b) => b.pct - a.pct);
-    const below = withPct.filter((r) => r.pct < 80).sort((a, b) => a.pct - b.pct);
-    const onPace = withPct.filter((r) => r.pct >= 80 && r.pct < 100);
+    // Same 80/100 boundary as everywhere else in the app — achievementStatus()
+    // is the single source of truth, never a re-typed threshold.
+    const above = withPct.filter((r) => achievementStatus(r.pct) === "above").sort((a, b) => b.pct - a.pct);
+    const below = withPct.filter((r) => achievementStatus(r.pct) === "attention").sort((a, b) => a.pct - b.pct);
+    const onPace = withPct.filter((r) => achievementStatus(r.pct) === "onpace");
     const top = [...withPct].sort((a, b) => b.pct - a.pct).slice(0, 3);
 
     const activeComp = state.competitions.find((c) => c.active);
@@ -158,31 +160,45 @@ function Generator() {
   const [kind, setKind] = useState<CommsKind>("morning");
   const inputs = useGenerationInputs();
   const [seed, setSeed] = useState(0);
-  const [selectedRepId, setSelectedRepId] = useState<string>(inputs.reps[0]?.id ?? "");
-  const [listeningId, setListeningId] = useState<string>(inputs.listeningsThisWeek[0]?.id ?? "");
+  // Reps/listenings load asynchronously (Live Mode cloud fetch) — these hold
+  // only an *explicit* user choice, never seeded from data that may not have
+  // arrived yet. The effective value below falls back to "first available"
+  // live, so it stays correct once loading finishes instead of freezing on
+  // whatever was (or wasn't) loaded at mount (RC-3).
+  const [selectedRepId, setSelectedRepId] = useState<string>("");
+  const [listeningId, setListeningId] = useState<string>("");
+  const effectiveRepId = selectedRepId || inputs.reps[0]?.id || "";
+  const effectiveListeningId = listeningId || inputs.listeningsThisWeek[0]?.id || "";
 
   const generated = useMemo(() => {
     switch (kind) {
       case "morning": return generateMorning(inputs);
       case "evening": return generateEvening(inputs);
       case "competition": return generateCompetition(inputs, seed);
-      case "congrats": return generateCongrats(inputs, selectedRepId);
-      case "coaching": return generateCoaching(inputs, selectedRepId);
-      case "listening": return generateListening(inputs, listeningId);
+      case "congrats": return generateCongrats(inputs, effectiveRepId);
+      case "coaching": return generateCoaching(inputs, effectiveRepId);
+      case "listening": return generateListening(inputs, effectiveListeningId);
     }
-  }, [kind, inputs, seed, selectedRepId, listeningId]);
+  }, [kind, inputs, seed, effectiveRepId, effectiveListeningId]);
 
   const [body, setBody] = useState(generated.body);
   const [title, setTitle] = useState(generated.title);
   const [dirty, setDirty] = useState(false);
+  const [lastGenerated, setLastGenerated] = useState(generated);
 
-  // Sync when generation changes and user hasn't edited
-  useMemo(() => {
+  // Adjust body/title when generation changes and the user hasn't edited yet —
+  // computed directly during render (React's documented pattern for deriving
+  // state from a changing value), not from a useMemo side effect (RC-2).
+  // useMemo is a performance hint, not a correctness guarantee; React's own
+  // docs are explicit that it must never be relied on to run required side
+  // effects, which is exactly what the previous implementation did.
+  if (generated !== lastGenerated) {
+    setLastGenerated(generated);
     if (!dirty) {
       setBody(generated.body);
       setTitle(generated.title);
     }
-  }, [generated, dirty]);
+  }
 
   const { saveMessage, saveTemplate } = useComms();
   const [tplName, setTplName] = useState("");
@@ -245,7 +261,7 @@ function Generator() {
                 {needsRep && (
                   <div>
                     <Label className="mb-1.5 block text-xs">בחירת נציג</Label>
-                    <Select value={selectedRepId} onValueChange={(v) => { setSelectedRepId(v); setDirty(false); }}>
+                    <Select value={effectiveRepId} onValueChange={(v) => { setSelectedRepId(v); setDirty(false); }}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {inputs.reps.map((r) => (
@@ -260,7 +276,7 @@ function Generator() {
                 {needsListening && (
                   <div>
                     <Label className="mb-1.5 block text-xs">בחירת האזנה</Label>
-                    <Select value={listeningId} onValueChange={(v) => { setListeningId(v); setDirty(false); }}>
+                    <Select value={effectiveListeningId} onValueChange={(v) => { setListeningId(v); setDirty(false); }}>
                       <SelectTrigger><SelectValue placeholder="בחר האזנה" /></SelectTrigger>
                       <SelectContent>
                         {inputs.listeningsThisWeek.map((f) => {
@@ -414,12 +430,20 @@ function InternalPreview({ title, body }: { title: string; body: string }) {
 
 function TemplatesPanel() {
   const { templates, removeTemplate } = useComms();
-  const grouped = useMemo(() => {
+  // Grouping keys off a fixed 6-entry record — a template whose kind isn't one
+  // of the 6 known values (the DB CHECK constraint should prevent this, but
+  // this must not trust that blindly a second time removed from the write
+  // path) goes to `unrecognized` instead of being dropped or crashing the tab.
+  const { grouped, unrecognized } = useMemo(() => {
     const g: Record<CommsKind, typeof templates> = {
       morning: [], evening: [], competition: [], congrats: [], coaching: [], listening: [],
     };
-    for (const t of templates) g[t.kind].push(t);
-    return g;
+    const other: typeof templates = [];
+    for (const t of templates) {
+      if (isCommsKind(t.kind)) g[t.kind].push(t);
+      else other.push(t);
+    }
+    return { grouped: g, unrecognized: other };
   }, [templates]);
 
   if (templates.length === 0) {
@@ -443,39 +467,50 @@ function TemplatesPanel() {
         if (list.length === 0) return null;
         const Icon = KIND_ICON[k];
         return (
-          <Card key={k}>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Icon className="h-4 w-4 text-primary" /> {KIND_LABEL[k]}
-                <Badge variant="secondary" className="ms-1">{list.length}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {list.map((t) => (
-                <div key={t.id} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">{t.name}</div>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost" size="icon"
-                        onClick={async () => { await navigator.clipboard.writeText(t.body); toast.success("הועתק"); }}
-                        aria-label="העתק"
-                      ><Copy className="h-4 w-4" /></Button>
-                      <Button
-                        variant="ghost" size="icon"
-                        onClick={() => { removeTemplate(t.id); toast.success("נמחק"); }}
-                        aria-label="מחק"
-                      ><Trash2 className="h-4 w-4" /></Button>
-                    </div>
-                  </div>
-                  <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{t.body}</p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <TemplateGroupCard key={k} icon={Icon} label={KIND_LABEL[k]} list={list} onRemove={removeTemplate} />
         );
       })}
+      {unrecognized.length > 0 && (
+        <TemplateGroupCard icon={MessageSquare} label="סוג לא מוכר" list={unrecognized} onRemove={removeTemplate} />
+      )}
     </div>
+  );
+}
+
+function TemplateGroupCard({ icon: Icon, label, list, onRemove }: {
+  icon: typeof Sunrise; label: string; list: CommsTemplate[]; onRemove: (id: string) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Icon className="h-4 w-4 text-primary" /> {label}
+          <Badge variant="secondary" className="ms-1">{list.length}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {list.map((t) => (
+          <div key={t.id} className="rounded-lg border p-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium">{t.name}</div>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost" size="icon"
+                  onClick={async () => { await navigator.clipboard.writeText(t.body); toast.success("הועתק"); }}
+                  aria-label="העתק"
+                ><Copy className="h-4 w-4" /></Button>
+                <Button
+                  variant="ghost" size="icon"
+                  onClick={() => { onRemove(t.id); toast.success("נמחק"); }}
+                  aria-label="מחק"
+                ><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </div>
+            <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{t.body}</p>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -504,14 +539,18 @@ function HistoryPanel() {
     <>
       <div className="grid gap-3 md:grid-cols-2">
         {history.map((m) => {
-          const Icon = KIND_ICON[m.kind];
+          // Same defensive lookup as TemplatesPanel — an unrecognized kind falls
+          // back to a generic icon/label instead of crashing the render.
+          const known = isCommsKind(m.kind);
+          const Icon = known ? KIND_ICON[m.kind] : MessageSquare;
+          const kindLabel = known ? KIND_LABEL[m.kind] : "סוג לא מוכר";
           return (
             <Card key={m.id}>
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Icon className="h-3.5 w-3.5" /> {KIND_LABEL[m.kind]} · {formatDateIL(m.createdAt)}
+                      <Icon className="h-3.5 w-3.5" /> {kindLabel} · {formatDateIL(m.createdAt)}
                     </div>
                     <CardTitle className="mt-1 truncate text-base">{m.title}</CardTitle>
                   </div>
@@ -684,10 +723,11 @@ function generateCongrats(i: Inputs, repId: string): { title: string; body: stri
   const lines: string[] = [];
   lines.push(`כל הכבוד ${rep.name}! 🎉`);
   lines.push("");
-  if (rep.pct >= 100) {
+  const status = achievementStatus(rep.pct);
+  if (status === "above") {
     lines.push(`עמדת ביעד עם ${formatPct(rep.pct)} - זה הישג משמעותי.`);
     lines.push(`${formatNum(rep.currentResult)} תוצאות בצוות ${rep.teamName} מדברות בעד עצמן.`);
-  } else if (rep.pct >= 80) {
+  } else if (status === "onpace") {
     lines.push(`אתה בקצב מעולה - ${formatPct(rep.pct)} מהיעד ועדיין נותרו ${i.workdaysLeft} ימי עבודה.`);
     lines.push("ההתמדה שלך ניכרת בכל שיחה.");
   } else {
@@ -710,7 +750,7 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   lines.push("");
   // Current challenge
   const gap = rep.monthlyTarget - rep.currentResult;
-  if (rep.pct < 80) {
+  if (achievementStatus(rep.pct) === "attention") {
     lines.push(`ראיתי בנתונים שאנחנו עומדים על ${formatPct(rep.pct)} מהיעד, ונותרו כ-${formatNum(Math.max(gap, 0))} יחידות למטרה החודשית.`);
   } else {
     lines.push(`אתה נמצא ב-${formatPct(rep.pct)} מהיעד, ויש עוד מרחב לסגור את הפער ולעבור אותו.`);

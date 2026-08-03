@@ -108,7 +108,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentRepId, setCurrentRepId] = useState<string>("");
   const [reps, setReps] = useState<Rep[]>([]);
   const [demo, setDemo] = useState<AppState>(SEED);
-  const { profile, isAdmin, isManager } = useAuth();
+  const { isAdmin, isManager } = useAuth();
 
   const announcements = useCloudCollection<AnnouncementRow>("announcements", {
     order: { column: "published_on" },
@@ -147,13 +147,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const live = announcements.live;
 
   // A representative's identity is never chosen in the UI in Live Mode (the role/rep
-  // switcher is demo-only) — resolve it from their own linked representative record so
-  // "my feedback" / "my performance" actually show their data instead of staying empty.
+  // switcher is demo-only) — resolve it from `reps`, which CloudRepsSync already
+  // populates from listRepresentatives(). For a caller with no elevated role, that
+  // query is RLS-scoped to exactly their own representatives row ("representatives
+  // self read": user_id = auth.uid()) — the same authoritative link
+  // (representatives.user_id) every other part of the backend trusts.
+  //
+  // This intentionally does NOT read profiles.representative_id — that's a legacy,
+  // display-only column (see resolveBusinessIdentifier in team-admin.functions.ts)
+  // that linkRepresentativeToUserCore, the actual admin linking path, never writes.
+  // A rep linked through the Representatives page or the Users page's Link
+  // Representative action would have a correct representatives.user_id but a null
+  // profiles.representative_id, and previously saw a permanently empty app as a
+  // result — reusing `reps` here (rather than a second, redundant query) fixes that
+  // for every representative-facing surface at once.
   useEffect(() => {
-    if (live && !currentRepId && profile?.representative_id) {
-      setCurrentRepId(profile.representative_id);
+    if (live && !currentRepId && isRepOnly && reps.length > 0) {
+      setCurrentRepId(reps[0].id);
     }
-  }, [live, currentRepId, profile?.representative_id]);
+  }, [live, currentRepId, isRepOnly, reps]);
 
   const replaceReps = useCallback((next: Rep[]) => setReps(next), []);
 

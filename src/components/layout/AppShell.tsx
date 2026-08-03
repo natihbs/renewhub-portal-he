@@ -6,6 +6,7 @@ import { useApp } from "@/lib/store";
 import { useUx } from "@/lib/ux-store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
+import { useWorkspace } from "@/lib/workspace-context";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
@@ -30,7 +31,7 @@ import { AboutDialog } from "@/components/AboutDialog";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { CloudRepsSync } from "@/components/CloudRepsSync";
 import { PulseLogo } from "@/components/PulseLogo";
-import { APP_NAME, APP_DESCRIPTOR, APP_STAGE, APP_VERSION, BUILD_NUMBER, BUILD_DATE } from "@/lib/app-meta";
+import { APP_NAME } from "@/lib/app-meta";
 
 
 type NavItem = { to: string; label: string; icon: typeof Home; roles?: Array<"admin" | "manager" | "representative">; managerOnly?: boolean; adminOnly?: boolean };
@@ -171,6 +172,48 @@ function RoleSwitcher() {
   );
 }
 
+/**
+ * The single, global scope every workspace-aware page reads instead of
+ * maintaining its own local team filter (see useWorkspace). Renders nothing
+ * for a representative (no scope concept) and nothing once there's only one
+ * possible workspace — a locked single-team manager sees a static label
+ * instead of a dropdown with one dead option ("no redundant selectors").
+ */
+function WorkspaceSwitcher() {
+  const { isDemo } = useAppMode();
+  const { workspace, options, setWorkspaceTeam, setWorkspaceOrg, ready } = useWorkspace();
+  if (isDemo || !ready || options.length === 0) return null;
+
+  if (options.length === 1) {
+    const only = options[0];
+    return (
+      <span
+        className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-background px-2.5 sm:px-3 text-xs font-medium text-muted-foreground"
+        title="סביבת העבודה שלך נעולה לצוות זה"
+      >
+        <UsersRound className="h-3.5 w-3.5 shrink-0" />
+        <span className="max-w-24 truncate sm:max-w-none">{only.label}</span>
+      </span>
+    );
+  }
+
+  const value = workspace.type === "org" ? "org" : workspace.teamId;
+  return (
+    <Select value={value} onValueChange={(v) => (v === "org" ? setWorkspaceOrg() : setWorkspaceTeam(v))}>
+      <SelectTrigger className="h-9 w-40 sm:w-52" aria-label="בחירת סביבת עבודה">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.type === "org" ? "org" : o.teamId} value={o.type === "org" ? "org" : o.teamId}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function initialsOf(name: string | null | undefined, email: string | null | undefined): string {
   const src = (name || email || "").trim();
   if (!src) return "?";
@@ -223,25 +266,6 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>סגירה</Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AboutContentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl" className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>אודות {APP_NAME}</DialogTitle>
-          <DialogDescription>מערכת לניהול צוותי מכירות · {APP_DESCRIPTOR}</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-          <span className="text-muted-foreground">שלב</span><span className="font-medium">{APP_STAGE}</span>
-          <span className="text-muted-foreground">גרסה</span><span className="font-mono">{APP_VERSION}</span>
-          <span className="text-muted-foreground">מספר בילד</span><span className="font-mono">{BUILD_NUMBER}</span>
-          <span className="text-muted-foreground">תאריך בילד</span><span className="font-mono">{BUILD_DATE}</span>
-        </div>
       </DialogContent>
     </Dialog>
   );
@@ -328,7 +352,7 @@ function UserMenu() {
       </DropdownMenu>
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <AboutContentDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
     </>
   );
 }
@@ -484,6 +508,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
             </div>
             <NotificationBell />
+            <WorkspaceSwitcher />
             <RoleSwitcher />
             <UserMenu />
           </div>

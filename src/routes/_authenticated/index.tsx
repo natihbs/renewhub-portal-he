@@ -1,21 +1,23 @@
 import { useMorning } from "@/lib/morning-store";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useApp, useIsManager, teamSummary, teamsFromReps, statusForRep } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import type { Rep } from "@/lib/seed";
 import type { Feedback } from "@/lib/feedback-domain";
 import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth, workdaysPassed } from "@/lib/format";
-import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
+import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
 import { useCloudTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForTeam } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import {
   Users2, TrendingUp, TrendingDown, Award, Trophy, PlusCircle, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, AlertTriangle, Bell, ListChecks, Lightbulb, Sparkles, Users, Clock,
@@ -28,9 +30,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
-      { title: "Pulse" },
+      { title: "דף הבית · Pulse" },
       { name: "description", content: "מרכז שליטה ניהולי לצוותי המכירות - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
-      { property: "og:title", content: "Pulse" },
+      { property: "og:title", content: "דף הבית · Pulse" },
       { property: "og:description", content: "מרכז שליטה ניהולי לצוותי המכירות - מצב צוות, התראות, משימות ותובנות בזמן אמת" },
     ],
   }),
@@ -54,6 +56,7 @@ function HomePage() {
   // set from real auth in Live Mode — a signed-in representative would incorrectly see
   // the full manager dashboard (all teams, admin actions) instead of just their own data.
   const isManager = useIsManager();
+  const { isAdmin } = useAuth();
   const me = reps.find((r) => r.id === currentRepId);
 
   const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
@@ -74,7 +77,10 @@ function HomePage() {
   const teamGroups = teamsFromReps(reps);
   const { teams: cloudTeams } = useCloudTeams();
   const profileByTeamId = useMemo(() => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])), [cloudTeams]);
-  const [teamFilter, setTeamFilter] = useState<"all" | string>("all");
+  // Team scope now comes from the shared Workspace Context (header) instead of
+  // a page-local filter — see src/lib/workspace-context.tsx.
+  const { workspace } = useWorkspace();
+  const teamFilter = workspaceTeamId(workspace);
   const visibleTeamGroups = teamFilter === "all" ? teamGroups : teamGroups.filter((t) => t.teamId === teamFilter);
 
   const top3 = [...reps]
@@ -82,7 +88,15 @@ function HomePage() {
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 3);
 
-  const greeting = isManager ? "שלום, מנהל.ת" : `שלום, ${me?.name ?? ""}`;
+  // Each role gets its own framing — a representative should never read
+  // "management control center," and a system administrator managing the
+  // whole organization shouldn't read the same subtitle as a team manager.
+  const greeting = isAdmin ? "שלום, מנהל/ת מערכת" : isManager ? "שלום, מנהל.ת" : `שלום, ${me?.name ?? ""}`;
+  const subtitle = isAdmin
+    ? "מרכז ניהול ארגוני"
+    : isManager
+    ? "סביבת העבודה של הצוות שלך"
+    : "היעדים והביצועים שלך היום";
 
   return (
     <div className="space-y-8">
@@ -90,7 +104,7 @@ function HomePage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">{greeting}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{formatDateIL(new Date())} · מרכז שליטה ניהולי</p>
+          <p className="text-sm text-muted-foreground mt-1">{formatDateIL(new Date())} · {subtitle}</p>
         </div>
         <ManagerOnly>
           <div className="flex flex-wrap gap-2">
@@ -154,24 +168,11 @@ function HomePage() {
         </div>
       )}
 
-      {/* Teams */}
+      {/* Teams — scoped by the Workspace switcher in the header, not a local filter */}
       {teamGroups.length > 0 && (
         <div className="space-y-3">
           {isManager && teamGroups.length > 1 && (
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold">צוותים</div>
-              <Select value={teamFilter} onValueChange={setTeamFilter}>
-                <SelectTrigger className="w-52" aria-label="סינון לפי צוות"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">כל הצוותים</SelectItem>
-                  {teamGroups.map((t) => (
-                    <SelectItem key={t.teamId} value={t.teamId}>
-                      {t.teamName}{(profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals" ? ` (${KPI_PROFILE_LABEL.renewals})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <div className="text-sm font-semibold">צוותים</div>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {visibleTeamGroups.map((t) => (
@@ -211,7 +212,7 @@ function HomePage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {top3.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">אין נציגים להצגה עדיין.</p>
+              <EmptyState icon={Award} title="אין נציגים להצגה עדיין" compact />
             ) : top3.map((r, i) => (
               <div key={r.id} className="flex items-center gap-3 rounded-xl border p-3">
                 <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground font-bold">
@@ -247,7 +248,7 @@ function HomePage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {announcements.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">אין הודעות פעילות כרגע.</p>
+              <EmptyState icon={Megaphone} title="אין הודעות פעילות כרגע" compact />
             ) : (
               announcements.slice(0, 3).map((a) => (
                 <div key={a.id} className="rounded-xl border p-3">
@@ -320,8 +321,8 @@ function HomePage() {
 
     const alerts = [
       { icon: TrendingDown, title: "נציגים מתחת לקצב", count: underPace.length, sample: underPace.slice(0, 3).map((r) => r.name).join(", "), urgent: underPace.length >= 3, href: "/performance" as const },
-      { icon: Headphones, title: "עובדים ללא האזנה השבוע", count: noListening.length, sample: noListening.slice(0, 3).map((r) => r.name).join(", "), urgent: noListening.length >= 4, href: "/feedback" as const },
-      { icon: Users, title: "עובדים ללא עדכון משוב", count: noFeedback.length, sample: noFeedback.slice(0, 3).map((r) => r.name).join(", "), urgent: false, href: "/feedback" as const },
+      { icon: Headphones, title: "נציגים ללא האזנה השבוע", count: noListening.length, sample: noListening.slice(0, 3).map((r) => r.name).join(", "), urgent: noListening.length >= 4, href: "/feedback" as const },
+      { icon: Users, title: "נציגים ללא עדכון משוב", count: noFeedback.length, sample: noFeedback.slice(0, 3).map((r) => r.name).join(", "), urgent: false, href: "/feedback" as const },
       { icon: Clock, title: "תחרויות שמסתיימות בקרוב", count: endingSoon.length, sample: endingSoon.map((c) => c.name).join(", ") || "אין", urgent: endingSoon.length > 0, href: "/competitions" as const },
     ];
 
@@ -524,7 +525,7 @@ function TeamCard({ teamName, summary, kpiProfile, renewal }: {
   renewal?: TeamCardRenewal | null;
 }) {
   const Icon = Users2;
-  const onTrack = summary.pct >= 80;
+  const onTrack = achievementStatus(summary.pct) !== "attention";
   return (
     <Card className="card-interactive">
       <CardHeader className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
@@ -688,7 +689,7 @@ function RecentActivityCard() {
       </CardHeader>
       <CardContent>
         {activity.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">אין פעילות אחרונה להצגה.</p>
+          <EmptyState icon={Activity} title="אין פעילות אחרונה להצגה" compact />
         ) : (
           <ul className="divide-y">
             {activity.slice(0, 6).map((a) => {

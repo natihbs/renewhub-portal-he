@@ -4,13 +4,21 @@ import { Button } from "@/components/ui/button";
 import { Sparkles } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { APP_VERSION, CHANGELOG } from "@/lib/app-meta";
+import { useAuth } from "@/lib/auth";
 
 const KEY = "renewhub_whats_new_seen_v1";
 
 export function WhatsNewDialog() {
   const [open, setOpen] = useState(false);
+  // Release notes today are written for admin/manager workflows (imports, user
+  // management, admin dialogs a representative never sees) — an unsolicited
+  // popup surfacing that to a rep breaks the "this is my personal workspace,
+  // not a management platform" goal. Representatives can still read
+  // /changelog directly if they want to.
+  const { isAdmin, isManager } = useAuth();
 
   useEffect(() => {
+    if (!isAdmin && !isManager) return;
     try {
       const seen = localStorage.getItem(KEY);
       if (seen !== APP_VERSION) {
@@ -19,7 +27,7 @@ export function WhatsNewDialog() {
         return () => clearTimeout(t);
       }
     } catch {}
-  }, []);
+  }, [isAdmin, isManager]);
 
   const close = () => {
     try { localStorage.setItem(KEY, APP_VERSION); } catch {}

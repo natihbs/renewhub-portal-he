@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useApp, useIsManager, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
 import { useCloudTeams } from "@/lib/teams-hooks";
+import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
 import type { Rep } from "@/lib/seed";
 import type { Feedback } from "@/lib/feedback-domain";
@@ -28,10 +29,10 @@ import {
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import {
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
-  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, type KpiProfile,
+  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, type KpiProfile, type Tone,
 } from "@/lib/performance-domain";
 import { renewalTotalsForTeam, type RenewalTotals } from "@/lib/kpi-values";
-import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, type RenewalRateResult } from "@/lib/renewal-rate";
+import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone, type RenewalRateResult } from "@/lib/renewal-rate";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -131,7 +132,10 @@ function PerformancePage() {
   );
 
   const [query, setQuery] = useState("");
-  const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
+  // Team scope comes from the shared Workspace Context (header switcher)
+  // instead of a page-local filter — see src/lib/workspace-context.tsx.
+  const { workspace } = useWorkspace();
+  const teamFilter: TeamFilter = workspaceTeamId(workspace);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("pct_desc");
 
@@ -248,8 +252,10 @@ function PerformancePage() {
   return (
     <div className="space-y-6" dir="rtl">
       <PageHeader
-        title="ביצועים"
-        description="מרכז ניהול ביצועים חודשי - איתור מובילים, נציגים בקצב ואלו הזקוקים לליווי"
+        title={isManager ? "ביצועים" : "הביצועים שלי"}
+        description={isManager
+          ? "מרכז ניהול ביצועים חודשי - איתור מובילים, נציגים בקצב ואלו הזקוקים לליווי"
+          : "מעקב אחר היעד החודשי שלך - קצב, פער ותחזית"}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={exportCsv}>
@@ -268,24 +274,30 @@ function PerformancePage() {
         }
       />
 
-      {/* Summary bar */}
-      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <SummaryCard tone="neutral" icon={Users} label="סך נציגים" value={formatNum(summary.total)} sub="בכלל הצוותים" />
-        <SummaryCard tone="success" icon={CheckCircle2} label="מעל היעד" value={formatNum(summary.above)} sub="נציגים מקדימים" />
-        <SummaryCard tone="warning" icon={Gauge} label="בקצב" value={formatNum(summary.onpace)} sub="עומדים בקצב הצפוי" />
-        <SummaryCard tone="danger" icon={AlertTriangle} label="דורש טיפול" value={formatNum(summary.attention)} sub="מתחת לקצב הנדרש" />
-        <SummaryCard tone="neutral" icon={Target} label="ממוצע עמידה" value={formatPct(summary.avgPct)} sub="בכלל הצוותים" />
-        <SummaryCard
-          tone={summary.forecastPct >= 100 ? "success" : summary.forecastPct >= 90 ? "warning" : "danger"}
-          icon={LineChartIcon}
-          label="תחזית סוף חודש"
-          value={formatNum(summary.teamForecast)}
-          sub={`מתוך יעד ${formatNum(summary.teamTarget)} · ${formatPct(summary.forecastPct)}`}
-        />
-      </div>
+      {/* Summary bar — team-wide aggregates, meaningless when scoped to a single
+          representative's own row, so this is manager/admin only. */}
+      {isManager && (
+        <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <SummaryCard tone="neutral" icon={Users} label="סך נציגים" value={formatNum(summary.total)} sub="בכלל הצוותים" />
+          <SummaryCard tone="success" icon={CheckCircle2} label="מעל היעד" value={formatNum(summary.above)} sub="נציגים מקדימים" />
+          <SummaryCard tone="warning" icon={Gauge} label="בקצב" value={formatNum(summary.onpace)} sub="עומדים בקצב הצפוי" />
+          <SummaryCard tone="danger" icon={AlertTriangle} label="דורש טיפול" value={formatNum(summary.attention)} sub="מתחת לקצב הנדרש" />
+          <SummaryCard tone="neutral" icon={Target} label="ממוצע עמידה" value={formatPct(summary.avgPct)} sub="בכלל הצוותים" />
+          <SummaryCard
+            tone={summary.forecastPct >= 100 ? "success" : summary.forecastPct >= 90 ? "warning" : "danger"}
+            icon={LineChartIcon}
+            label="תחזית סוף חודש"
+            value={formatNum(summary.teamForecast)}
+            sub={`מתוך יעד ${formatNum(summary.teamTarget)} · ${formatPct(summary.forecastPct)}`}
+          />
+        </div>
+      )}
 
-      {/* Renewal-specific KPIs — only for a renewals-profile team, never mixed into the universal table */}
-      {selectedRenewal && (
+      {/* Renewal-specific KPIs — only for a renewals-profile team, never mixed into
+          the universal table. Team-level aggregates, so manager/admin only —
+          a rep never has a workspace team scope (always "all"), and the
+          per-team breakdown below is explicitly cross-team data. */}
+      {isManager && selectedRenewal && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -298,7 +310,7 @@ function PerformancePage() {
           </CardContent>
         </Card>
       )}
-      {teamFilter === "all" && renewalsByTeam.length > 0 && (
+      {isManager && teamFilter === "all" && renewalsByTeam.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">חידושים לפי צוות</CardTitle>
@@ -317,7 +329,9 @@ function PerformancePage() {
         </Card>
       )}
 
-      {/* Insights + Coaching */}
+      {/* Insights + Coaching — comparative/aggregate by nature (who leads, who
+          needs coaching relative to the rest), so manager/admin only. */}
+      {isManager && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 card-interactive">
           <CardHeader className="flex flex-row items-center justify-between">
@@ -383,16 +397,23 @@ function PerformancePage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
-      {/* Filters + table */}
+      {/* Filters + table — the filter/search/sort controls only make sense across
+          more than one row, so they're manager/admin only; a rep still gets
+          their own detailed row (pace, risk, status) below, just without
+          controls that have nothing to act on. */}
       <Card>
         <CardHeader className="gap-3">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:flex-wrap sm:justify-between">
-            <CardTitle className="text-base min-w-0 truncate">טבלת ביצועים</CardTitle>
-            <div className="text-xs text-muted-foreground shrink-0">
-              מציג {filtered.length} מתוך {enriched.length}
-            </div>
+            <CardTitle className="text-base min-w-0 truncate">{isManager ? "טבלת ביצועים" : "הנתונים שלי"}</CardTitle>
+            {isManager && (
+              <div className="text-xs text-muted-foreground shrink-0">
+                מציג {filtered.length} מתוך {enriched.length}
+              </div>
+            )}
           </div>
+          {isManager && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             <div className="relative">
               <Search className="absolute inset-y-0 end-2 my-auto h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -403,17 +424,6 @@ function PerformancePage() {
                 className="pe-8"
               />
             </div>
-            <Select value={teamFilter} onValueChange={(v) => setTeamFilter(v as TeamFilter)}>
-              <SelectTrigger><SelectValue placeholder="צוות" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל הצוותים</SelectItem>
-                {teamOptions.map((t) => (
-                  <SelectItem key={t.teamId} value={t.teamId}>
-                    {t.teamName}{profileFor(t.teamId) === "renewals" ? ` (${KPI_PROFILE_LABEL.renewals})` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
               <SelectTrigger><SelectValue placeholder="סטטוס" /></SelectTrigger>
               <SelectContent>
@@ -434,13 +444,16 @@ function PerformancePage() {
               </SelectContent>
             </Select>
           </div>
+          )}
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
             <EmptyState
               icon={Users}
-              title="לא נמצאו נציגים"
-              description="נקו את הסינון או שנו את מונחי החיפוש כדי לראות נציגים נוספים."
+              title={isManager ? "לא נמצאו נציגים" : "אין עדיין נתוני ביצועים"}
+              description={isManager
+                ? "נקו את הסינון או שנו את מונחי החיפוש כדי לראות נציגים נוספים."
+                : "החשבון שלך עדיין לא מקושר לפרופיל נציג — פנה/י למנהל המערכת."}
               compact
             />
           ) : (
@@ -603,7 +616,7 @@ function RenewalStatRow({ totals, rate }: { totals: RenewalTotals; rate: Renewal
       <MobileStat
         label="אחוז חידוש"
         value={rate.available ? formatPct(rate.pct) : "לא זמין"}
-        tone={rate.available ? (rate.pct >= 80 ? "success" : undefined) : undefined}
+        tone={renewalRateTone(rate)}
       />
       {!rate.available && (
         <div className="sm:col-span-3 text-xs text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[rate.reason]}</div>
@@ -672,11 +685,16 @@ function PriorityBadge({ level }: { level: "high" | "medium" | "low" }) {
   return <span className={cn("hidden sm:inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium shrink-0", m.cls)}>{m.label}</span>;
 }
 
-function MobileStat({ label, value, tone }: { label: string; value: string; tone?: "success" | "danger" }) {
+function MobileStat({ label, value, tone }: { label: string; value: string; tone?: Tone }) {
   return (
     <div className="rounded-lg bg-muted/40 py-2">
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className={cn("text-sm font-bold tabular-nums", tone === "success" && "text-[color:var(--success)]", tone === "danger" && "text-primary")}>{value}</div>
+      <div className={cn(
+        "text-sm font-bold tabular-nums",
+        tone === "success" && "text-[color:var(--success)]",
+        tone === "warning" && "text-[color:oklch(0.45_0.14_75)]",
+        tone === "danger" && "text-primary",
+      )}>{value}</div>
     </div>
   );
 }

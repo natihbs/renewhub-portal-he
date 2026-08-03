@@ -43,6 +43,7 @@ import {
 } from "@/lib/user-admin.functions";
 import { setUserTeam } from "@/lib/team-admin.functions";
 import { linkRepresentativeUser, listRepresentatives } from "@/lib/rep-admin.functions";
+import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 
 export const Route = createFileRoute("/_authenticated/users")({
   beforeLoad: () => requireRole(["admin"]),
@@ -120,7 +121,12 @@ function UsersPage() {
 
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [teamFilter, setTeamFilter] = useState<string>("all");
+  // Team scope comes from the shared Workspace Context (header switcher)
+  // instead of a page-local filter — see src/lib/workspace-context.tsx. This
+  // page is admin-only, so workspace is always either "🌍 כלל הארגון" (every
+  // user, same as the old "all") or one specific team.
+  const { workspace } = useWorkspace();
+  const teamFilter = workspaceTeamId(workspace);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [healthFilter, setHealthFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"name" | "email" | "role" | "team" | "status" | "health" | "created" | "last_login">("name");
@@ -218,7 +224,7 @@ function UsersPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                 <div className="relative md:col-span-2">
                   <Search className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="חיפוש לפי שם, מייל, צוות או מנהל" className="pe-3 ps-9" />
@@ -230,13 +236,6 @@ function UsersPage() {
                     <SelectItem value="admin">מנהל מערכת</SelectItem>
                     <SelectItem value="manager">מנהל</SelectItem>
                     <SelectItem value="representative">נציג</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={teamFilter} onValueChange={setTeamFilter}>
-                  <SelectTrigger><SelectValue placeholder="צוות" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">כל הצוותים</SelectItem>
-                    {teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>

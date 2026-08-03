@@ -69,8 +69,20 @@ export function processRows(
     const rawName = fieldToCol.name ? String(raw[fieldToCol.name] ?? "").trim() : "";
     const teamRaw = fieldToCol.team ? String(raw[fieldToCol.team] ?? "").trim() : "";
     const { teamId, teamName } = resolveTeam(fieldToCol.team ? raw[fieldToCol.team] : null, teams);
+    // An update never clears an existing team assignment just because this
+    // file's team text didn't resolve — applyImport() only ever sends team_id
+    // on update when a real one was resolved, precisely so a typo can't wipe a
+    // rep's real assignment. A create has no prior assignment to protect, so an
+    // unresolved team really is saved as unassigned. The warning must say
+    // whichever of those is actually about to happen, not always the create case.
     if (teamRaw && !teamId) {
-      issues.push({ severity: "warning", message: `הצוות "${teamRaw}" אינו מזוהה מול צוותי הענן — הנציג יישמר ללא שיוך צוות` });
+      const willUpdateExisting = rawName && repByNorm.has(normalizeName(rawName));
+      issues.push({
+        severity: "warning",
+        message: willUpdateExisting
+          ? `הצוות "${teamRaw}" אינו מזוהה מול צוותי הענן — שיוך הצוות הקיים של הנציג יישאר ללא שינוי`
+          : `הצוות "${teamRaw}" אינו מזוהה מול צוותי הענן — הנציג יישמר ללא שיוך צוות`,
+      });
     }
     const target = fieldToCol.monthlyTarget ? parseNumber(raw[fieldToCol.monthlyTarget]) : null;
     const current = fieldToCol.currentResult ? parseNumber(raw[fieldToCol.currentResult]) : null;
