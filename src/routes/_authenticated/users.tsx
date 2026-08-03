@@ -44,6 +44,7 @@ import {
 import { setUserTeam } from "@/lib/team-admin.functions";
 import { linkRepresentativeUser, listRepresentatives } from "@/lib/rep-admin.functions";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
+import { isNetworkFailure } from "@/lib/network-error";
 
 export const Route = createFileRoute("/_authenticated/users")({
   beforeLoad: () => requireRole(["admin"]),
@@ -815,7 +816,21 @@ function DeleteUserDialog({
       toast.success(r.representative_unlinked ? `המשתמש נמחק. הנציג "${r.representative_unlinked}" נשאר במערכת ללא קישור.` : "המשתמש נמחק");
       onDone();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      // fetch() only ever rejects for a network-layer failure (dropped
+      // connection, proxy timeout) — a real error our server returned still
+      // resolves the request and reaches us as a proper thrown message. A
+      // network failure here does NOT mean the deletion failed: the server
+      // may have completed it before the response was lost in transit. We
+      // must not assert failure we can't verify — close the dialog and
+      // resync the list from the server so the real state speaks for itself.
+      if (isNetworkFailure(e)) {
+        toast.error("החיבור נכשל בעת קבלת התשובה מהשרת. בודקים מול הרשימה אם המחיקה בכל זאת בוצעה...");
+        onDone();
+        return;
+      }
+      toast.error(e.message);
+    },
   });
 
   const check = q.data;

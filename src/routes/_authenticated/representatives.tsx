@@ -21,12 +21,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Users, Plus, Search, Pencil, Trash2, Power, Link2, Link2Off, ArrowLeftRight } from "lucide-react";
 import { requireRole } from "@/lib/require-role";
-import { useApp } from "@/lib/store";
-import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import {
   listRepresentatives, createRepresentative, updateRepresentative, setRepresentativeActive,
-  setRepresentativeTeam, linkRepresentativeUser, deleteRepresentative, type DeleteBlocker,
+  setRepresentativeTeam, linkRepresentativeUser, deleteRepresentative, getRepresentativeDeleteCheck,
 } from "@/lib/rep-admin.functions";
 
 export const Route = createFileRoute("/_authenticated/representatives")({
@@ -239,7 +237,12 @@ function RepresentativesPage() {
         <LinkUserDialog rep={linkTarget} people={people} onClose={() => setLinkTarget(null)} onDone={invalidate} />
       )}
       {deleteTarget && (
-        <DeleteDialog rep={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={invalidate} />
+        <DeleteDialog
+          rep={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDone={invalidate}
+          onPreferDisable={() => { setDeleteTarget(null); setDeactivateTarget(deleteTarget); }}
+        />
       )}
     </div>
   );
@@ -455,33 +458,24 @@ function LinkUserDialog({ rep, people, onClose, onDone }: { rep: RepRow; people:
   );
 }
 
-function useLocalHistoryLinks(repId: string): DeleteBlocker[] {
-  const { state } = useApp();
-  const workspace = useRepWorkspace();
-  return useMemo(() => {
-    const blockers: DeleteBlocker[] = [];
-    const feedback = (state.feedback ?? []).filter((f: any) => f.repId === repId).length;
-    if (feedback) blockers.push({ label: "משובים", count: feedback });
-    const scores = (state.competitions ?? []).reduce(
-      (acc: number, c: any) => acc + c.scores.filter((s: any) => s.repId === repId).length, 0);
-    if (scores) blockers.push({ label: "ניקוד תחרויות", count: scores });
-    const notes = workspace.getNotes(repId).length;
-    if (notes) blockers.push({ label: "הערות מנהל", count: notes });
-    const tasks = workspace.getTasks(repId).length;
-    if (tasks) blockers.push({ label: "משימות", count: tasks });
-    return blockers;
-  }, [state, workspace, repId]);
-}
-
-function DeleteDialog({ rep, onClose, onDone }: { rep: RepRow; onClose: () => void; onDone: () => void }) {
+function DeleteDialog({
+  rep, onClose, onDone, onPreferDisable,
+}: { rep: RepRow; onClose: () => void; onDone: () => void; onPreferDisable: () => void }) {
+  const checkFn = useServerFn(getRepresentativeDeleteCheck);
   const del = useServerFn(deleteRepresentative);
   const [confirmName, setConfirmName] = useState("");
-  const localLinks = useLocalHistoryLinks(rep.id);
-  const cloudLinks: DeleteBlocker[] = rep.linked_user ? [{ label: "חשבון משתמש מקושר", count: 1 }] : [];
-  const blockers = [...cloudLinks, ...localLinks];
+
+  // Single source of truth: the same server-side check deleteRepresentative
+  // re-runs itself before the actual delete (never a client-only computation
+  // that can drift from what the database really has linked to this rep).
+  const q = useQuery({
+    queryKey: ["admin", "rep-delete-check", rep.id],
+    queryFn: () => checkFn({ data: { rep_id: rep.id } }),
+  });
+  const blockers = q.data?.blockers ?? [];
 
   const mutation = useMutation({
-    mutationFn: () => del({ data: { rep_id: rep.id, confirm_name: confirmName, local_links: localLinks } }),
+    mutationFn: () => del({ data: { rep_id: rep.id, confirm_name: confirmName } }),
     onSuccess: () => { toast.success("הנציג נמחק לצמיתות"); onDone(); onClose(); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -490,7 +484,11 @@ function DeleteDialog({ rep, onClose, onDone }: { rep: RepRow; onClose: () => vo
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader><DialogTitle>מחיקה לצמיתות — {rep.name}</DialogTitle></DialogHeader>
-        {blockers.length > 0 ? (
+        {q.isLoading ? (
+          <div className="text-sm text-muted-foreground p-4 text-center">בודק תלויות...</div>
+        ) : q.isError ? (
+          <div className="text-sm text-destructive">{(q.error as Error).message}</div>
+        ) : blockers.length > 0 ? (
           <div className="space-y-3">
             <p className="text-sm">
               לא ניתן למחוק את הנציג משום שקיימים נתונים היסטוריים מקושרים. ניתן להשבית את הנציג או להעביר את הרשומות.
@@ -498,6 +496,10 @@ function DeleteDialog({ rep, onClose, onDone }: { rep: RepRow; onClose: () => vo
             <ul className="text-sm list-disc pe-5 space-y-1">
               {blockers.map((b) => <li key={b.label}>{b.label} — {b.count}</li>)}
             </ul>
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-center justify-between gap-3">
+              <div>מומלץ להשבית את הנציג במקום למחוק אותו לצמיתות — השבתה הפיכה ושומרת את כל ההיסטוריה.</div>
+              <Button size="sm" variant="outline" className="shrink-0" onClick={onPreferDisable}>השבתה במקום</Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">
@@ -512,7 +514,7 @@ function DeleteDialog({ rep, onClose, onDone }: { rep: RepRow; onClose: () => vo
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>סגירה</Button>
-          {blockers.length === 0 && (
+          {blockers.length === 0 && !q.isLoading && !q.isError && (
             <Button
               variant="destructive"
               disabled={confirmName.trim() !== rep.name.trim() || mutation.isPending}

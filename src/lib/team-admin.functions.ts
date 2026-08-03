@@ -485,14 +485,14 @@ export const reconcileProfileRepresentativeTeams = createServerFn({ method: "POS
       return { count: changes.length, applied: false, changes };
     }
 
-    // Each row's own update is a single atomic UPDATE — if the batch is interrupted
-    // partway, already-reconciled rows stay correctly reconciled and reconciliation
-    // is idempotent to re-run (re-running finds fewer/no mismatches next time).
-    let applied = 0;
-    for (const change of changes) {
-      await syncLinkedProfileTeam(supabaseAdmin, change.user_id, change.to_team_id);
-      applied++;
-    }
+    // Each row's own update is a single atomic UPDATE against a different
+    // user's profile — if the batch is interrupted partway, already-reconciled
+    // rows stay correctly reconciled and reconciliation is idempotent to
+    // re-run (re-running finds fewer/no mismatches next time). That property
+    // holds regardless of ordering, so there's no reason to pay for N
+    // sequential round trips one at a time — run them concurrently.
+    await Promise.all(changes.map((change) => syncLinkedProfileTeam(supabaseAdmin, change.user_id, change.to_team_id)));
+    const applied = changes.length;
 
     await logAudit(supabaseAdmin, ctx, "team.reconciliation_run", { rows_changed: applied });
     return { count: applied, applied: true, changes: [] };

@@ -58,6 +58,9 @@ export async function syncLinkedProfileTeam(admin: any, userId: string, teamId: 
   await admin.from("profiles").update({ team_id: teamId, manager_id: managerId }).eq("id", userId);
 }
 
+// Audit logging is best-effort and must never be able to fail (or delay the
+// response of) the operation it's recording — see the identical fix in
+// user-admin.functions.ts's logAudit for the full rationale.
 async function logAudit(
   admin: any,
   ctx: Ctx,
@@ -66,14 +69,19 @@ async function logAudit(
   targetUserId: string | null = null,
   targetEmail: string | null = null,
 ) {
-  await admin.from("audit_log").insert({
-    actor_id: ctx.userId,
-    actor_email: (ctx.claims as any)?.email ?? null,
-    action,
-    target_user_id: targetUserId,
-    target_email: targetEmail,
-    details,
-  });
+  try {
+    const { error } = await admin.from("audit_log").insert({
+      actor_id: ctx.userId,
+      actor_email: (ctx.claims as any)?.email ?? null,
+      action,
+      target_user_id: targetUserId,
+      target_email: targetEmail,
+      details,
+    });
+    if (error) console.error("[audit_log] insert failed", action, error);
+  } catch (e) {
+    console.error("[audit_log] insert threw", action, e);
+  }
 }
 
 /** Visible to every authenticated user; rows are scoped by RLS. */
@@ -330,7 +338,18 @@ export const linkRepresentativeUser = createServerFn({ method: "POST" })
 
 export type DeleteBlocker = { label: string; count: number };
 
-/** Cloud-side links that must be cleared before a permanent delete. */
+/**
+ * Cloud-side links that must be cleared before a permanent delete. This is
+ * the single, authoritative list — every table with a foreign key to
+ * representatives(id) must be represented here (all currently cascade-delete
+ * or set-null at the DB level, so nothing here is caught by a constraint
+ * violation; this check is the only thing standing between a delete and
+ * silently destroying that history). Called both by the dry-run preview
+ * (getRepresentativeDeleteCheck) and, again, server-side inside
+ * deleteRepresentative itself — never trust a dependency summary the client
+ * computed or fetched earlier, exactly like collectUserDeleteBlockers in
+ * user-admin.functions.ts.
+ */
 async function collectBlockers(admin: any, repId: string): Promise<DeleteBlocker[]> {
   const { data: rep } = await admin
     .from("representatives")
@@ -348,19 +367,24 @@ async function collectBlockers(admin: any, repId: string): Promise<DeleteBlocker
     if (count && count > 0) blockers.push({ label: "פרופילי משתמשים עם מזהה נציג זהה", count });
   }
 
-  // feedback/listening_schedules/rep_notes/rep_tasks all cascade-delete with the
-  // representative — surface them as blockers so an admin can't silently wipe a
-  // rep's entire quality-review history with a single delete.
-  const [feedbackCount, scheduleCount, notesCount, tasksCount] = await Promise.all([
+  // feedback/listening_schedules/rep_notes/rep_tasks/competition_scores/
+  // kpi_values all cascade-delete with the representative — surface them as
+  // blockers so an admin can't silently wipe a rep's entire quality-review,
+  // competition, or renewal history with a single delete.
+  const [feedbackCount, scheduleCount, notesCount, tasksCount, scoresCount, kpiCount] = await Promise.all([
     admin.from("feedback").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("listening_schedules").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("rep_notes").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("rep_tasks").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("competition_scores").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("kpi_values").select("id", { count: "exact", head: true }).eq("representative_id", repId),
   ]);
   if (feedbackCount.count && feedbackCount.count > 0) blockers.push({ label: "רשומות משוב והאזנה", count: feedbackCount.count });
   if (scheduleCount.count && scheduleCount.count > 0) blockers.push({ label: "האזנות מתוזמנות", count: scheduleCount.count });
   if (notesCount.count && notesCount.count > 0) blockers.push({ label: "הערות מנהל", count: notesCount.count });
   if (tasksCount.count && tasksCount.count > 0) blockers.push({ label: "משימות פתוחות וסגורות", count: tasksCount.count });
+  if (scoresCount.count && scoresCount.count > 0) blockers.push({ label: "ניקוד תחרויות (כולל תחרויות שהסתיימו)", count: scoresCount.count });
+  if (kpiCount.count && kpiCount.count > 0) blockers.push({ label: "נתוני ביצועים/חידושים היסטוריים", count: kpiCount.count });
 
   return blockers;
 }
@@ -381,7 +405,7 @@ export const getRepresentativeDeleteCheck = createServerFn({ method: "POST" })
 
 export const deleteRepresentative = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { rep_id: string; confirm_name: string; local_links?: DeleteBlocker[] }) => {
+  .inputValidator((data: { rep_id: string; confirm_name: string }) => {
     if (!data?.rep_id) throw new Error("חסר מזהה נציג");
     if (!data.confirm_name?.trim()) throw new Error("יש להקליד את שם הנציג לאישור המחיקה");
     return data;
@@ -398,10 +422,11 @@ export const deleteRepresentative = createServerFn({ method: "POST" })
     if (!rep) throw new Error("הנציג לא נמצא");
     if (rep.name.trim() !== data.confirm_name.trim()) throw new Error("שם הנציג שהוקלד אינו תואם");
 
-    const blockers = [
-      ...(await collectBlockers(supabaseAdmin, data.rep_id)),
-      ...((data.local_links ?? []).filter((l) => l && l.count > 0)),
-    ];
+    // Server-side re-check — never trust a dependency summary the client
+    // fetched earlier (see the identical comment on deleteUser above).
+    // collectBlockers is now the single, complete list; a client-supplied
+    // blocker list was never authoritative and is no longer accepted.
+    const blockers = await collectBlockers(supabaseAdmin, data.rep_id);
     if (blockers.length > 0) {
       const list = blockers.map((b) => `${b.label} (${b.count})`).join(", ");
       throw new Error(
@@ -410,7 +435,21 @@ export const deleteRepresentative = createServerFn({ method: "POST" })
     }
 
     const { error } = await supabaseAdmin.from("representatives").delete().eq("id", data.rep_id);
-    if (error) throw new Error(error.message);
+    if (error) {
+      // collectBlockers above already checks every table with a foreign key to
+      // representatives(id), so this should be unreachable in normal operation.
+      // If it ever fires anyway (a future constraint, a concurrent write), the
+      // admin must still get a graceful, truthful Hebrew message — never a raw
+      // Postgres error string (e.g. "update or delete on table ... violates
+      // foreign key constraint ...").
+      if (error.code === "23503") {
+        throw new Error(
+          "לא ניתן למחוק את הנציג: נמצאו נתונים היסטוריים מקושרים נוספים שלא זוהו בבדיקה המקדימה. ניתן להשבית את הנציג במקום, או לפנות לתמיכה.",
+        );
+      }
+      console.error("[deleteRepresentative] delete failed", data.rep_id, error);
+      throw new Error("אירעה שגיאה במחיקת הנציג. נסו שוב מאוחר יותר.");
+    }
     await logAudit(supabaseAdmin, ctx, "rep.delete", { rep_id: rep.id, name: rep.name, team_id: rep.team_id });
     return { ok: true };
   });
