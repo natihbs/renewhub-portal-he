@@ -336,6 +336,7 @@ function ListeningCard({ reps, feedback, noRecentListening }: { reps: Rep[]; fee
   const avg = feedback.length > 0 ? feedback.reduce((a, f) => a + f.score, 0) / feedback.length : 0;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [chosen, setChosen] = useState<string>("");
+  const { open: openRepWorkspace } = useRepWorkspace();
 
   return (
     <div className="rounded-xl border p-4 bg-card">
@@ -381,8 +382,11 @@ function ListeningCard({ reps, feedback, noRecentListening }: { reps: Rep[]; fee
               </SelectContent>
             </Select>
             <DialogFooter>
-              <Button asChild disabled={!chosen}>
-                <Link to="/feedback" onClick={() => setPickerOpen(false)}>המשך להאזנה</Link>
+              <Button
+                disabled={!chosen}
+                onClick={() => { setPickerOpen(false); openRepWorkspace(chosen); }}
+              >
+                המשך להאזנה
               </Button>
             </DialogFooter>
           </DialogContent>

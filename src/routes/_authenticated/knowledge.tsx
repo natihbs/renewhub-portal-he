@@ -38,9 +38,10 @@ function KnowledgePage() {
   const isManager = useIsManager();
 
   const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
     return state.articles.filter((a) => {
       if (cat !== "all" && a.category !== cat) return false;
-      if (query && !a.title.includes(query) && !a.summary.includes(query)) return false;
+      if (q && !a.title.toLowerCase().includes(q) && !a.summary.toLowerCase().includes(q)) return false;
       return true;
     });
   }, [state.articles, query, cat]);

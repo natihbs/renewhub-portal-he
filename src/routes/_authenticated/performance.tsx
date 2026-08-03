@@ -6,6 +6,7 @@ import { useApp, useIsManager, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
 import { useCloudTeams } from "@/lib/teams-hooks";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
+import { downloadCsv } from "@/lib/csv-export";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
 import type { Rep } from "@/lib/seed";
 import type { Feedback } from "@/lib/feedback-domain";
@@ -166,7 +167,10 @@ function PerformancePage() {
     let arr = enriched;
     if (teamFilter !== "all") arr = arr.filter((e) => e.rep.teamId === teamFilter);
     if (statusFilter !== "all") arr = arr.filter((e) => e.status === statusFilter);
-    if (query.trim()) arr = arr.filter((e) => e.rep.name.includes(query.trim()));
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      arr = arr.filter((e) => e.rep.name.toLowerCase().includes(q));
+    }
     const sorted = [...arr];
     sorted.sort((a, b) => {
       switch (sortKey) {
@@ -238,14 +242,7 @@ function PerformancePage() {
         STATUS_LABEL[e.status],
       ]),
     ];
-    const csv = "\uFEFF" + rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `performance-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(`performance-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     toast.success("הקובץ יוצא בהצלחה");
   };
 

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useApp, competitionLeaderboard, useIsManager } from "@/lib/store";
-import type { Competition, CompetitionCategory } from "@/lib/seed";
+import type { Competition } from "@/lib/seed";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -327,6 +327,3 @@ function AddCategoryDialog({ compId }: { compId: string }) {
     </Dialog>
   );
 }
-
-// Prevent unused import warnings
-export type _Unused = CompetitionCategory;

@@ -11,9 +11,10 @@ import {
 } from "@/components/ui/command";
 import { useApp } from "@/lib/store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
+import { downloadCsv } from "@/lib/csv-export";
 import {
   Home, BarChart3, Trophy, BookOpen, Headphones, Settings,
-  UserPlus, PlusCircle, FileSpreadsheet, Users, FileText, MessageSquare,
+  UserPlus, FileSpreadsheet, Users, FileText, MessageSquare, Megaphone,
 } from "lucide-react";
 
 export function useCommandPalette() {
@@ -44,12 +45,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const exportCsv = () => {
     onOpenChange(false);
     const rows = [["שם", "צוות", "יעד", "ביצוע"], ...state.reps.map((r) => [r.name, r.teamName, r.monthlyTarget, r.currentResult])];
-    const csv = "\uFEFF" + rows.map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "renewhub.csv";
-    a.click();
+    downloadCsv(`pulse-reps-${new Date().toISOString().slice(0, 10)}.csv`, rows);
   };
 
   return (
@@ -59,7 +55,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         <CommandEmpty>לא נמצאו תוצאות</CommandEmpty>
 
         <CommandGroup heading="פעולות מהירות">
-          <CommandItem onSelect={() => go("/admin")}><UserPlus className="ms-2 h-4 w-4" />הוספת נציג</CommandItem>
+          <CommandItem onSelect={() => go("/representatives")}><UserPlus className="ms-2 h-4 w-4" />הוספת נציג</CommandItem>
           <CommandItem onSelect={() => go("/feedback")}><Headphones className="ms-2 h-4 w-4" />הוספת האזנה / משוב</CommandItem>
           <CommandItem onSelect={() => go("/competitions")}><Trophy className="ms-2 h-4 w-4" />יצירת תחרות</CommandItem>
           <CommandItem onSelect={() => go("/knowledge")}><BookOpen className="ms-2 h-4 w-4" />פתיחת מרכז הידע</CommandItem>
@@ -141,7 +137,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
         <CommandSeparator />
         <CommandGroup heading="הוספה">
-          <CommandItem onSelect={() => go("/admin")}><PlusCircle className="ms-2 h-4 w-4" />הוספת הודעה / נציג</CommandItem>
+          <CommandItem onSelect={() => go("/admin")}><Megaphone className="ms-2 h-4 w-4" />הוספת הודעה</CommandItem>
         </CommandGroup>
       </CommandList>
     </CommandDialog>

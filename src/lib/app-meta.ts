@@ -3,8 +3,11 @@
 export const APP_NAME = "Pulse";
 export const APP_DESCRIPTOR = "Sales Performance Platform";
 export const APP_TAGLINE = "Every team has a pulse.";
-export const APP_STAGE = "Release Candidate 1";
 export const APP_VERSION = "1.0.0-rc.2";
+// Derived from APP_VERSION so the two can never drift apart (they previously
+// did: this stayed "Release Candidate 1" after the version moved to rc.2).
+const rcMatch = /-rc\.(\d+)$/.exec(APP_VERSION);
+export const APP_STAGE = rcMatch ? `Release Candidate ${rcMatch[1]}` : "General Availability";
 // Build number is stable per build (bundler inlines Date.now at import time).
 export const BUILD_NUMBER = `${Math.floor(Date.now() / 1000).toString(36).toUpperCase()}`;
 export const BUILD_DATE = new Date().toISOString().slice(0, 10);
