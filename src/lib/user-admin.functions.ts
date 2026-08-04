@@ -27,7 +27,9 @@ type UpdateInput = {
   must_change_password?: boolean;
 };
 
-async function assertAdmin(ctx: { supabase: any; userId: string; claims: any }) {
+type Ctx = { supabase: any; userId: string; claims: any };
+
+async function assertAdmin(ctx: Ctx) {
   const { data, error } = await ctx.supabase
     .from("user_roles")
     .select("role")
@@ -36,6 +38,48 @@ async function assertAdmin(ctx: { supabase: any; userId: string; claims: any }) 
     .maybeSingle();
   if (error) throw new Error("שגיאה באימות הרשאות");
   if (!data) throw new Error("אין הרשאה לפעולה זו");
+}
+
+async function getRoles(ctx: Ctx): Promise<string[]> {
+  const { data, error } = await ctx.supabase.from("user_roles").select("role").eq("user_id", ctx.userId);
+  if (error) throw new Error("שגיאה באימות הרשאות");
+  return ((data ?? []) as { role: string }[]).map((r) => r.role);
+}
+
+/**
+ * Admin, or a manager creating a login for an EXISTING representative in a
+ * team they manage (§21/§22 mode 2 continuation: inviting a rep created
+ * earlier without login access). A manager may only ever create
+ * representative-role accounts, never admin/manager accounts, and only for a
+ * rep that doesn't already have a linked login. Returns the rep's team so the
+ * handler can force team_id/manager_id rather than trust the client's values.
+ */
+async function assertCanCreateUser(ctx: Ctx, data: CreateInput): Promise<{ isAdmin: boolean; forcedTeamId?: string | null }> {
+  const roles = await getRoles(ctx);
+  if (roles.includes("admin")) return { isAdmin: true };
+  if (!roles.includes("manager")) throw new Error("אין הרשאה ליצור משתמשים");
+  if (data.role !== "representative") throw new Error("מנהל צוות רשאי ליצור חשבונות נציגים בלבד");
+  if (!data.representative_id?.trim()) throw new Error("יש לבחור נציג קיים לקישור חשבון הכניסה");
+  const { data: rep, error } = await ctx.supabase.from("representatives").select("id, team_id, user_id").eq("id", data.representative_id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!rep) throw new Error("אין לך הרשאה ליצור חשבון עבור נציג זה — הוא אינו בצוות שבניהולך");
+  if (rep.user_id) throw new Error("לנציג זה כבר יש חשבון כניסה מקושר");
+  return { isAdmin: false, forcedTeamId: rep.team_id ?? null };
+}
+
+/**
+ * Admin, or a manager acting on a login account that is linked (through the
+ * authoritative representatives.user_id, never profiles.team_id — §25) to a
+ * representative in a team they manage. Used to gate password resets.
+ */
+async function assertCanManageLoginViaRep(ctx: Ctx, targetUserId: string): Promise<{ isAdmin: boolean }> {
+  const roles = await getRoles(ctx);
+  if (roles.includes("admin")) return { isAdmin: true };
+  if (!roles.includes("manager")) throw new Error("אין הרשאה לפעולה זו");
+  const { data, error } = await ctx.supabase.from("representatives").select("id").eq("user_id", targetUserId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("אין לך הרשאה לאפס סיסמה עבור משתמש זה — הוא אינו נציג בצוות שבניהולך");
+  return { isAdmin: false };
 }
 
 // Audit logging is best-effort and must never be able to fail (or delay the
@@ -142,7 +186,13 @@ export const createUser = createServerFn({ method: "POST" })
     return data;
   })
   .handler(async ({ data, context }) => {
-    await assertAdmin(context as any);
+    const { isAdmin, forcedTeamId } = await assertCanCreateUser(context as any, data);
+    if (!isAdmin) {
+      // A manager's client-supplied team/manager fields are never trusted —
+      // both are forced from the representative's own authoritative team.
+      data.team_id = forcedTeamId ?? null;
+      data.manager_id = context.userId;
+    }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // Validate the chosen representative is actually free BEFORE creating the auth
@@ -289,7 +339,9 @@ export const resetPassword = createServerFn({ method: "POST" })
     return data;
   })
   .handler(async ({ data, context }) => {
-    await assertAdmin(context as any);
+    // Password resets for a manager are authorized via the authoritative
+    // representatives.user_id link only (§25) — never via profiles.team_id.
+    await assertCanManageLoginViaRep(context as any, data.user_id);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, { password: data.new_password });
     if (error) throw new Error(error.message);
@@ -304,11 +356,14 @@ export const sendPasswordResetEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { email: string; redirect_to: string }) => data)
   .handler(async ({ data, context }) => {
-    await assertAdmin(context as any);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: profile, error: findErr } = await supabaseAdmin.from("profiles").select("id").eq("email", data.email).maybeSingle();
+    if (findErr) throw new Error(findErr.message);
+    if (!profile) throw new Error("לא נמצא משתמש עם כתובת מייל זו");
+    await assertCanManageLoginViaRep(context as any, profile.id);
     const { error } = await supabaseAdmin.auth.resetPasswordForEmail(data.email, { redirectTo: data.redirect_to });
     if (error) throw new Error(error.message);
-    await logAudit(supabaseAdmin, context.userId, (context.claims as any).email ?? null, "user.email_password_reset", null, data.email, {});
+    await logAudit(supabaseAdmin, context.userId, (context.claims as any).email ?? null, "user.email_password_reset", profile.id, data.email, {});
     return { ok: true };
   });
 

@@ -42,8 +42,15 @@ export type ResolvableTeam = { id: string; name: string; kpiProfile?: KpiProfile
 // still be created/updated without a team assignment.
 const rowSchema = z.object({
   name: z.string().trim().min(1, "שם הנציג חסר").max(80, "שם ארוך מדי"),
-  monthlyTarget: z.number({ message: "יעד חודשי חייב להיות מספר" }).positive("יעד חייב להיות חיובי"),
-  currentResult: z.number({ message: "ביצוע נוכחי חייב להיות מספר" }).min(0, "ביצוע לא יכול להיות שלילי"),
+  // Optional: a row with no (or blank) target column still imports its
+  // performance data normally (§20) — target is never a blocking
+  // requirement. When present, it must still be a valid positive number.
+  // `error` (not the deprecated `message` param) is Zod v4's constructor-level
+  // error-customization option — see the Zod v4 compatibility note in the
+  // sprint report for why this repo is on v4 (required by @tanstack/router's
+  // own toolchain dependencies, not an arbitrary bump).
+  monthlyTarget: z.number({ error: "יעד חודשי חייב להיות מספר" }).positive("יעד חייב להיות חיובי").optional(),
+  currentResult: z.number({ error: "ביצוע נוכחי חייב להיות מספר" }).min(0, "ביצוע לא יכול להיות שלילי"),
   updatedAt: z.string().min(1, "תאריך עדכון לא תקין"),
 });
 

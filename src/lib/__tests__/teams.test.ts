@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { teamSummary, teamsFromReps } from "@/lib/store";
+import { teamsFromReps } from "@/lib/store";
 import { resolveTeam, normalizeName } from "@/lib/import-store";
 import type { Rep } from "@/lib/seed";
 
@@ -19,33 +19,26 @@ function rep(over: Partial<Rep> & Pick<Rep, "id">): Rep {
   };
 }
 
-describe("teamsFromReps / teamSummary — no hardcoded car/home", () => {
+describe("teamsFromReps — no hardcoded car/home", () => {
   it("groups an arbitrary number of teams, not just two", () => {
     const reps: Rep[] = [
-      rep({ id: "r1", teamId: "t-alpha", teamName: "Alpha Squad", monthlyTarget: 100, currentResult: 50 }),
-      rep({ id: "r2", teamId: "t-beta", teamName: "Beta Squad", monthlyTarget: 100, currentResult: 100 }),
-      rep({ id: "r3", teamId: "t-gamma", teamName: "Gamma Squad", monthlyTarget: 100, currentResult: 25 }),
-      rep({ id: "r4", teamId: "t-alpha", teamName: "Alpha Squad", monthlyTarget: 100, currentResult: 90 }),
+      rep({ id: "r1", teamId: "t-alpha", teamName: "Alpha Squad" }),
+      rep({ id: "r2", teamId: "t-beta", teamName: "Beta Squad" }),
+      rep({ id: "r3", teamId: "t-gamma", teamName: "Gamma Squad" }),
+      rep({ id: "r4", teamId: "t-alpha", teamName: "Alpha Squad" }),
     ];
 
     const groups = teamsFromReps(reps);
     expect(groups.map((g) => g.teamId).sort()).toEqual(["t-alpha", "t-beta", "t-gamma"]);
-
-    const alpha = teamSummary(reps, "t-alpha");
-    expect(alpha).toEqual({ target: 200, result: 140, pct: 70, count: 2 });
-
-    const beta = teamSummary(reps, "t-beta");
-    expect(beta.pct).toBe(100);
   });
 
   it("never special-cases 'car' or 'home' — a team named exactly that is treated like any other id", () => {
     const reps: Rep[] = [
-      rep({ id: "r1", teamId: "car", teamName: "Car (renamed as a generic id)", monthlyTarget: 50, currentResult: 25 }),
-      rep({ id: "r2", teamId: "retention-eu", teamName: "EU Retention", monthlyTarget: 80, currentResult: 80 }),
+      rep({ id: "r1", teamId: "car", teamName: "Car (renamed as a generic id)" }),
+      rep({ id: "r2", teamId: "retention-eu", teamName: "EU Retention" }),
     ];
     const groups = teamsFromReps(reps).map((g) => g.teamId).sort();
     expect(groups).toEqual(["car", "retention-eu"]);
-    expect(teamSummary(reps, "retention-eu").pct).toBe(100);
   });
 
   it("excludes unassigned (teamId: null) reps from the team groups", () => {
@@ -54,14 +47,6 @@ describe("teamsFromReps / teamSummary — no hardcoded car/home", () => {
       rep({ id: "r2", teamId: "t-x", teamName: "Team X" }),
     ];
     expect(teamsFromReps(reps)).toEqual([{ teamId: "t-x", teamName: "Team X" }]);
-  });
-
-  it("teamSummary(reps, null) aggregates unassigned reps without crashing", () => {
-    const reps: Rep[] = [
-      rep({ id: "r1", teamId: null, teamName: "ללא צוות", monthlyTarget: 10, currentResult: 5 }),
-      rep({ id: "r2", teamId: "t-x", teamName: "Team X", monthlyTarget: 10, currentResult: 10 }),
-    ];
-    expect(teamSummary(reps, null)).toEqual({ target: 10, result: 5, pct: 50, count: 1 });
   });
 });
 

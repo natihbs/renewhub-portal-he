@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -30,10 +30,11 @@ import {
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import {
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
-  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, type KpiProfile, type Tone,
+  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, type KpiProfile, type Tone, type PaceInfo,
 } from "@/lib/performance-domain";
 import { renewalTotalsForTeam, type RenewalTotals } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone, type RenewalRateResult } from "@/lib/renewal-rate";
+import { useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -86,20 +87,18 @@ export function computeRisk(_rep: Rep, pct: number, avgScore: number | null, day
   return sharedComputeRisk(pct, avgScore, daysSinceLastFeedback);
 }
 
-function paceInfo(rep: Rep) {
-  return sharedPaceInfo(rep.monthlyTarget, rep.currentResult, workdaysInMonth(), workdaysPassed(), workdaysRemaining());
-}
+// "no_target" is an honest, distinct state — never a silent 0%. A rep with no
+// official personal target for the current month (representative_goals) is
+// simply not put through pace/achievement math at all (§11/§19): no hidden
+// fallback to the legacy rep.monthlyTarget column, no fabricated percentage.
+type Status = "above" | "onpace" | "attention" | "no_target";
 
-type Status = "above" | "onpace" | "attention";
-function statusOf(rep: Rep): Status {
-  return paceStatus(rep.currentResult, rep.monthlyTarget, workdaysInMonth(), workdaysPassed());
-}
-
-const STATUS_LABEL: Record<Status, string> = PACE_STATUS_LABEL;
+const STATUS_LABEL: Record<Status, string> = { ...PACE_STATUS_LABEL, no_target: "לא הוגדר יעד" };
 
 function statusBadgeClass(s: Status) {
   if (s === "above") return "bg-[color:var(--success)]/12 text-[color:var(--success)] border border-[color:var(--success)]/25";
   if (s === "onpace") return "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border border-[color:var(--warning)]/30";
+  if (s === "no_target") return "bg-muted text-muted-foreground border border-border";
   return "bg-primary/10 text-primary border border-primary/25";
 }
 
@@ -111,13 +110,23 @@ type TeamFilter = "all" | string;
 
 type EnrichedRep = {
   rep: Rep;
-  pct: number;
-  gap: number;
+  target: number | null;
+  pct: number | null;
+  gap: number | null;
   status: Status;
-  pace: ReturnType<typeof paceInfo>;
-  remaining: number;
+  pace: PaceInfo | null;
+  remaining: number | null;
   risk: ReturnType<typeof computeRisk>;
 };
+
+// Narrowed shape for reps with a confirmed official target — used wherever a
+// list has already been filtered to status !== "no_target", so downstream
+// arithmetic doesn't need repeated null checks for values we've already
+// established are present.
+type TargetedRep = EnrichedRep & { target: number; pct: number; gap: number; pace: PaceInfo; remaining: number };
+function hasTarget(e: EnrichedRep): e is TargetedRep {
+  return e.status !== "no_target";
+}
 
 function PerformancePage() {
   const { state } = useApp();
@@ -144,24 +153,46 @@ function PerformancePage() {
 
   const scoped = isManager ? state.reps : state.reps.filter((r) => r.id === state.currentRepId);
 
+  // Official monthly targets (representative_goals) for every rep in scope,
+  // for the current month — the sole source of truth for personal
+  // achievement/pace/forecast (§12/§19). A rep absent from the map has no
+  // official target and is never defaulted to 0 or to the legacy
+  // rep.monthlyTarget column.
+  const repIds = useMemo(() => scoped.map((r) => r.id), [scoped]);
+  const { goalsByRepId } = useRepresentativeGoals(repIds, currentGoalMonth());
+
   const enriched = useMemo(
     () =>
-      scoped.map((r) => {
-        const pct = calculateAchievement(r.currentResult, r.monthlyTarget);
-        const status = statusOf(r);
+      scoped.map((r): EnrichedRep => {
+        const target = goalsByRepId.get(r.id) ?? null;
         const { avgScore, daysSinceLast } = feedbackStatsFor(r.id, state.feedback);
+        if (target === null) {
+          // Risk is still computed from real feedback signals alone — pct is
+          // passed as a neutral 100 so the pct-based risk reasons ("ביצוע
+          // מתחת ל-...") never fire for a rep we simply can't measure yet.
+          return {
+            rep: r, target: null, pct: null, gap: null, status: "no_target",
+            pace: null, remaining: null,
+            risk: computeRisk(r, 100, avgScore, daysSinceLast),
+          };
+        }
+        const pct = calculateAchievement(r.currentResult, target);
+        const status = paceStatus(r.currentResult, target, workdaysInMonth(), workdaysPassed()) as Status;
         return {
           rep: r,
+          target,
           pct,
-          gap: calculateGap(r.currentResult, r.monthlyTarget),
+          gap: calculateGap(r.currentResult, target),
           status,
-          pace: paceInfo(r),
-          remaining: Math.max(0, r.monthlyTarget - r.currentResult),
+          pace: sharedPaceInfo(target, r.currentResult, workdaysInMonth(), workdaysPassed(), workdaysRemaining()),
+          remaining: Math.max(0, target - r.currentResult),
           risk: computeRisk(r, pct, avgScore, daysSinceLast),
         };
       }),
-    [scoped, state.feedback]
+    [scoped, state.feedback, goalsByRepId]
   );
+
+  const missingTargetCount = useMemo(() => enriched.filter((e) => e.status === "no_target").length, [enriched]);
 
   const filtered = useMemo(() => {
     let arr = enriched;
@@ -173,27 +204,35 @@ function PerformancePage() {
     }
     const sorted = [...arr];
     sorted.sort((a, b) => {
-      switch (sortKey) {
-        case "pct_asc": return a.pct - b.pct;
-        case "target": return b.rep.monthlyTarget - a.rep.monthlyTarget;
-        case "result": return b.rep.currentResult - a.rep.currentResult;
-        case "name": return a.rep.name.localeCompare(b.rep.name, "he");
-        default: return b.pct - a.pct;
+      if (sortKey === "pct_asc" || sortKey === "pct_desc") {
+        if (a.pct === null && b.pct === null) return 0;
+        if (a.pct === null) return 1;
+        if (b.pct === null) return -1;
+        return sortKey === "pct_asc" ? a.pct - b.pct : b.pct - a.pct;
       }
+      if (sortKey === "target") {
+        if (a.target === null && b.target === null) return 0;
+        if (a.target === null) return 1;
+        if (b.target === null) return -1;
+        return b.target - a.target;
+      }
+      if (sortKey === "result") return b.rep.currentResult - a.rep.currentResult;
+      return a.rep.name.localeCompare(b.rep.name, "he");
     });
     return sorted;
   }, [enriched, teamFilter, statusFilter, query, sortKey]);
 
   const summary = useMemo(() => {
+    const targeted = enriched.filter((e) => e.status !== "no_target");
     const total = enriched.length;
-    const above = enriched.filter((e) => e.status === "above").length;
-    const onpace = enriched.filter((e) => e.status === "onpace").length;
-    const attention = enriched.filter((e) => e.status === "attention").length;
-    const avgPct = total ? enriched.reduce((s, e) => s + e.pct, 0) / total : 0;
-    const teamTarget = enriched.reduce((s, e) => s + e.rep.monthlyTarget, 0);
-    const teamForecast = enriched.reduce((s, e) => s + e.pace.forecast, 0);
-    const forecastPct = teamTarget ? (teamForecast / teamTarget) * 100 : 0;
-    return { total, above, onpace, attention, avgPct, teamTarget, teamForecast, forecastPct };
+    const above = targeted.filter((e) => e.status === "above").length;
+    const onpace = targeted.filter((e) => e.status === "onpace").length;
+    const attention = targeted.filter((e) => e.status === "attention").length;
+    const avgPct = targeted.length ? targeted.reduce((s, e) => s + (e.pct ?? 0), 0) / targeted.length : null;
+    const teamTarget = targeted.reduce((s, e) => s + (e.target ?? 0), 0);
+    const teamForecast = targeted.reduce((s, e) => s + (e.pace?.forecast ?? 0), 0);
+    const forecastPct = teamTarget ? (teamForecast / teamTarget) * 100 : null;
+    return { total, above, onpace, attention, avgPct, teamTarget, teamForecast, forecastPct, targetedCount: targeted.length };
   }, [enriched]);
 
   // Renewal-specific KPIs, only ever computed for a team whose profile actually
@@ -218,27 +257,31 @@ function PerformancePage() {
 
 
 
-  const insights = useMemo(() => buildInsights(enriched), [enriched]);
+  // Comparisons/rankings below only make sense across reps we can actually
+  // measure — a rep with no official target yet is surfaced separately via
+  // missingTargetCount, never silently ranked by a fabricated 0%.
+  const targetedEnriched = useMemo(() => enriched.filter(hasTarget), [enriched]);
+  const insights = useMemo(() => buildInsights(targetedEnriched), [targetedEnriched]);
   const coaching = useMemo(
     () =>
-      [...enriched]
+      [...targetedEnriched]
         .filter((e) => e.status !== "above")
         .sort((a, b) => a.pct - b.pct)
         .slice(0, 5),
-    [enriched]
+    [targetedEnriched]
   );
 
   const exportCsv = () => {
     const rows = [
-      ["שם", "צוות", "יעד", "ביצוע", "אחוז", "פער", "תחזית", "סטטוס"],
+      ["שם", "צוות", "יעד אישי", "ביצוע", "אחוז", "פער", "תחזית", "סטטוס"],
       ...filtered.map((e) => [
         e.rep.name,
         e.rep.teamName,
-        e.rep.monthlyTarget,
+        e.target ?? "לא הוגדר יעד",
         e.rep.currentResult,
-        `${Math.round(e.pct)}%`,
-        e.gap,
-        e.pace.forecast,
+        e.pct === null ? "לא זמין" : `${Math.round(e.pct)}%`,
+        e.gap ?? "לא זמין",
+        e.pace?.forecast ?? "לא זמין",
         STATUS_LABEL[e.status],
       ]),
     ];
@@ -279,14 +322,34 @@ function PerformancePage() {
           <SummaryCard tone="success" icon={CheckCircle2} label="מעל היעד" value={formatNum(summary.above)} sub="נציגים מקדימים" />
           <SummaryCard tone="warning" icon={Gauge} label="בקצב" value={formatNum(summary.onpace)} sub="עומדים בקצב הצפוי" />
           <SummaryCard tone="danger" icon={AlertTriangle} label="דורש טיפול" value={formatNum(summary.attention)} sub="מתחת לקצב הנדרש" />
-          <SummaryCard tone="neutral" icon={Target} label="ממוצע עמידה" value={formatPct(summary.avgPct)} sub="בכלל הצוותים" />
           <SummaryCard
-            tone={summary.forecastPct >= 100 ? "success" : summary.forecastPct >= 90 ? "warning" : "danger"}
+            tone="neutral"
+            icon={Target}
+            label="ממוצע עמידה"
+            value={summary.avgPct === null ? "אין יעדים" : formatPct(summary.avgPct)}
+            sub={`מתוך ${summary.targetedCount} נציגים עם יעד מוגדר`}
+          />
+          <SummaryCard
+            tone={summary.forecastPct === null ? "neutral" : summary.forecastPct >= 100 ? "success" : summary.forecastPct >= 90 ? "warning" : "danger"}
             icon={LineChartIcon}
             label="תחזית סוף חודש"
             value={formatNum(summary.teamForecast)}
-            sub={`מתוך יעד ${formatNum(summary.teamTarget)} · ${formatPct(summary.forecastPct)}`}
+            sub={summary.forecastPct === null ? "אין יעדים מוגדרים לחישוב תחזית" : `מתוך סך יעדים ${formatNum(summary.teamTarget)} · ${formatPct(summary.forecastPct)}`}
           />
+        </div>
+      )}
+
+      {/* Honest, actionable — never folded into the flat "0%" achievement
+          math: reps with no official personal target for this month need a
+          target set, not performance coaching. */}
+      {isManager && missingTargetCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-3 text-sm">
+          <span>
+            {missingTargetCount === 1 ? "לנציג אחד אין יעד אישי מוגדר לחודש זה" : `ל-${missingTargetCount} נציגים אין יעד אישי מוגדר לחודש זה`} — לא ניתן לחשב עבורם עמידה, קצב או תחזית.
+          </span>
+          <Button size="sm" variant="outline" asChild>
+            <Link to="/targets">הגדרת יעדים</Link>
+          </Button>
         </div>
       )}
 
@@ -428,6 +491,7 @@ function PerformancePage() {
                 <SelectItem value="above">מעל היעד</SelectItem>
                 <SelectItem value="onpace">בקצב</SelectItem>
                 <SelectItem value="attention">דורש טיפול</SelectItem>
+                <SelectItem value="no_target">לא הוגדר יעד</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
@@ -435,7 +499,7 @@ function PerformancePage() {
               <SelectContent>
                 <SelectItem value="pct_desc">מיון: אחוז - גבוה לנמוך</SelectItem>
                 <SelectItem value="pct_asc">מיון: אחוז - נמוך לגבוה</SelectItem>
-                <SelectItem value="target">מיון: יעד חודשי</SelectItem>
+                <SelectItem value="target">מיון: יעד אישי</SelectItem>
                 <SelectItem value="result">מיון: ביצוע נוכחי</SelectItem>
                 <SelectItem value="name">מיון: שם הנציג</SelectItem>
               </SelectContent>
@@ -462,7 +526,7 @@ function PerformancePage() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[180px]">שם הנציג</TableHead>
                       <TableHead>צוות</TableHead>
-                      <TableHead className="text-end">יעד</TableHead>
+                      <TableHead className="text-end">יעד אישי</TableHead>
                       <TableHead className="text-end">ביצוע</TableHead>
                       <TableHead className="min-w-[220px]">%</TableHead>
                       <TableHead className="text-end">קצב/יום</TableHead>
@@ -487,17 +551,23 @@ function PerformancePage() {
                         <TableCell>
                           <Badge variant="outline" className="font-normal">{e.rep.teamName}</Badge>
                         </TableCell>
-                        <TableCell className="text-end tabular-nums">{formatNum(e.rep.monthlyTarget)}</TableCell>
+                        <TableCell className="text-end tabular-nums">{e.target === null ? <span className="text-xs text-muted-foreground">לא הוגדר</span> : formatNum(e.target)}</TableCell>
                         <TableCell className="text-end tabular-nums font-medium">{formatNum(e.rep.currentResult)}</TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <ColoredBar pct={e.pct} status={e.status} className="flex-1 min-w-[120px]" />
-                            <span className="text-xs font-semibold w-10 text-end tabular-nums">{formatPct(e.pct)}</span>
-                          </div>
+                          {e.pct === null ? (
+                            <span className="text-xs text-muted-foreground">לא הוגדר יעד אישי</span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <ColoredBar pct={e.pct} status={e.status} className="flex-1 min-w-[120px]" />
+                              <span className="text-xs font-semibold w-10 text-end tabular-nums">{formatPct(e.pct)}</span>
+                            </div>
+                          )}
                         </TableCell>
-                        <TableCell className="text-end tabular-nums text-sm">{formatNum(e.pace.perDay)}</TableCell>
+                        <TableCell className="text-end tabular-nums text-sm">{e.pace ? formatNum(e.pace.perDay) : "—"}</TableCell>
                         <TableCell className="text-end">
-                          {e.gap >= 0 ? (
+                          {e.gap === null || e.remaining === null ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : e.gap >= 0 ? (
                             <span className="inline-flex flex-col items-end">
                               <span className="text-[color:var(--success)] font-medium tabular-nums">+{formatNum(e.gap)}</span>
                               <span className="text-[10px] text-muted-foreground">מעל היעד</span>
@@ -543,25 +613,31 @@ function PerformancePage() {
                         {STATUS_LABEL[e.status]}
                       </span>
                     </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <ColoredBar pct={e.pct} status={e.status} className="flex-1" />
-                      <span className="text-sm font-bold tabular-nums w-12 text-end">{formatPct(e.pct)}</span>
-                    </div>
+                    {e.pct === null ? (
+                      <div className="mt-3 text-xs text-muted-foreground">לא הוגדר יעד אישי לחודש זה — לא ניתן לחשב עמידה, קצב או תחזית.</div>
+                    ) : (
+                      <div className="mt-3 flex items-center gap-2">
+                        <ColoredBar pct={e.pct} status={e.status} className="flex-1" />
+                        <span className="text-sm font-bold tabular-nums w-12 text-end">{formatPct(e.pct)}</span>
+                      </div>
+                    )}
                     <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                      <MobileStat label="יעד" value={formatNum(e.rep.monthlyTarget)} />
+                      <MobileStat label="יעד אישי" value={e.target === null ? "לא הוגדר" : formatNum(e.target)} />
                       <MobileStat label="ביצוע" value={formatNum(e.rep.currentResult)} />
                       <MobileStat
-                        label={e.gap >= 0 ? "מעל היעד" : "נותרו"}
-                        value={e.gap >= 0 ? `+${formatNum(e.gap)}` : formatNum(e.remaining)}
-                        tone={e.gap >= 0 ? "success" : "danger"}
+                        label={e.gap === null ? "—" : e.gap >= 0 ? "מעל היעד" : "נותרו"}
+                        value={e.gap === null || e.remaining === null ? "—" : e.gap >= 0 ? `+${formatNum(e.gap)}` : formatNum(e.remaining)}
+                        tone={e.gap === null ? undefined : e.gap >= 0 ? "success" : "danger"}
                       />
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
                       <RiskBadge level={e.risk.level} />
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {e.remaining > 0 ? `${formatNum(e.pace.perDay)}/יום כדי לעמוד ביעד` : "היעד הושלם"}
-                    </div>
+                    {e.pace && e.remaining !== null && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {e.remaining > 0 ? `${formatNum(e.pace.perDay)}/יום כדי לעמוד ביעד` : "היעד הושלם"}
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -623,7 +699,10 @@ function RenewalStatRow({ totals, rate }: { totals: RenewalTotals; rate: Renewal
 }
 
 function StatusDot({ status }: { status: Status }) {
-  const c = status === "above" ? "bg-[color:var(--success)]" : status === "onpace" ? "bg-[color:var(--warning)]" : "bg-primary";
+  const c = status === "above" ? "bg-[color:var(--success)]"
+    : status === "onpace" ? "bg-[color:var(--warning)]"
+    : status === "no_target" ? "bg-muted-foreground/50"
+    : "bg-primary";
   return <span className={cn("h-1.5 w-1.5 rounded-full", c)} aria-hidden />;
 }
 
@@ -698,7 +777,9 @@ function MobileStat({ label, value, tone }: { label: string; value: string; tone
 
 // -------- insights --------
 
-function buildInsights(items: EnrichedRep[]) {
+// Callers only ever pass targeted reps (pct/target already confirmed
+// non-null via the TargetedRep type) — see targetedEnriched at the call site.
+function buildInsights(items: TargetedRep[]) {
   if (items.length === 0) return [];
   const out: string[] = [];
   const sorted = [...items].sort((a, b) => b.pct - a.pct);
@@ -748,21 +829,22 @@ function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(rep?.name ?? "");
   const [teamId, setTeamId] = useState<string>(rep?.teamId ?? "");
-  const [target, setTarget] = useState<number>(rep?.monthlyTarget ?? 100);
   const [result, setResult] = useState<number>(rep?.currentResult ?? 0);
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (isDemo) {
         const teamName = teamOptions.find((t) => t.id === teamId)?.name ?? "ללא צוות";
-        if (rep) updateRep(rep.id, { name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: target, currentResult: result });
-        else addRep({ name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: target, currentResult: result });
+        // Target-setting lives exclusively on /targets now — this dialog
+        // never touches monthlyTarget, on create or edit alike.
+        if (rep) updateRep(rep.id, { name: name.trim(), teamId: teamId || null, teamName, currentResult: result });
+        else addRep({ name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: 0, currentResult: result });
         return;
       }
       if (rep) {
-        await updateMetricsFn({ data: { rep_id: rep.id, name: name.trim(), team_id: teamId || null, monthly_target: target, current_result: result } });
+        await updateMetricsFn({ data: { rep_id: rep.id, name: name.trim(), team_id: teamId || null, current_result: result } });
       } else {
-        await createFn({ data: { name: name.trim(), team_id: teamId || null, monthly_target: target, current_result: result, external_ref: null, user_id: null, active: true } });
+        await createFn({ data: { name: name.trim(), team_id: teamId || null, current_result: result, external_ref: null, user_id: null, active: true } });
       }
       void qc.invalidateQueries({ queryKey: ["representatives"] });
     },
@@ -775,7 +857,6 @@ function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }
 
   const submit = () => {
     if (!name.trim()) return toast.error("יש להזין שם נציג");
-    if (target <= 0) return toast.error("יעד חייב להיות גדול מ-0");
     if (result < 0) return toast.error("ביצוע לא יכול להיות שלילי");
     mutation.mutate();
   };
@@ -802,16 +883,13 @@ function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>יעד חודשי</Label>
-              <Input type="number" min={0} value={target} onChange={(e) => setTarget(Number(e.target.value))} />
-            </div>
-            <div className="space-y-2">
-              <Label>ביצוע נוכחי</Label>
-              <Input type="number" min={0} value={result} onChange={(e) => setResult(Number(e.target.value))} />
-            </div>
+          <div className="space-y-2">
+            <Label>ביצוע נוכחי</Label>
+            <Input type="number" min={0} value={result} onChange={(e) => setResult(Number(e.target.value))} />
           </div>
+          <p className="text-xs text-muted-foreground">
+            הגדרת יעד חודשי אישי מתבצעת במסך ניהול היעדים הייעודי.
+          </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={mutation.isPending}>ביטול</Button>

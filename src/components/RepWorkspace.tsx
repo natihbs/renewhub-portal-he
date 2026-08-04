@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
 import { useCloudTeams } from "@/lib/teams-hooks";
+import { useRepresentativeGoal, currentGoalMonth } from "@/lib/goals-hooks";
 import { renewalTotalsForMonth } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone } from "@/lib/renewal-rate";
 import { toast } from "sonner";
@@ -31,24 +32,31 @@ function daysSince(dateStr: string) {
 }
 
 // ---------- status / risk (derived entirely from real cloud data) ----------
-type Status = "above" | "onpace" | "attention";
-export function statusOf(rep: Rep): Status {
-  return paceStatus(rep.currentResult, rep.monthlyTarget, workdaysInMonth(), workdaysPassed());
+// "no_target" is an honest, distinct state — a rep with no official personal
+// target for the current month (representative_goals) never gets a
+// fabricated pace/status derived from the legacy rep.monthlyTarget column
+// (§11/§19). target is now an explicit parameter, not read off the rep.
+type Status = "above" | "onpace" | "attention" | "no_target";
+export function statusOf(rep: Rep, target: number | null): Status {
+  if (target === null) return "no_target";
+  return paceStatus(rep.currentResult, target, workdaysInMonth(), workdaysPassed());
 }
-const STATUS_LABEL: Record<Status, string> = { above: "מעל היעד", onpace: "בקצב", attention: "דורש טיפול" };
+const STATUS_LABEL: Record<Status, string> = { above: "מעל היעד", onpace: "בקצב", attention: "דורש טיפול", no_target: "לא הוגדר יעד" };
 
 type RiskLevel = "low" | "medium" | "high";
 /**
  * Every reason here comes from real target/result pace and real feedback records for
  * this rep — no random/fabricated signal (this used to be seeded from a hash of the
  * rep's id, which meant the same rep could be flagged or cleared for reasons that had
- * nothing to do with their actual data).
+ * nothing to do with their actual data). target is explicit; when null (no official
+ * target set) pct is passed as a neutral 100 so the pct-based risk reasons never fire
+ * for a rep we simply can't measure yet — that's surfaced separately as "no_target".
  *
  * Thin wrapper kept for its existing call sites/tests — thresholds live in the shared
  * performance-domain module (also used by performance.tsx's computeRisk).
  */
-export function riskOf(rep: Rep, avgScore: number | null, daysSinceLastFeedback: number | null): { level: RiskLevel; reasons: string[] } {
-  const pct = calculateAchievement(rep.currentResult, rep.monthlyTarget);
+export function riskOf(rep: Rep, target: number | null, avgScore: number | null, daysSinceLastFeedback: number | null): { level: RiskLevel; reasons: string[] } {
+  const pct = target === null ? 100 : calculateAchievement(rep.currentResult, target);
   return sharedComputeRisk(pct, avgScore, daysSinceLastFeedback);
 }
 
@@ -58,6 +66,8 @@ function StatusBadge({ s }: { s: Status }) {
     ? "bg-[color:var(--success)]/12 text-[color:var(--success)] border-[color:var(--success)]/25"
     : s === "onpace"
     ? "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border-[color:var(--warning)]/30"
+    : s === "no_target"
+    ? "bg-muted text-muted-foreground border-border"
     : "bg-primary/10 text-primary border-primary/25";
   return <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium", cls)}>{STATUS_LABEL[s]}</span>;
 }
@@ -72,20 +82,26 @@ function RiskBadge({ level }: { level: RiskLevel }) {
   return <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium", m.cls)}>{m.label}</span>;
 }
 
-function CircularProgress({ pct, status }: { pct: number; status: Status }) {
+function CircularProgress({ pct, status }: { pct: number | null; status: Status }) {
   const size = 132, stroke = 10, r = (size - stroke) / 2, c = 2 * Math.PI * r;
-  const clamped = Math.min(Math.max(pct, 0), 100);
+  const clamped = Math.min(Math.max(pct ?? 0, 0), 100);
   const offset = c - (clamped / 100) * c;
-  const color = status === "above" ? "var(--success)" : status === "onpace" ? "var(--warning)" : "var(--primary)";
+  const color = status === "above" ? "var(--success)" : status === "onpace" ? "var(--warning)" : status === "no_target" ? "var(--muted-foreground)" : "var(--primary)";
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} className="fill-none stroke-muted" />
-        <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} strokeLinecap="round" style={{ stroke: color, strokeDasharray: c, strokeDashoffset: offset, transition: "stroke-dashoffset 500ms ease" }} className="fill-none" />
+        {pct !== null && (
+          <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} strokeLinecap="round" style={{ stroke: color, strokeDasharray: c, strokeDashoffset: offset, transition: "stroke-dashoffset 500ms ease" }} className="fill-none" />
+        )}
       </svg>
       <div className="absolute inset-0 grid place-items-center">
         <div className="text-center">
-          <div className="text-2xl font-extrabold tabular-nums leading-none">{Math.round(pct)}%</div>
+          {pct === null ? (
+            <div className="text-xs font-semibold text-muted-foreground px-3">לא הוגדר יעד</div>
+          ) : (
+            <div className="text-2xl font-extrabold tabular-nums leading-none">{Math.round(pct)}%</div>
+          )}
           <div className="text-[10px] text-muted-foreground mt-1">עמידה ביעד</div>
         </div>
       </div>
@@ -111,9 +127,15 @@ export function RepWorkspace() {
 function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   const { state } = useApp();
   const { getNotes, addNote, updateNote, deleteNote, getTasks, addTask, toggleTask, deleteTask } = useRepWorkspace();
-  const status = statusOf(rep);
-  const pct = calculateAchievement(rep.currentResult, rep.monthlyTarget);
-  const { perDay, forecast } = sharedPaceInfo(rep.monthlyTarget, rep.currentResult, workdaysInMonth(), workdaysPassed(), workdaysRemaining());
+  // Official monthly target (representative_goals) — the sole source of
+  // truth for this rep's personal achievement/pace/forecast (§12/§19). No
+  // fallback to the legacy rep.monthlyTarget column.
+  const { targetValue: target } = useRepresentativeGoal(rep.id, currentGoalMonth());
+  const status = statusOf(rep, target);
+  const pct = target === null ? null : calculateAchievement(rep.currentResult, target);
+  const pace = target === null ? null : sharedPaceInfo(target, rep.currentResult, workdaysInMonth(), workdaysPassed(), workdaysRemaining());
+  const perDay = pace?.perDay ?? null;
+  const forecast = pace?.forecast ?? null;
 
   const repFeedback = useMemo(
     () => state.feedback.filter((f) => f.repId === rep.id).sort((a, b) => (a.date < b.date ? 1 : -1)),
@@ -121,7 +143,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   );
   const avgListen = repFeedback.length ? Math.round(repFeedback.reduce((s, f) => s + f.score, 0) / repFeedback.length) : 0;
   const daysSinceLast = repFeedback[0] ? daysSince(repFeedback[0].date) : null;
-  const risk = riskOf(rep, repFeedback.length ? avgListen : null, daysSinceLast);
+  const risk = riskOf(rep, target, repFeedback.length ? avgListen : null, daysSinceLast);
 
   // Renewal-specific section: only ever shown for a team whose KPI profile is
   // explicitly "renewals" — never inferred from the team's name — and only when
@@ -146,7 +168,9 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
 
   const summary = useMemo(() => {
     const parts: string[] = [];
-    parts.push(`${rep.name} נמצא/ת כעת על ${Math.round(pct)}% מהיעד החודשי`);
+    parts.push(pct === null
+      ? `לא הוגדר יעד אישי ל${rep.name} לחודש זה`
+      : `${rep.name} נמצא/ת כעת על ${Math.round(pct)}% מהיעד החודשי`);
     if (repFeedback.length > 0) parts.push(`בוצעו ${repFeedback.length} האזנות בציון ממוצע של ${avgListen}`);
     else parts.push("טרם תועדה האזנה לנציג/ה זה/זו");
     parts.push(openTasks.length ? `קיימות ${openTasks.length} משימות פתוחות` : "לא קיימות משימות פתוחות");
@@ -191,10 +215,14 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
             <div className="flex items-center gap-5">
               <CircularProgress pct={pct} status={status} />
               <div className="min-w-0 flex-1 grid grid-cols-2 gap-3">
-                <SummaryRow label="יעד חודשי" value={formatNum(rep.monthlyTarget)} />
+                <SummaryRow label="יעד אישי" value={target === null ? "לא הוגדר" : formatNum(target)} />
                 <SummaryRow label="ביצוע נוכחי" value={formatNum(rep.currentResult)} />
-                <SummaryRow label="קצב יומי נדרש" value={`${formatNum(perDay)}/יום`} />
-                <SummaryRow label="תחזית סוף חודש" value={formatNum(forecast)} tone={forecast >= rep.monthlyTarget ? "success" : "danger"} />
+                <SummaryRow label="קצב יומי נדרש" value={perDay === null ? "—" : `${formatNum(perDay)}/יום`} />
+                <SummaryRow
+                  label="תחזית סוף חודש"
+                  value={forecast === null ? "—" : formatNum(forecast)}
+                  tone={forecast === null || target === null ? undefined : forecast >= target ? "success" : "danger"}
+                />
                 <SummaryRow label="האזנות שתועדו" value={formatNum(repFeedback.length)} />
                 <SummaryRow label="משוב אחרון" value={daysSinceLast === null ? "אין עדיין" : `לפני ${daysSinceLast} ימים`} />
               </div>
@@ -203,15 +231,23 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
 
           {/* Section 2 - Current performance */}
           <Section icon={LineChartIcon} title="ביצועים החודש">
-            <div className="grid grid-cols-3 gap-3">
-              <AnalyticStat label="יעד" value={formatNum(rep.monthlyTarget)} />
-              <AnalyticStat label="ביצוע" value={formatNum(rep.currentResult)} />
-              <AnalyticStat label="עמידה" value={formatPct(pct)} tone={status === "above" ? "success" : status === "attention" ? "danger" : "warning"} />
-            </div>
-            <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
-              <div className={cn("h-full rounded-full transition-all", status === "above" ? "bg-[color:var(--success)]" : status === "onpace" ? "bg-[color:var(--warning)]" : "bg-primary")} style={{ width: `${Math.min(pct, 100)}%` }} />
-            </div>
-            <div className="mt-2 text-xs text-muted-foreground text-end">תחזית סוף חודש: {formatNum(forecast)}</div>
+            {target === null ? (
+              <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground text-center">
+                לא הוגדר יעד אישי לחודש זה — לא ניתן לחשב עמידה, קצב או תחזית. ביצוע נוכחי: {formatNum(rep.currentResult)}.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <AnalyticStat label="יעד" value={formatNum(target)} />
+                  <AnalyticStat label="ביצוע" value={formatNum(rep.currentResult)} />
+                  <AnalyticStat label="עמידה" value={formatPct(pct!)} tone={status === "above" ? "success" : status === "attention" ? "danger" : "warning"} />
+                </div>
+                <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
+                  <div className={cn("h-full rounded-full transition-all", status === "above" ? "bg-[color:var(--success)]" : status === "onpace" ? "bg-[color:var(--warning)]" : "bg-primary")} style={{ width: `${Math.min(pct!, 100)}%` }} />
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground text-end">תחזית סוף חודש: {formatNum(forecast!)}</div>
+              </>
+            )}
           </Section>
 
           {/* Section 2b - Renewal KPIs: only for a real "renewals" profile team */}

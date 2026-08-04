@@ -16,6 +16,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedTeamsRouteImport } from './routes/_authenticated/teams'
+import { Route as AuthenticatedTargetsRouteImport } from './routes/_authenticated/targets'
 import { Route as AuthenticatedRepresentativesRouteImport } from './routes/_authenticated/representatives'
 import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
 import { Route as AuthenticatedKnowledgeRouteImport } from './routes/_authenticated/knowledge'
@@ -58,6 +59,11 @@ const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
 const AuthenticatedTeamsRoute = AuthenticatedTeamsRouteImport.update({
   id: '/teams',
   path: '/teams',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedTargetsRoute = AuthenticatedTargetsRouteImport.update({
+  id: '/targets',
+  path: '/targets',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedRepresentativesRoute =
@@ -124,6 +130,7 @@ export interface FileRoutesByFullPath {
   '/knowledge': typeof AuthenticatedKnowledgeRoute
   '/performance': typeof AuthenticatedPerformanceRoute
   '/representatives': typeof AuthenticatedRepresentativesRoute
+  '/targets': typeof AuthenticatedTargetsRoute
   '/teams': typeof AuthenticatedTeamsRoute
   '/users': typeof AuthenticatedUsersRoute
 }
@@ -140,6 +147,7 @@ export interface FileRoutesByTo {
   '/knowledge': typeof AuthenticatedKnowledgeRoute
   '/performance': typeof AuthenticatedPerformanceRoute
   '/representatives': typeof AuthenticatedRepresentativesRoute
+  '/targets': typeof AuthenticatedTargetsRoute
   '/teams': typeof AuthenticatedTeamsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
@@ -159,6 +167,7 @@ export interface FileRoutesById {
   '/_authenticated/knowledge': typeof AuthenticatedKnowledgeRoute
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
   '/_authenticated/representatives': typeof AuthenticatedRepresentativesRoute
+  '/_authenticated/targets': typeof AuthenticatedTargetsRoute
   '/_authenticated/teams': typeof AuthenticatedTeamsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
@@ -179,6 +188,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/performance'
     | '/representatives'
+    | '/targets'
     | '/teams'
     | '/users'
   fileRoutesByTo: FileRoutesByTo
@@ -195,6 +205,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/performance'
     | '/representatives'
+    | '/targets'
     | '/teams'
     | '/users'
     | '/'
@@ -213,6 +224,7 @@ export interface FileRouteTypes {
     | '/_authenticated/knowledge'
     | '/_authenticated/performance'
     | '/_authenticated/representatives'
+    | '/_authenticated/targets'
     | '/_authenticated/teams'
     | '/_authenticated/users'
     | '/_authenticated/'
@@ -274,6 +286,13 @@ declare module '@tanstack/react-router' {
       path: '/teams'
       fullPath: '/teams'
       preLoaderRoute: typeof AuthenticatedTeamsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/targets': {
+      id: '/_authenticated/targets'
+      path: '/targets'
+      fullPath: '/targets'
+      preLoaderRoute: typeof AuthenticatedTargetsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/representatives': {
@@ -352,6 +371,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedKnowledgeRoute: typeof AuthenticatedKnowledgeRoute
   AuthenticatedPerformanceRoute: typeof AuthenticatedPerformanceRoute
   AuthenticatedRepresentativesRoute: typeof AuthenticatedRepresentativesRoute
+  AuthenticatedTargetsRoute: typeof AuthenticatedTargetsRoute
   AuthenticatedTeamsRoute: typeof AuthenticatedTeamsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
@@ -367,6 +387,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedKnowledgeRoute: AuthenticatedKnowledgeRoute,
   AuthenticatedPerformanceRoute: AuthenticatedPerformanceRoute,
   AuthenticatedRepresentativesRoute: AuthenticatedRepresentativesRoute,
+  AuthenticatedTargetsRoute: AuthenticatedTargetsRoute,
   AuthenticatedTeamsRoute: AuthenticatedTeamsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,

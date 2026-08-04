@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Menu, Search, Star, Upload, MessageSquare, LogOut, Users2, UsersRound, User as UserIcon, KeyRound, Info } from "lucide-react";
+import { Menu, Search, Star, LogOut, User as UserIcon, KeyRound, Info, UsersRound, Settings } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/store";
@@ -8,6 +8,10 @@ import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
 import { useWorkspace } from "@/lib/workspace-context";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  type AppRole, navItemsByGroup, navLabel, type NavItem, NAV_ITEMS,
+} from "@/lib/navigation-config";
+import { useResolvedRole } from "@/lib/use-resolved-role";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -34,30 +38,14 @@ import { PulseLogo } from "@/components/PulseLogo";
 import { APP_NAME } from "@/lib/app-meta";
 
 
-type NavItem = { to: string; label: string; icon: typeof Home; roles?: Array<"admin" | "manager" | "representative">; managerOnly?: boolean; adminOnly?: boolean };
-const NAV: NavItem[] = [
-  { to: "/", label: "דף הבית", icon: Home },
-  { to: "/performance", label: "ביצועים", icon: BarChart3 },
-  { to: "/competitions", label: "תחרויות", icon: Trophy },
-  { to: "/knowledge", label: "מרכז ידע", icon: BookOpen },
-  { to: "/feedback", label: "האזנות ומשוב", icon: Headphones },
-  { to: "/data-import", label: "ייבוא נתונים", icon: Upload, managerOnly: true, roles: ["admin", "manager"] },
-  { to: "/communications", label: "מרכז תקשורת", icon: MessageSquare, managerOnly: true, roles: ["admin", "manager"] },
-  { to: "/teams", label: "ניהול צוותים", icon: UsersRound, managerOnly: true, roles: ["admin", "manager"] },
-  { to: "/representatives", label: "ניהול נציגים", icon: Users2, managerOnly: true, roles: ["admin", "manager"] },
-  { to: "/users", label: "ניהול משתמשים", icon: Users2, managerOnly: true, adminOnly: true, roles: ["admin"] },
-  { to: "/admin", label: "ניהול המערכת", icon: Settings, managerOnly: true, adminOnly: true, roles: ["admin"] },
-];
-
-
-function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
+function NavRow({ item, label, active, onClick }: { item: NavItem; label: string; active: boolean; onClick?: () => void }) {
   const { isFavorite, toggleFavorite } = useUx();
   const Icon = item.icon;
   const pinned = isFavorite(item.to);
   return (
     <div className="group relative">
       <Link
-        to={item.to as string}
+        to={item.to}
         onClick={onClick}
         className={cn(
           "flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-[9px] py-2.5 text-sm font-medium transition-colors sm:pe-9 border-s-[3px]",
@@ -67,7 +55,7 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
         )}
       >
         <Icon className="h-4 w-4 shrink-0" />
-        <span className="truncate">{item.label}</span>
+        <span className="truncate">{label}</span>
       </Link>
       <button
         type="button"
@@ -79,7 +67,7 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
             ? "text-sidebar-primary-foreground/80 hover:text-sidebar-primary-foreground"
             : "text-sidebar-foreground/55 hover:text-sidebar-foreground"
         )}
-        aria-label={pinned ? `הסרת ${item.label} מהמועדפים` : `הוספת ${item.label} למועדפים`}
+        aria-label={pinned ? `הסרת ${label} מהמועדפים` : `הוספת ${label} למועדפים`}
       >
         <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
       </button>
@@ -88,21 +76,19 @@ function NavRow({ item, active, onClick }: { item: NavItem; active: boolean; onC
   );
 }
 
+const GROUP_TITLE: Record<AppRole, string> = {
+  admin: "ניהול ארגוני",
+  manager: "ניהול הצוות",
+  representative: "ניווט",
+};
+
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { state } = useApp();
   const { favorites } = useUx();
-  const { isDemo } = useAppMode();
-  const { roles } = useAuth();
-  // Demo mode falls back to the local role state; Live mode uses real roles from the DB.
-  const canManage = isDemo ? state.role === "manager" : (roles.includes("admin") || roles.includes("manager"));
-  const canAdmin = isDemo ? state.role === "manager" : roles.includes("admin");
-  const visible = NAV.filter((n) => {
-    if (n.adminOnly) return canAdmin;
-    if (n.managerOnly) return canManage;
-    return true;
-  });
-  const pinned = visible.filter((n) => favorites.includes(n.to));
+  const role = useResolvedRole();
+  const { primary, management } = navItemsByGroup(role);
+  const all = [...primary, ...management];
+  const pinned = all.filter((n) => favorites.includes(n.to));
 
   return (
     <nav className="flex flex-col gap-1 p-3">
@@ -113,26 +99,50 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             מועדפים
           </div>
           {pinned.map((n) => (
-            <NavRow key={`fav-${n.to}`} item={n} active={pathname === n.to} onClick={onNavigate} />
+            <NavRow key={`fav-${n.to}`} item={n} label={navLabel(n, role)} active={pathname === n.to} onClick={onNavigate} />
           ))}
           <div className="my-2 border-t border-sidebar-border" />
         </>
       )}
-      <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/60">ניווט</div>
-      {visible.map((n) => (
-        <NavRow key={n.to} item={n} active={pathname === n.to} onClick={onNavigate} />
+      <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/60">
+        {role === "representative" ? GROUP_TITLE.representative : "עבודה יומית"}
+      </div>
+      {primary.map((n) => (
+        <NavRow key={n.to} item={n} label={navLabel(n, role)} active={pathname === n.to} onClick={onNavigate} />
       ))}
+      {management.length > 0 && (
+        <>
+          <div className="mt-2 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/60">
+            {GROUP_TITLE[role]}
+          </div>
+          {management.map((n) => (
+            <NavRow key={n.to} item={n} label={navLabel(n, role)} active={pathname === n.to} onClick={onNavigate} />
+          ))}
+        </>
+      )}
     </nav>
   );
 }
 
+// A representative is not managing a sales team — "מערכת לניהול צוותי
+// מכירות" (a sales-team-management system) misrepresents their own
+// experience, so it's shown only to the roles it's actually true for.
+const BRAND_SUBTITLE: Partial<Record<AppRole, string>> = {
+  admin: "מערכת לניהול צוותי מכירות",
+  manager: "מערכת לניהול צוותי מכירות",
+};
+
 function Brand({ onDark = false }: { onDark?: boolean }) {
+  const role = useResolvedRole();
+  const subtitle = BRAND_SUBTITLE[role];
   return (
     <div className={cn("flex flex-col gap-1.5 px-5 py-5 border-b", onDark ? "border-sidebar-border" : "")}>
       <PulseLogo variant={onDark ? "light" : "dark"} className="h-8" />
-      <div className={cn("text-xs", onDark ? "text-sidebar-foreground/65" : "text-muted-foreground")}>
-        מערכת לניהול צוותי מכירות
-      </div>
+      {subtitle && (
+        <div className={cn("text-xs", onDark ? "text-sidebar-foreground/65" : "text-muted-foreground")}>
+          {subtitle}
+        </div>
+      )}
     </div>
   );
 }
@@ -374,31 +384,17 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
 
 const BARE_ROUTES = ["/auth", "/reset-password", "/access-denied"];
 
-const PAGE_TITLES: Record<string, string> = {
-  "/": "דף הבית",
-  "/performance": "ביצועים",
-  "/competitions": "תחרויות",
-  "/knowledge": "מרכז ידע",
-  "/feedback": "האזנות ומשוב",
-  "/data-import": "ייבוא נתונים",
-  "/communications": "מרכז תקשורת",
-  "/teams": "ניהול צוותים",
-  "/representatives": "ניהול נציגים",
-  "/users": "ניהול משתמשים",
-  "/admin": "ניהול המערכת",
+/** Routes with no entry in navigation-config.ts (not part of any role's nav). */
+const EXTRA_PAGE_TITLES: Record<string, string> = {
   "/changelog": "יומן שינויים",
 };
 
 /** Bottom navigation shown instead of the sidebar on phones and small tablets. */
 function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { state } = useApp();
-  const { isDemo } = useAppMode();
-  const { roles } = useAuth();
-  const canManage = isDemo ? state.role === "manager" : (roles.includes("admin") || roles.includes("manager"));
-  const canAdmin = isDemo ? state.role === "manager" : roles.includes("admin");
-  const visible = NAV.filter((n) => (n.adminOnly ? canAdmin : n.managerOnly ? canManage : true));
-  const primary = visible.slice(0, 4);
+  const role = useResolvedRole();
+  const { primary, management } = navItemsByGroup(role);
+  const visible = [...primary, ...management].slice(0, 4);
 
   return (
     <nav
@@ -406,13 +402,13 @@ function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
       className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 pb-[env(safe-area-inset-bottom)]"
     >
       <ul className="grid grid-cols-5">
-        {primary.map((n) => {
+        {visible.map((n) => {
           const Icon = n.icon;
           const active = pathname === n.to;
           return (
             <li key={n.to}>
               <Link
-                to={n.to as string}
+                to={n.to}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium transition-colors",
@@ -420,7 +416,7 @@ function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
                 )}
               >
                 <Icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.4]")} />
-                <span className="w-full truncate text-center leading-none">{n.label}</span>
+                <span className="w-full truncate text-center leading-none">{navLabel(n, role)}</span>
               </Link>
             </li>
           );
@@ -445,11 +441,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const cmd = useCommandPalette();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const role = useResolvedRole();
   if (BARE_ROUTES.includes(pathname)) {
     return <div className="min-h-dvh bg-background">{children}</div>;
   }
 
-  const pageTitle = PAGE_TITLES[pathname] ?? APP_NAME;
+  const navItem = NAV_ITEMS.find((n) => n.to === pathname);
+  const pageTitle = navItem ? navLabel(navItem, role) : (EXTRA_PAGE_TITLES[pathname] ?? APP_NAME);
 
   return (
     <div className="min-h-dvh flex bg-background">
