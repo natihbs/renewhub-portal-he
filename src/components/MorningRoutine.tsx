@@ -19,12 +19,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useApp, teamSummary, teamsFromReps } from "@/lib/store";
+import { useApp } from "@/lib/store";
 import { calculateAchievement } from "@/lib/performance-domain";
 import { useMorning, type UnderwritingIssue, type UnderwritingPriority, type UnderwritingStatus, type ManagerCall } from "@/lib/morning-store";
 import { formatDateIL, formatNum, formatPct, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import type { Rep } from "@/lib/seed";
 import { useRepWorkspace } from "@/lib/rep-workspace";
+import { useWorkspace } from "@/lib/workspace-context";
+import { useTeamGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
 
 const CHECKLIST = [
   "בדיקת רענון נתונים",
@@ -38,29 +40,41 @@ const CHECKLIST = [
 
 export function MorningRoutine() {
   const { state } = useApp();
-  const { reps, feedback } = state;
+  // Scoped to the manager's current Workspace team — the same scope every
+  // other manager-facing page (Representatives, Performance, Targets) already
+  // reads from. Required for the official team target below to be
+  // well-defined: a team_goals row is per team, not an org-wide aggregate.
+  const { workspace } = useWorkspace();
+  const workspaceTeamId = workspace.type === "team" ? workspace.teamId : null;
+  const reps = useMemo(
+    () => (workspaceTeamId ? state.reps.filter((r) => r.teamId === workspaceTeamId) : state.reps),
+    [state.reps, workspaceTeamId],
+  );
+  const feedback = state.feedback;
   const morning = useMorning();
 
   const wdPassed = Math.max(1, workdaysPassed());
   const wdTotal = workdaysInMonth();
   const wdRemaining = workdaysRemaining();
 
-  const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
+  const teamGoal = useTeamGoal(workspaceTeamId);
+  const hasTeamTarget = teamGoal.targetValue !== null;
+  const repIds = useMemo(() => reps.map((r) => r.id), [reps]);
+  const repGoals = useRepresentativeGoals(repIds);
+
   const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
-  const achievementPct = calculateAchievement(totalResult, totalTarget);
-  const teamRows = useMemo(
-    () => teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) })),
-    [reps],
-  );
+  const achievementPct = hasTeamTarget ? calculateAchievement(totalResult, teamGoal.targetValue as number) : null;
 
   const repsWithData = reps.filter((r) => r.currentResult > 0 || r.lastUpdatedAt);
   const repsMissingData = reps.filter((r) => !(r.currentResult > 0 || r.lastUpdatedAt));
   const completeness = reps.length > 0 ? (repsWithData.length / reps.length) * 100 : 0;
 
   const underPace = useMemo(() => reps.filter((r) => {
-    const expected = (r.monthlyTarget * wdPassed) / wdTotal;
+    const target = repGoals.goalsByRepId.get(r.id);
+    if (target === undefined) return false; // no personal target set — can't judge pace
+    const expected = (target * wdPassed) / wdTotal;
     return r.currentResult < expected * 0.9;
-  }), [reps, wdPassed, wdTotal]);
+  }), [reps, repGoals.goalsByRepId, wdPassed, wdTotal]);
 
   const feedbackRepIds = new Set(feedback.map((f) => f.repId));
   const noRecentListening = reps.filter((r) => {
@@ -73,8 +87,12 @@ export function MorningRoutine() {
 
   const openCalls = morning.managerCalls.filter((c) => c.status !== "completed");
   const openUnderwriting = morning.underwriting.filter((u) => u.status !== "הושלם");
+  const competitionsEndingSoon = state.competitions.filter((c) => {
+    const days = (new Date(c.endDate).getTime() - Date.now()) / 86400000;
+    return c.active && days >= 0 && days <= 7;
+  });
 
-  const change = achievementPct - morning.yesterdayAchievementPct;
+  const change = achievementPct !== null ? achievementPct - morning.yesterdayAchievementPct : null;
 
   return (
     <Card className="overflow-hidden border-primary/20">
@@ -92,12 +110,12 @@ export function MorningRoutine() {
         {/* Row 1: Data status + Target achievement */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DataStatusCard completeness={completeness} withCount={repsWithData.length} missingCount={repsMissingData.length} />
-          <AchievementCard achievementPct={achievementPct} change={change} teams={teamRows} />
+          <AchievementCard achievementPct={achievementPct} change={change} hasTarget={hasTeamTarget} totalResult={totalResult} />
         </div>
 
         {/* Row 2: Quality check + Priorities */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <QualityCheckCard reps={reps} repsMissingData={repsMissingData} />
+          <QualityCheckCard reps={reps} repsMissingData={repsMissingData} goalsByRepId={repGoals.goalsByRepId} />
           <PrioritiesCard
             underPace={underPace.length}
             noListening={noRecentListening.length}
@@ -105,6 +123,7 @@ export function MorningRoutine() {
             openCalls={openCalls.length}
             openUnderwriting={openUnderwriting.length}
             staleData={morning.refreshStatus !== "complete" ? 1 : 0}
+            competitionsEndingSoon={competitionsEndingSoon.length}
           />
         </div>
 
@@ -122,10 +141,11 @@ export function MorningRoutine() {
           <div className="lg:col-span-2">
             <MorningUpdateCard
               achievementPct={achievementPct}
-              teams={teamRows}
+              hasTeamTarget={hasTeamTarget}
+              teamTarget={teamGoal.targetValue}
+              repGoalsByRepId={repGoals.goalsByRepId}
               reps={reps}
               wdRemaining={wdRemaining}
-              totalTarget={totalTarget}
               totalResult={totalResult}
             />
           </div>
@@ -190,9 +210,11 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
 }
 
 /* ============ Quality Check ============ */
-function QualityCheckCard({ reps, repsMissingData }: { reps: Rep[]; repsMissingData: Rep[] }) {
+function QualityCheckCard({ reps, repsMissingData, goalsByRepId }: { reps: Rep[]; repsMissingData: Rep[]; goalsByRepId: Map<string, number> }) {
   const { open } = useRepWorkspace();
-  const noTarget = reps.filter((r) => !r.monthlyTarget || r.monthlyTarget <= 0);
+  // Official monthly target (representative_goals) — never the legacy
+  // rep.monthlyTarget column (§19).
+  const noTarget = reps.filter((r) => !goalsByRepId.has(r.id));
   const nameCounts = reps.reduce<Record<string, number>>((acc, r) => { acc[r.name] = (acc[r.name] ?? 0) + 1; return acc; }, {});
   const duplicates = reps.filter((r) => nameCounts[r.name] > 1);
   const unknownTeam = reps.filter((r) => !r.teamId);
@@ -245,9 +267,28 @@ function QualityCheckCard({ reps, repsMissingData }: { reps: Rep[]; repsMissingD
 }
 
 /* ============ Target Achievement ============ */
-function AchievementCard({ achievementPct, change, teams }: { achievementPct: number; change: number; teams: { teamId: string; teamName: string; pct: number }[] }) {
+function AchievementCard({ achievementPct, change, hasTarget, totalResult }: {
+  achievementPct: number | null; change: number | null; hasTarget: boolean; totalResult: number;
+}) {
   const m = useMorning();
-  const up = change >= 0;
+  if (!hasTarget || achievementPct === null) {
+    return (
+      <div className="rounded-xl border p-4 bg-card">
+        <div className="flex items-center gap-2">
+          <Percent className="h-4 w-4 text-primary" />
+          <div className="font-semibold">אחוז עמידה ביעד</div>
+        </div>
+        <div className="mt-2 text-lg font-semibold text-muted-foreground">לא הוגדר יעד חודשי</div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          ביצוע נוכחי: {formatNum(totalResult)} יחידות. הגדירו יעד חודשי רשמי כדי לראות אחוז עמידה, קצב ותחזית.
+        </p>
+        <Button asChild size="sm" variant="outline" className="mt-3">
+          <Link to="/targets">הגדרת יעד חודשי</Link>
+        </Button>
+      </div>
+    );
+  }
+  const up = (change ?? 0) >= 0;
   return (
     <div className="rounded-xl border p-4 bg-card">
       <div className="flex items-start justify-between gap-2">
@@ -255,25 +296,23 @@ function AchievementCard({ achievementPct, change, teams }: { achievementPct: nu
           <Percent className="h-4 w-4 text-primary" />
           <div className="font-semibold">אחוז עמידה ביעד</div>
         </div>
-        <Badge variant="outline" className={cn("gap-1", up ? "text-[color:var(--success)]" : "text-primary")}>
-          {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-          {up ? "+" : ""}{change.toFixed(1)}%
-        </Badge>
+        {change !== null && (
+          <Badge variant="outline" className={cn("gap-1", up ? "text-[color:var(--success)]" : "text-primary")}>
+            {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            {up ? "+" : ""}{change.toFixed(1)}%
+          </Badge>
+        )}
       </div>
       <div className="mt-2 text-4xl font-extrabold tracking-tight">{formatPct(achievementPct)}</div>
       <div className="text-xs text-muted-foreground">מול {formatPct(m.yesterdayAchievementPct)} אתמול · ממוצע חודשי {formatPct(m.monthlyAvgAchievementPct)}</div>
-      {teams.length > 0 && (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          {teams.slice(0, 4).map((t) => <MiniStat key={t.teamId} label={t.teamName} value={formatPct(t.pct)} />)}
-        </div>
-      )}
     </div>
   );
 }
 
 /* ============ Priorities ============ */
-function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnderwriting, staleData }: {
+function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnderwriting, staleData, competitionsEndingSoon }: {
   underPace: number; noListening: number; noFeedback: number; openCalls: number; openUnderwriting: number; staleData: number;
+  competitionsEndingSoon: number;
 }) {
   const items = [
     { label: "נציגים מתחת לקצב", count: underPace, href: "/performance", urgency: underPace * 3 },
@@ -282,6 +321,7 @@ function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnd
     { label: "שיחות מנהל פתוחות", count: openCalls, href: "#calls", urgency: openCalls * 2 },
     { label: "נציגים ללא משוב", count: noFeedback, href: "/feedback", urgency: noFeedback },
     { label: "נתונים חסרים / לא מעודכנים", count: staleData, href: "/data-import", urgency: staleData * 5 },
+    { label: "תחרויות שמסתיימות בקרוב", count: competitionsEndingSoon, href: "/competitions", urgency: competitionsEndingSoon },
   ].filter((x) => x.count > 0).sort((a, b) => b.urgency - a.urgency);
 
   return (
@@ -712,33 +752,45 @@ function AddUwDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChange
 }
 
 /* ============ Morning Update Generator ============ */
-function MorningUpdateCard({ achievementPct, teams, reps, wdRemaining, totalTarget, totalResult }: {
-  achievementPct: number; teams: { teamId: string; teamName: string; pct: number; result: number; target: number }[];
-  reps: Rep[]; wdRemaining: number; totalTarget: number; totalResult: number;
+function MorningUpdateCard({ achievementPct, hasTeamTarget, teamTarget, repGoalsByRepId, reps, wdRemaining, totalResult }: {
+  achievementPct: number | null; hasTeamTarget: boolean; teamTarget: number | null;
+  repGoalsByRepId: Map<string, number>; reps: Rep[]; wdRemaining: number; totalResult: number;
 }) {
   const m = useMorning();
   const [text, setText] = useState("");
   const [editing, setEditing] = useState(false);
 
   const generate = () => {
-    const withPct = reps.map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, r.monthlyTarget) }))
+    // Only representatives with an official personal target this month can be
+    // ranked by achievement — a rep with no target has no pct to fabricate.
+    const withPct = reps
+      .filter((r) => repGoalsByRepId.has(r.id))
+      .map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, repGoalsByRepId.get(r.id) as number) }))
       .sort((a, b) => b.pct - a.pct);
-    const leaders = withPct.slice(0, 3).map((r) => `${r.name} (${formatPct(r.pct)})`).join(", ");
-    const focus = withPct.slice(-2).reverse().map((r) => r.name).join(", ");
-    const remaining = Math.max(0, totalTarget - totalResult);
-    const perDay = wdRemaining > 0 ? Math.ceil(remaining / wdRemaining) : 0;
+    const leaders = withPct.slice(0, 3).map((r) => `${r.name} (${formatPct(r.pct)})`).join(", ") || "—";
+    const focus = withPct.slice(-2).reverse().map((r) => r.name).join(", ") || "—";
+
+    const targetLine = hasTeamTarget && achievementPct !== null
+      ? `📊 אחוז עמידה ביעד: ${formatPct(achievementPct)} (${formatNum(totalResult)}/${formatNum(teamTarget ?? 0)})`
+      : `📊 לא הוגדר יעד חודשי רשמי לצוות — ביצוע נוכחי: ${formatNum(totalResult)} יחידות`;
+
+    const paceLine = hasTeamTarget && teamTarget !== null
+      ? (() => {
+          const remaining = Math.max(0, teamTarget - totalResult);
+          const perDay = wdRemaining > 0 ? Math.ceil(remaining / wdRemaining) : 0;
+          return `\n💪 יעד להיום: ${formatNum(perDay)} יחידות לנציג בממוצע`;
+        })()
+      : "";
 
     const msg =
 `בוקר טוב לצוות ☀️
 עדכון בוקר ${formatDateIL(new Date())}
 
-📊 אחוז עמידה ביעד כללי: ${formatPct(achievementPct)}
-${teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)} (${formatNum(t.result)}/${formatNum(t.target)})`).join("\n")}
+${targetLine}
 
 ⭐ מובילים: ${leaders}
 🎯 פוקוס להיום: ${focus}
-
-💪 יעד להיום: ${formatNum(perDay)} יחידות לנציג בממוצע
+${paceLine}
 בואו נצא לדרך - יום מצוין ומוצלח!`;
     setText(msg);
     setEditing(false);

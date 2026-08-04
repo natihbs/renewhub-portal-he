@@ -42,7 +42,10 @@ export type ResolvableTeam = { id: string; name: string; kpiProfile?: KpiProfile
 // still be created/updated without a team assignment.
 const rowSchema = z.object({
   name: z.string().trim().min(1, "שם הנציג חסר").max(80, "שם ארוך מדי"),
-  monthlyTarget: z.number({ message: "יעד חודשי חייב להיות מספר" }).positive("יעד חייב להיות חיובי"),
+  // Optional: a row with no (or blank) target column still imports its
+  // performance data normally (§20) — target is never a blocking
+  // requirement. When present, it must still be a valid positive number.
+  monthlyTarget: z.number({ message: "יעד חודשי חייב להיות מספר" }).positive("יעד חייב להיות חיובי").optional(),
   currentResult: z.number({ message: "ביצוע נוכחי חייב להיות מספר" }).min(0, "ביצוע לא יכול להיות שלילי"),
   updatedAt: z.string().min(1, "תאריך עדכון לא תקין"),
 });

@@ -31,6 +31,8 @@ export const CLOUD_TABLES = [
   "morning_checklist",
   "morning_settings",
   "kpi_values",
+  "team_goals",
+  "representative_goals",
 ] as const;
 
 export type CloudTable = (typeof CLOUD_TABLES)[number];

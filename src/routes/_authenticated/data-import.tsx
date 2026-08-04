@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -27,11 +28,12 @@ import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useCloudTeams } from "@/lib/teams-hooks";
 import type { KpiValueRow } from "@/lib/kpi-values";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
+import { setRepresentativeGoals, restoreRepresentativeGoals } from "@/lib/goals.functions";
 import {
   useImport, autoMap, detectPii, PII_LABEL, type PiiHit,
   FIELD_LABEL, REQUIRED_FIELDS, UNSUPPORTED_FIELDS, UNSUPPORTED_FIELD_REASON,
   RENEWAL_FIELDS, RENEWAL_FIELDS_WRONG_PROFILE_REASON,
-  type ImportFieldKey, type ImportHistoryEntry,
+  type ImportFieldKey, type ImportHistoryEntry, type TargetGoalSnapshotEntry,
 } from "@/lib/import-store";
 import { processRows, type ProcessedRow, type ResolvedAction, type RawRow } from "@/lib/import-processing";
 
@@ -111,6 +113,12 @@ function downloadTemplate(kind: "xlsx" | "csv") {
   }
 }
 
+/** "YYYY-MM" (native month input format) -> a Hebrew "MMMM YYYY" label, e.g. "אוגוסט 2026". */
+function formatMonthLabel(month: string): string {
+  const d = new Date(`${month}-01T00:00:00`);
+  return new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(d);
+}
+
 function triggerDownload(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -155,6 +163,8 @@ function DataImportPage() {
   const qc = useQueryClient();
   const createRepFn = useServerFn(createRepresentative);
   const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
+  const setGoalsFn = useServerFn(setRepresentativeGoals);
+  const restoreGoalsFn = useServerFn(restoreRepresentativeGoals);
   const importedByName = profile?.full_name || user?.email || "לא ידוע";
 
   const [step, setStep] = useState(0);
@@ -164,6 +174,17 @@ function DataImportPage() {
   const [mapping, setMapping] = useState<Record<string, ImportFieldKey>>({});
   const [processed, setProcessed] = useState<ProcessedRow[]>([]);
   const [busy, setBusy] = useState(false);
+  // Default OFF: a target column in the file is read and shown in preview,
+  // but never applied as the official monthly target unless the user
+  // explicitly opts in here (§20) — performance data (name/team/result)
+  // always imports regardless of this toggle.
+  const [applyTargetsFromImport, setApplyTargetsFromImport] = useState(false);
+  // "YYYY-MM", explicit target month for the import (§20 correction #3).
+  // Seeded with a default only when every row in the file reports the same
+  // reporting month (see goToPreview) — otherwise left blank, forcing an
+  // explicit choice before target writes can be confirmed. Never silently
+  // defaults to "now".
+  const [importTargetMonth, setImportTargetMonth] = useState("");
   const [lastSummary, setLastSummary] = useState<ImportHistoryEntry | null>(null);
   const [piiBlock, setPiiBlock] = useState<{ fileName: string; hits: PiiHit[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -207,7 +228,16 @@ function DataImportPage() {
       toast.error("חסרות עמודות חובה", { description: missing.map((m) => FIELD_LABEL[m]).join(", ") });
       return;
     }
-    setProcessed(processRows(rows, mapping, state.reps, teamsForResolution));
+    const rows2 = processRows(rows, mapping, state.reps, teamsForResolution);
+    setProcessed(rows2);
+    // A "reliable" default target month exists only when every importable
+    // row's own reporting date (תאריך עדכון) agrees on the same calendar
+    // month — never "now". Any disagreement, or no dates at all, leaves the
+    // picker blank and requires an explicit choice (§20 correction #3).
+    const reportedMonths = new Set(
+      rows2.filter((r) => r.action !== "skip" && r.updatedAt).map((r) => r.updatedAt!.slice(0, 7)),
+    );
+    setImportTargetMonth(reportedMonths.size === 1 ? [...reportedMonths][0] : "");
     setStep(2);
   }
 
@@ -219,6 +249,11 @@ function DataImportPage() {
       let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0, cloudFailed = 0;
       const now = new Date().toISOString().slice(0, 10);
       const byId = new Map(state.reps.map((r) => [r.id, r] as const));
+      // Official-target write candidates, collected only for rows whose
+      // performance-data write already succeeded — never mixed into the
+      // representatives.monthly_target column, and only applied at all when
+      // the user explicitly opted in (applyTargetsFromImport, §20).
+      const targetCandidates: { repId: string; teamId: string | null; targetValue: number }[] = [];
 
       for (const r of processed) {
         const rowErrors = r.issues.filter((i) => i.severity === "error");
@@ -240,17 +275,18 @@ function DataImportPage() {
             if (!existing) throw new Error("הנציג המקורי לא נמצא — יתכן שהוסר");
             if (isDemo) {
               updateRep(existing.id, {
-                monthlyTarget: r.monthlyTarget ?? existing.monthlyTarget,
                 currentResult: r.currentResult ?? existing.currentResult,
                 teamId: r.teamId ?? existing.teamId,
                 teamName: r.teamName ?? existing.teamName,
                 lastUpdatedAt: updatedAt,
               });
             } else {
+              // Performance data only — monthly_target is never written from
+              // an import. Official targets (if opted in) are written
+              // separately below, to representative_goals.
               await updateMetricsFn({
                 data: {
                   rep_id: existing.id,
-                  monthly_target: r.monthlyTarget ?? undefined,
                   current_result: r.currentResult ?? undefined,
                   team_id: r.teamId ?? undefined,
                 },
@@ -262,12 +298,12 @@ function DataImportPage() {
             if (isDemo) {
               addRep({
                 name: r.name, teamId: r.teamId, teamName: r.teamName ?? "ללא צוות",
-                monthlyTarget: r.monthlyTarget!, currentResult: r.currentResult!, lastUpdatedAt: updatedAt,
+                monthlyTarget: 0, currentResult: r.currentResult!, lastUpdatedAt: updatedAt,
               });
             } else {
               const createdRep = await createRepFn({
                 data: {
-                  name: r.name, team_id: r.teamId, monthly_target: r.monthlyTarget!, current_result: r.currentResult!,
+                  name: r.name, team_id: r.teamId, current_result: r.currentResult!,
                   external_ref: null, user_id: null, active: true,
                 },
               });
@@ -280,6 +316,10 @@ function DataImportPage() {
           errs++;
           errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`] });
           continue;
+        }
+
+        if (!isDemo && repIdForRenewal && r.monthlyTarget != null) {
+          targetCandidates.push({ repId: repIdForRenewal, teamId: r.teamId, targetValue: r.monthlyTarget });
         }
 
         // Renewal values are a second, independent write — a failure here must never
@@ -305,7 +345,55 @@ function DataImportPage() {
         }
       }
 
-      if (!isDemo) void qc.invalidateQueries({ queryKey: ["representatives"] });
+      // Official target write — opt-in only, explicit target month only
+      // (§20 corrections #3/#4). Grouped by team since setRepresentativeGoals
+      // authorizes and validates one team at a time (admin, or the manager of
+      // that specific team); a row whose rep has no team can't be assigned an
+      // official target this way and is reported as skipped rather than
+      // silently dropped. Every write also captures a restore point
+      // (targetGoalSnapshot) so undo can put things back exactly, per row —
+      // never a generic "clear everything" undo.
+      let targetsSet = 0, targetsSkippedNoTeam = 0, targetsFailed = 0;
+      const targetGoalSnapshot: TargetGoalSnapshotEntry[] = [];
+      if (!isDemo && applyTargetsFromImport && targetCandidates.length > 0 && importTargetMonth) {
+        const byTeam = new Map<string, { representative_id: string; target_value: number }[]>();
+        for (const c of targetCandidates) {
+          if (!c.teamId) { targetsSkippedNoTeam++; continue; }
+          const list = byTeam.get(c.teamId) ?? [];
+          list.push({ representative_id: c.repId, target_value: c.targetValue });
+          byTeam.set(c.teamId, list);
+        }
+        for (const [teamId, goals] of byTeam) {
+          try {
+            const res = await setGoalsFn({ data: { team_id: teamId, month: importTargetMonth, goals } });
+            targetsSet += res.created + res.updated;
+            const goalMonth = `${importTargetMonth}-01`;
+            for (const p of res.previously_existing) {
+              targetGoalSnapshot.push({
+                representativeId: p.representative_id, teamId, goalMonth,
+                hadPrevious: true, previousTargetValue: p.target_value,
+              });
+            }
+            for (const repId of res.newly_created_representative_ids) {
+              targetGoalSnapshot.push({
+                representativeId: repId, teamId, goalMonth,
+                hadPrevious: false, previousTargetValue: null,
+              });
+            }
+          } catch (e) {
+            targetsFailed += goals.length;
+            errorReport!.push({
+              row: 0, name: undefined,
+              messages: [`עדכון יעדים רשמיים נכשל עבור צוות (${goals.length} נציגים): ${(e as Error).message ?? e}`],
+            });
+          }
+        }
+      }
+
+      if (!isDemo) {
+        void qc.invalidateQueries({ queryKey: ["representatives"] });
+        if (applyTargetsFromImport) void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
+      }
 
       const status: ImportHistoryEntry["status"] =
         cloudFailed > 0 ? (updated + created === 0 ? "failed" : "partial") : (errs > 0 ? "partial" : "success");
@@ -320,21 +408,28 @@ function DataImportPage() {
         warnings: warns,
         errors: errs,
         status,
-        snapshot,
+        snapshot: { reps: snapshot, targetGoals: targetGoalSnapshot },
         errorReport,
       });
       setLastSummary(entry);
       setStep(4);
 
+      const monthLabel = importTargetMonth ? formatMonthLabel(importTargetMonth) : "";
+      const targetsNote = !applyTargetsFromImport
+        ? undefined
+        : targetsFailed > 0
+        ? ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו, ${targetsFailed} נכשלו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`
+        : ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`;
+
       // Never report success unless every cloud write actually succeeded.
-      if (cloudFailed > 0) {
+      if (cloudFailed > 0 || targetsFailed > 0) {
         toast.error("הייבוא הושלם עם שגיאות שמירה", {
-          description: `${updated} עודכנו, ${created} נוספו, ${cloudFailed} נכשלו בשמירה בענן — פרטים בדוח השגיאות`,
+          description: `${updated} עודכנו, ${created} נוספו, ${cloudFailed} נכשלו בשמירה בענן — פרטים בדוח השגיאות${targetsNote ?? ""}`,
         });
       } else if (isDemo) {
         toast.success("הייבוא הושלם (מצב הדגמה — לא נשמר בענן)", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
       } else {
-        toast.success("הייבוא נשמר בהצלחה בענן", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
+        toast.success("הייבוא נשמר בהצלחה בענן", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו${targetsNote ?? ""}` });
       }
     } catch (e) {
       toast.error("שגיאה בייבוא", { description: String((e as Error).message ?? e) });
@@ -409,6 +504,11 @@ function DataImportPage() {
             <ConfirmStep
               processed={processed} fileName={file?.name ?? ""} criticalCount={criticalCount} warnCount={warnCount}
               onBack={() => setStep(2)} onConfirm={applyImport} busy={busy}
+              isDemo={isDemo}
+              applyTargetsFromImport={applyTargetsFromImport}
+              onApplyTargetsFromImportChange={setApplyTargetsFromImport}
+              importTargetMonth={importTargetMonth}
+              onImportTargetMonthChange={setImportTargetMonth}
             />
           )}
           {step === 4 && lastSummary && (
@@ -422,37 +522,81 @@ function DataImportPage() {
         onUndo={async (entry) => {
           if (!entry.snapshot) { toast.error("לא ניתן לשחזר – אין תמונת מצב שמורה"); return; }
           if (isDemo) {
-            replaceReps(entry.snapshot);
+            replaceReps(entry.snapshot.reps);
             importStore.removeHistory(entry.id);
             toast.success("הייבוא האחרון בוטל והנתונים שוחזרו (מצב הדגמה)");
             return;
           }
-          // Restores target/result/team for reps that existed before the import.
-          // Representatives CREATED by this import are not deleted by undo —
-          // remove them manually from /representatives if needed.
           setBusy(true);
           try {
-            let failed = 0;
-            for (const prevRep of entry.snapshot) {
+            // Part 1: performance data (result/team). Representatives
+            // CREATED by this import are not deleted by undo — remove them
+            // manually from /representatives if needed.
+            let repsFailed = 0;
+            for (const prevRep of entry.snapshot.reps) {
               try {
                 await updateMetricsFn({
-                  data: {
-                    rep_id: prevRep.id,
-                    monthly_target: prevRep.monthlyTarget,
-                    current_result: prevRep.currentResult,
-                    team_id: prevRep.teamId,
-                  },
+                  data: { rep_id: prevRep.id, current_result: prevRep.currentResult, team_id: prevRep.teamId },
                 });
               } catch {
-                failed++;
+                repsFailed++;
               }
             }
+
+            // Part 2: official monthly targets — target-aware undo (§4).
+            // Restores each representative_goals row to its exact prior
+            // state (or deletes it if it didn't exist before this import),
+            // grouped by team since restoreRepresentativeGoals authorizes
+            // one team at a time. A generic "the reps are back to normal" is
+            // never presented as if targets were handled too — the two
+            // outcomes are tracked and reported completely separately.
+            let goalsRestored = 0, goalsDeleted = 0, goalsFailed = 0;
+            const snapshotEntries = entry.snapshot.targetGoals;
+            if (snapshotEntries.length > 0) {
+              const byTeam = new Map<string, TargetGoalSnapshotEntry[]>();
+              for (const g of snapshotEntries) {
+                const list = byTeam.get(g.teamId) ?? [];
+                list.push(g);
+                byTeam.set(g.teamId, list);
+              }
+              for (const [teamId, entries] of byTeam) {
+                const goalMonth = entries[0].goalMonth;
+                try {
+                  const res = await restoreGoalsFn({
+                    data: {
+                      team_id: teamId, month: goalMonth,
+                      entries: entries.map((e) => (e.hadPrevious
+                        ? { representative_id: e.representativeId, had_previous: true as const, previous_target_value: e.previousTargetValue as number }
+                        : { representative_id: e.representativeId, had_previous: false as const, previous_target_value: null })),
+                    },
+                  });
+                  goalsRestored += res.restored;
+                  goalsDeleted += res.deleted;
+                  goalsFailed += res.failed;
+                } catch {
+                  goalsFailed += entries.length;
+                }
+              }
+            }
+
             void qc.invalidateQueries({ queryKey: ["representatives"] });
+            if (snapshotEntries.length > 0) void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
             importStore.removeHistory(entry.id);
-            if (failed > 0) {
-              toast.error("הביטול הושלם חלקית", { description: `${failed} נציגים לא שוחזרו בהצלחה. נציגים חדשים שנוצרו בייבוא זה לא הוסרו.` });
+
+            const goalsNote = snapshotEntries.length === 0
+              ? ""
+              : goalsFailed > 0
+              ? ` יעדים רשמיים: ${goalsRestored + goalsDeleted} שוחזרו, ${goalsFailed} נכשלו — יש לבדוק במסך ניהול היעדים.`
+              : ` יעדים רשמיים: ${goalsRestored + goalsDeleted} שוחזרו בהצלחה.`;
+
+            if (repsFailed > 0 || goalsFailed > 0) {
+              toast.error("הביטול הושלם חלקית", {
+                description: `${repsFailed > 0 ? `${repsFailed} נציגים לא שוחזרו בהצלחה. ` : ""}נציגים חדשים שנוצרו בייבוא זה לא הוסרו.${goalsNote}`,
+              });
             } else {
-              toast.success("הייבוא האחרון בוטל ושוחזר בענן", { description: "נציגים חדשים שנוצרו בייבוא זה לא הוסרו — יש למחוק אותם ידנית במידת הצורך." });
+              toast.success("הייבוא האחרון בוטל ושוחזר בענן", {
+                description: `נציגים חדשים שנוצרו בייבוא זה לא הוסרו.${goalsNote}`,
+              });
             }
           } finally {
             setBusy(false);
@@ -653,8 +797,14 @@ function MappingStep({
 function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<string, ImportFieldKey> }) {
   const persisted = headers.filter((h) => {
     const f = mapping[h];
-    return f && f !== "__skip__" && !UNSUPPORTED_FIELDS.includes(f) && !RENEWAL_FIELDS.includes(f);
+    return f && f !== "__skip__" && f !== "monthlyTarget" && !UNSUPPORTED_FIELDS.includes(f) && !RENEWAL_FIELDS.includes(f);
   });
+  // Called out separately from the plain "יישמרו במערכת" bucket: unlike
+  // every other persisted field, this one is never written just because it's
+  // mapped — it requires the explicit opt-in in the confirmation step, and
+  // when applied it goes to the official target system, not the
+  // representative's row (§20).
+  const targetMapped = headers.some((h) => mapping[h] === "monthlyTarget");
   const renewal = headers.filter((h) => {
     const f = mapping[h];
     return !!f && RENEWAL_FIELDS.includes(f);
@@ -672,6 +822,13 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
         <span className="font-medium text-[color:var(--success)]">יישמרו במערכת:</span>{" "}
         {persisted.length > 0 ? persisted.join(", ") : "—"}
       </div>
+      {targetMapped && (
+        <div>
+          <span className="font-medium text-primary">יעד חודשי — לא יישמר אוטומטית:</span>{" "}
+          הערכים יוצגו בבדיקת הנתונים, אך היעד הרשמי של נציג משתנה רק אם תאשרו זאת מפורשות בשלב האישור.
+          ביצוע נוכחי מתעדכן תמיד, ללא תלות באפשרות זו.
+        </div>
+      )}
       {renewal.length > 0 && (
         <div>
           <span className="font-medium text-primary">יישמרו כנתוני חידוש — רק לשורות בצוות "חידושים":</span>{" "}
@@ -733,7 +890,7 @@ function PreviewStep({
               <TableHead className="w-10">#</TableHead>
               <TableHead>שם</TableHead>
               <TableHead>צוות</TableHead>
-              <TableHead>יעד</TableHead>
+              <TableHead>יעד (מהקובץ)</TableHead>
               <TableHead>ביצוע</TableHead>
               {showRenewalColumns && <TableHead>הזדמנויות חידוש</TableHead>}
               {showRenewalColumns && <TableHead>חידושים שבוצעו</TableHead>}
@@ -838,13 +995,24 @@ function ManualMatchDialog({ reps, onPick }: { reps: Rep[]; onPick: (id: string)
 
 // ---------- Step: Confirm ----------
 
-function ConfirmStep({ processed, fileName, criticalCount, warnCount, onBack, onConfirm, busy }: {
+function ConfirmStep({
+  processed, fileName, criticalCount, warnCount, onBack, onConfirm, busy,
+  isDemo, applyTargetsFromImport, onApplyTargetsFromImportChange,
+  importTargetMonth, onImportTargetMonthChange,
+}: {
   processed: ProcessedRow[]; fileName: string; criticalCount: number; warnCount: number;
   onBack: () => void; onConfirm: () => void; busy: boolean;
+  isDemo: boolean; applyTargetsFromImport: boolean; onApplyTargetsFromImportChange: (v: boolean) => void;
+  importTargetMonth: string; onImportTargetMonthChange: (v: string) => void;
 }) {
   const updateN = processed.filter((p) => p.action === "update").length;
   const createN = processed.filter((p) => p.action === "create").length;
   const skipN = processed.length - updateN - createN;
+  const targetRowsN = processed.filter((p) => p.action !== "skip" && p.monthlyTarget != null).length;
+  // Confirming an import that would write official targets requires an
+  // explicit target month — never silently falls back to "now" (§20
+  // correction #3).
+  const monthMissing = applyTargetsFromImport && !importTargetMonth;
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
@@ -860,9 +1028,45 @@ function ConfirmStep({ processed, fileName, criticalCount, warnCount, onBack, on
           פעולה זו לא תשנה הערות מנהל, האזנות, משימות, מאמרים או תחרויות.
         </AlertDescription>
       </Alert>
+
+      {!isDemo && targetRowsN > 0 && (
+        <div className="space-y-3 rounded-xl border p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <div className="font-medium text-sm">עדכון יעדים אישיים רשמיים מהקובץ</div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                הקובץ מכיל עמודת "יעד חודשי" עם ערך עבור {targetRowsN} שורות. כברירת מחדל היעדים הרשמיים
+                (המוצגים ב"ניהול יעדים") אינם משתנים מייבוא — רק הביצוע הנוכחי מתעדכן. הפעלת האפשרות הזו
+                תעדכן את היעד האישי הרשמי לחודש שייבחר למטה עבור כל נציג עם ערך יעד בשורה, ותדרוס יעד רשמי
+                קיים לאותו חודש אם הוגדר. נציג ללא צוות משויך לא יעודכן בדרך זו.
+              </p>
+            </div>
+            <Switch checked={applyTargetsFromImport} onCheckedChange={onApplyTargetsFromImportChange} className="shrink-0 mt-1" />
+          </div>
+
+          {applyTargetsFromImport && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/40 p-3">
+              <Label htmlFor="import-target-month" className="text-sm shrink-0">חודש יעד לייבוא</Label>
+              <Input
+                id="import-target-month" type="month" value={importTargetMonth}
+                onChange={(e) => onImportTargetMonthChange(e.target.value)}
+                className="w-auto"
+              />
+              {importTargetMonth ? (
+                <span className="text-sm text-muted-foreground">
+                  היעדים יעודכנו עבור <b className="text-foreground">{formatMonthLabel(importTargetMonth)}</b> בלבד — לא חודש נוכחי אוטומטית.
+                </span>
+              ) : (
+                <span className="text-sm text-destructive">חובה לבחור חודש לפני אישור הייבוא.</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} disabled={busy}><ArrowRight className="me-1 h-4 w-4" /> חזרה</Button>
-        <Button onClick={onConfirm} disabled={busy || updateN + createN === 0}>אישור וייבוא</Button>
+        <Button onClick={onConfirm} disabled={busy || updateN + createN === 0 || monthMissing}>אישור וייבוא</Button>
       </div>
     </div>
   );
@@ -889,6 +1093,16 @@ function SummaryStep({ entry, onNew }: { entry: ImportHistoryEntry; onNew: () =>
       <div className="text-sm text-muted-foreground">
         קובץ: <b>{entry.fileName}</b> · תאריך: {new Date(entry.date).toLocaleString("he-IL")}
       </div>
+      {entry.snapshot && entry.snapshot.targetGoals.length > 0 && (
+        <Alert>
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertTitle>יעדים רשמיים עודכנו</AlertTitle>
+          <AlertDescription>
+            עודכנו יעדים אישיים רשמיים עבור {entry.snapshot.targetGoals.length} נציגים, עבור החודש{" "}
+            <b>{formatMonthLabel(entry.snapshot.targetGoals[0].goalMonth.slice(0, 7))}</b> בלבד.
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button asChild><Link to="/performance">צפה בביצועים המעודכנים</Link></Button>
         <Button variant="outline" onClick={onNew}>ייבוא נוסף</Button>
@@ -1086,14 +1300,13 @@ function ManualEntryDialog() {
   const [repId, setRepId] = useState<string>(state.reps[0]?.id ?? "");
   const [name, setName] = useState("");
   const [teamId, setTeamId] = useState<string>("");
-  const [target, setTarget] = useState<string>("");
   const [current, setCurrent] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    const t = Number(target), c = Number(current);
+    const c = Number(current);
     if (mode === "create") {
-      if (!name.trim() || !isFinite(t) || t <= 0 || !isFinite(c) || c < 0) {
+      if (!name.trim() || !isFinite(c) || c < 0) {
         toast.error("נא למלא את כל השדות בערכים תקינים"); return;
       }
     } else if (!repId) {
@@ -1105,20 +1318,20 @@ function ManualEntryDialog() {
       if (isDemo) {
         if (mode === "create") {
           const teamName = teamOptions.find((tm) => tm.id === teamId)?.name ?? "ללא צוות";
-          addRep({ name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: t, currentResult: c, lastUpdatedAt: new Date().toISOString().slice(0, 10) });
+          // Target-setting lives exclusively on /targets — a manually
+          // entered rep here always starts with no legacy target.
+          addRep({ name: name.trim(), teamId: teamId || null, teamName, monthlyTarget: 0, currentResult: c, lastUpdatedAt: new Date().toISOString().slice(0, 10) });
         } else {
           const patch: Partial<Rep> = { lastUpdatedAt: new Date().toISOString().slice(0, 10) };
-          if (target !== "" && isFinite(t) && t > 0) patch.monthlyTarget = t;
           if (current !== "" && isFinite(c) && c >= 0) patch.currentResult = c;
           updateRep(repId, patch);
         }
         toast.success(mode === "create" ? "הנציג נוסף בהצלחה (מצב הדגמה)" : "הנציג עודכן בהצלחה (מצב הדגמה)");
       } else {
         if (mode === "create") {
-          await createRepFn({ data: { name: name.trim(), team_id: teamId || null, monthly_target: t, current_result: c, external_ref: null, user_id: null, active: true } });
+          await createRepFn({ data: { name: name.trim(), team_id: teamId || null, current_result: c, external_ref: null, user_id: null, active: true } });
         } else {
-          const payload: { rep_id: string; monthly_target?: number; current_result?: number } = { rep_id: repId };
-          if (target !== "" && isFinite(t) && t > 0) payload.monthly_target = t;
+          const payload: { rep_id: string; current_result?: number } = { rep_id: repId };
           if (current !== "" && isFinite(c) && c >= 0) payload.current_result = c;
           await updateMetricsFn({ data: payload });
         }
@@ -1126,7 +1339,7 @@ function ManualEntryDialog() {
         toast.success(mode === "create" ? "הנציג נוסף ונשמר בענן" : "הנציג עודכן ונשמר בענן");
       }
       setOpen(false);
-      setName(""); setTarget(""); setCurrent("");
+      setName(""); setCurrent("");
     } catch (e) {
       toast.error("השמירה נכשלה", { description: (e as Error).message });
     } finally {
@@ -1174,10 +1387,8 @@ function ManualEntryDialog() {
               </div>
             </>
           )}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1"><Label>יעד חודשי</Label><Input inputMode="numeric" value={target} onChange={(e) => setTarget(e.target.value)} /></div>
-            <div className="space-y-1"><Label>ביצוע נוכחי</Label><Input inputMode="numeric" value={current} onChange={(e) => setCurrent(e.target.value)} /></div>
-          </div>
+          <div className="space-y-1"><Label>ביצוע נוכחי</Label><Input inputMode="numeric" value={current} onChange={(e) => setCurrent(e.target.value)} /></div>
+          <p className="text-xs text-muted-foreground">הגדרת יעד חודשי אישי מתבצעת במסך ניהול היעדים הייעודי.</p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>ביטול</Button>

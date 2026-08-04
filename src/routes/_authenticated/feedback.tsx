@@ -9,6 +9,8 @@ import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useUx } from "@/lib/ux-store";
+import { useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
+import { calculateAchievement } from "@/lib/performance-domain";
 import { useServerFn } from "@tanstack/react-start";
 import { previewUnpublishedFeedback, publishFeedbackBulk, toBulkPublishFilters, BULK_PUBLISH_NONE } from "@/lib/feedback-admin.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -468,25 +470,31 @@ function RecentSessions({ list, onView }: { list: Feedback[]; onView: (id: strin
 function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
   const { state } = useApp();
   const { open: openRepWorkspace } = useRepWorkspace();
+  // Official monthly target (representative_goals) — the sole source of
+  // truth for "עמידה ביעד" here too (§19), never the legacy
+  // rep.monthlyTarget column.
+  const repIds = useMemo(() => state.reps.map((r) => r.id), [state.reps]);
+  const { goalsByRepId } = useRepresentativeGoals(repIds, currentGoalMonth());
 
   const ranked = useMemo(() => {
     return state.reps.map((r) => {
       const last = lastFeedbackFor(state.feedback, r.id);
       const days = last ? daysSince(last.date) : 30;
       const avg = avgScoreFor(state.feedback, r.id);
-      const pct = r.monthlyTarget > 0 ? (r.currentResult / r.monthlyTarget) * 100 : 0;
+      const target = goalsByRepId.get(r.id) ?? null;
+      const pct = target === null ? null : calculateAchievement(r.currentResult, target);
       // Priority score (higher = more urgent)
       let priority = 0;
       priority += Math.min(days, 30);            // time since last
       if (avg && avg < 60) priority += 30;       // low quality
       else if (avg && avg < 75) priority += 15;
-      if (pct < 80) priority += 20;              // performance decline proxy
+      if (pct !== null && pct < 80) priority += 20; // performance decline proxy — never fabricated when target is unset
       if (!last) priority += 25;
       const level: "high" | "medium" | "low" =
         priority >= 45 ? "high" : priority >= 25 ? "medium" : "low";
       return { r, last, days, avg, pct, priority, level };
     }).sort((a, b) => b.priority - a.priority);
-  }, [state.reps, state.feedback]);
+  }, [state.reps, state.feedback, goalsByRepId]);
 
   return (
     <Card>
@@ -524,7 +532,7 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                       avg >= 80 ? "text-[color:var(--success)]" : avg >= 60 ? "text-[color:var(--warning)]" : "text-primary"
                     )}>{avg || "—"}</span>
                   </TableCell>
-                  <TableCell className="text-sm">{Math.round(pct)}%</TableCell>
+                  <TableCell className="text-sm">{pct === null ? <span className="text-muted-foreground">לא הוגדר יעד</span> : `${Math.round(pct)}%`}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {reasonFor(level, days, avg, pct, !!last)}
                   </TableCell>
@@ -543,12 +551,13 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
   );
 }
 
-function reasonFor(level: string, days: number, avg: number, pct: number, hasAny: boolean) {
+function reasonFor(level: string, days: number, avg: number, pct: number | null, hasAny: boolean) {
   const reasons: string[] = [];
   if (!hasAny) reasons.push("ללא היסטוריה");
   else if (days > 14) reasons.push(`${days} ימים ללא האזנה`);
   if (avg && avg < 60) reasons.push("ציון נמוך");
-  if (pct < 80) reasons.push("ירידה בביצוע");
+  if (pct === null) reasons.push("לא הוגדר יעד אישי");
+  else if (pct < 80) reasons.push("ירידה בביצוע");
   return reasons.join(" · ") || (level === "low" ? "מעקב שגרתי" : "—");
 }
 

@@ -20,7 +20,13 @@ export type ImportFieldKey =
   | "upgradePct"
   | "__skip__";
 
-export const REQUIRED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget", "currentResult", "updatedAt"];
+// monthlyTarget is intentionally NOT required: performance-result imports
+// (name/team/result/date) must work with no target column at all, and even
+// when a target column is mapped, whether it's applied as the official
+// monthly target is a separate, explicit opt-in decision (see
+// applyTargetsFromImport in data-import.tsx / §20) — never a blocking
+// requirement on every import.
+export const REQUIRED_FIELDS: ImportFieldKey[] = ["name", "team", "currentResult", "updatedAt"];
 
 /**
  * Fields the import pipeline actually validates AND writes to the cloud. Every other
@@ -28,6 +34,12 @@ export const REQUIRED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget
  * mapping UI — it is never persisted. Keeping these two lists explicit is what
  * prevents a field from silently being "accepted" (mappable, validated) while its
  * values are quietly discarded before the cloud write.
+ *
+ * monthlyTarget is read and shown in the preview, but is never written to the
+ * legacy representatives.monthly_target column — when the explicit "update
+ * official targets" opt-in is on, it is written only to representative_goals
+ * (the official target system), never as a side effect of a plain
+ * performance-data import.
  */
 export const PERSISTED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget", "currentResult", "updatedAt"];
 
@@ -51,7 +63,7 @@ export const UNSUPPORTED_FIELD_REASON = "השדה מוצג להתאמה עתיד
 export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   name: "שם הנציג",
   team: "צוות",
-  monthlyTarget: "יעד חודשי",
+  monthlyTarget: "יעד חודשי (אופציונלי — עדכון יעדים רשמיים דורש אישור נפרד)",
   currentResult: "ביצוע נוכחי",
   updatedAt: "תאריך עדכון",
   renewalOpportunities: "הזדמנויות חידוש (רק לצוותי חידושים)",
@@ -73,6 +85,25 @@ export type MappingTemplate = {
   createdAt: string;
 };
 
+/**
+ * Restore point for one representative's official monthly target row, taken
+ * immediately before an import wrote to it (§4 target-aware undo). had_previous
+ * distinguishes "put the old value back" from "this row didn't exist before —
+ * delete it," so undo never fabricates a value or leaves an orphaned row.
+ */
+export type TargetGoalSnapshotEntry = {
+  representativeId: string;
+  teamId: string;
+  goalMonth: string; // normalized YYYY-MM-01
+  hadPrevious: boolean;
+  previousTargetValue: number | null; // null when hadPrevious is false
+};
+
+export type ImportSnapshot = {
+  reps: Rep[]; // previous rep rows for the performance-data undo path
+  targetGoals: TargetGoalSnapshotEntry[]; // empty when this import never touched official targets
+};
+
 export type ImportHistoryEntry = {
   id: string;
   fileName: string;
@@ -85,7 +116,7 @@ export type ImportHistoryEntry = {
   warnings: number;
   errors: number;
   status: "success" | "partial" | "failed";
-  snapshot?: Rep[]; // previous reps for undo (only most recent kept)
+  snapshot?: ImportSnapshot; // only the most recent import keeps its snapshot
   errorReport?: { row: number; name?: string; messages: string[] }[];
 };
 
@@ -111,10 +142,19 @@ type HistoryRow = {
   warnings: number;
   errors: number;
   status: ImportHistoryEntry["status"];
-  snapshot: Rep[] | null;
+  // snapshot is a schemaless JSONB column — accepts both the current shape
+  // ({reps, targetGoals}) and the legacy bare-array shape written before
+  // target-aware undo existed, normalized on read below.
+  snapshot: ImportSnapshot | Rep[] | null;
   error_report: ImportHistoryEntry["errorReport"] | null;
   created_at: string;
 };
+
+function normalizeSnapshot(raw: ImportSnapshot | Rep[] | null | undefined): ImportSnapshot | undefined {
+  if (!raw) return undefined;
+  if (Array.isArray(raw)) return { reps: raw, targetGoals: [] };
+  return raw;
+}
 
 const ImportCtx = createContext<Ctx | null>(null);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -167,7 +207,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       warnings: h.warnings,
       errors: h.errors,
       status: h.status,
-      snapshot: h.snapshot ?? undefined,
+      snapshot: normalizeSnapshot(h.snapshot),
       errorReport: h.error_report ?? undefined,
     }));
 

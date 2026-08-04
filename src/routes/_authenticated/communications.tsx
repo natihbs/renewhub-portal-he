@@ -6,9 +6,10 @@ import {
   Copy, Save, RefreshCw, Pencil, Trash2, Files, ShieldAlert, MessageCircle,
   Mail, Megaphone, Sparkles,
 } from "lucide-react";
-import { useApp, useIsManager, teamSummary, teamsFromReps, competitionLeaderboard } from "@/lib/store";
+import { useApp, useIsManager, teamsFromReps, competitionLeaderboard } from "@/lib/store";
 import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
 import { useCloudTeams } from "@/lib/teams-hooks";
+import { useTeamGoals, useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
 import { renewalTotalsForTeam } from "@/lib/kpi-values";
 import { calculateRenewalRate } from "@/lib/renewal-rate";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
@@ -106,12 +107,31 @@ function CommsPage() {
 function useGenerationInputs() {
   const { state } = useApp();
   const { teams: cloudTeams } = useCloudTeams();
+  const reps = state.reps;
+  const teamList = useMemo(() => teamsFromReps(reps), [reps]);
+
+  // Official monthly targets (team_goals / representative_goals) — the sole
+  // source of truth for target achievement in generated communications too
+  // (§19). Never derived from summed rep.monthlyTarget (teamSummary's old
+  // "target" field did exactly that, which §9 explicitly forbids).
+  const { goalsByTeamId } = useTeamGoals(teamList.map((t) => t.teamId));
+  const { goalsByRepId } = useRepresentativeGoals(reps.map((r) => r.id), currentGoalMonth());
+
   return useMemo(() => {
-    const reps = state.reps;
-    const totalTarget = reps.reduce((a, r) => a + r.monthlyTarget, 0);
+    const teams = teamList.map((t) => {
+      const filtered = reps.filter((r) => r.teamId === t.teamId);
+      const target = goalsByTeamId.get(t.teamId) ?? null;
+      const result = filtered.reduce((a, r) => a + r.currentResult, 0);
+      const pct = target === null ? null : calculateAchievement(result, target);
+      return { teamId: t.teamId, teamName: t.teamName, target, result, pct, count: filtered.length };
+    });
+    const teamsWithTarget = teams.filter((t): t is typeof t & { target: number; pct: number } => t.target !== null);
+    const totalTarget = teamsWithTarget.length > 0 ? teamsWithTarget.reduce((a, t) => a + t.target, 0) : null;
     const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
-    const overall = calculateAchievement(totalResult, totalTarget);
-    const teams = teamsFromReps(reps).map((t) => ({ teamId: t.teamId, teamName: t.teamName, ...teamSummary(reps, t.teamId) }));
+    const overall = totalTarget === null ? null : calculateAchievement(
+      teamsWithTarget.reduce((a, t) => a + t.result, 0),
+      totalTarget,
+    );
 
     // Renewal-specific teams only — never a combined/derived rate across teams that
     // don't share the metric, and never derived from target/result.
@@ -124,16 +144,20 @@ function useGenerationInputs() {
         return { teamId: t.teamId, teamName: t.teamName, totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
       });
 
-    const withPct = reps.map((r) => ({
-      ...r,
-      pct: calculateAchievement(r.currentResult, r.monthlyTarget),
-    }));
+    const withPct = reps.map((r) => {
+      const target = goalsByRepId.get(r.id) ?? null;
+      return { ...r, target, pct: target === null ? null : calculateAchievement(r.currentResult, target) };
+    });
+    const targeted = withPct.filter((r): r is typeof r & { target: number; pct: number } => r.pct !== null);
     // Same 80/100 boundary as everywhere else in the app — achievementStatus()
-    // is the single source of truth, never a re-typed threshold.
-    const above = withPct.filter((r) => achievementStatus(r.pct) === "above").sort((a, b) => b.pct - a.pct);
-    const below = withPct.filter((r) => achievementStatus(r.pct) === "attention").sort((a, b) => a.pct - b.pct);
-    const onPace = withPct.filter((r) => achievementStatus(r.pct) === "onpace");
-    const top = [...withPct].sort((a, b) => b.pct - a.pct).slice(0, 3);
+    // is the single source of truth, never a re-typed threshold. Reps with no
+    // official target this month are excluded from every ranking below —
+    // never silently ranked at a fabricated 0%.
+    const above = targeted.filter((r) => achievementStatus(r.pct) === "above").sort((a, b) => b.pct - a.pct);
+    const below = targeted.filter((r) => achievementStatus(r.pct) === "attention").sort((a, b) => a.pct - b.pct);
+    const onPace = targeted.filter((r) => achievementStatus(r.pct) === "onpace");
+    const top = [...targeted].sort((a, b) => b.pct - a.pct).slice(0, 3);
+    const missingTargetCount = withPct.length - targeted.length;
 
     const activeComp = state.competitions.find((c) => c.active);
     const board = activeComp ? competitionLeaderboard(activeComp) : [];
@@ -147,13 +171,13 @@ function useGenerationInputs() {
     return {
       reps: withPct,
       teams, overall, totalResult, totalTarget,
-      above, below, onPace, top,
+      above, below, onPace, top, missingTargetCount,
       activeComp, leaderboard,
       listeningsThisWeek,
       workdaysLeft: workdaysRemaining(),
       renewalTeams,
     };
-  }, [state, cloudTeams]);
+  }, [state, cloudTeams, teamList, goalsByTeamId, goalsByRepId, reps]);
 }
 
 function Generator() {
@@ -256,6 +280,14 @@ function Generator() {
               })}
             </div>
 
+            {inputs.missingTargetCount > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {inputs.missingTargetCount === 1
+                  ? "לנציג אחד אין יעד אישי מוגדר לחודש זה — הוא לא נכלל בדירוגים ובחישובי האחוז שלמעלה."
+                  : `ל-${inputs.missingTargetCount} נציגים אין יעד אישי מוגדר לחודש זה — הם לא נכללים בדירוגים ובחישובי האחוז שלמעלה.`}
+              </p>
+            )}
+
             {(needsRep || needsListening) && (
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {needsRep && (
@@ -266,7 +298,7 @@ function Generator() {
                       <SelectContent>
                         {inputs.reps.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
-                            {r.name} · {r.teamName} · {formatPct(r.pct)}
+                            {r.name} · {r.teamName} · {r.pct === null ? "לא הוגדר יעד" : formatPct(r.pct)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -631,11 +663,15 @@ function generateMorning(i: Inputs): { title: string; body: string } {
   lines.push(`${greeting()} ☀️`);
   lines.push(`עדכון בוקר · ${date}`);
   lines.push("");
-  lines.push(`אחוז עמידה ביעד כללי: ${formatPct(i.overall)} (${formatNum(i.totalResult)} מתוך ${formatNum(i.totalTarget)})`);
+  lines.push(i.overall === null
+    ? "לא הוגדרו יעדים חודשיים רשמיים לצוותים החודש — לא ניתן לחשב אחוז עמידה כללי."
+    : `אחוז עמידה ביעד כללי: ${formatPct(i.overall)} (${formatNum(i.totalResult)} מתוך ${formatNum(i.totalTarget ?? 0)})`);
   lines.push(`נותרו ${i.workdaysLeft} ימי עבודה בחודש.`);
   lines.push("");
   for (const t of i.teams) {
-    lines.push(`🔹 ${t.teamName}: ${formatPct(t.pct)} · ${formatNum(t.result)}/${formatNum(t.target)}`);
+    lines.push(t.target === null
+      ? `🔹 ${t.teamName}: לא הוגדר יעד חודשי · תוצאה: ${formatNum(t.result)}`
+      : `🔹 ${t.teamName}: ${formatPct(t.pct as number)} · ${formatNum(t.result)}/${formatNum(t.target)}`);
   }
   lines.push(...renewalSectionLines(i.renewalTeams));
   lines.push("");
@@ -661,8 +697,10 @@ function generateEvening(i: Inputs): { title: string; body: string } {
   const lines: string[] = [];
   lines.push(`סיכום יום · ${date} 🌙`);
   lines.push("");
-  lines.push(`סה"כ תוצאה החודש: ${formatNum(i.totalResult)} (${formatPct(i.overall)} מהיעד)`);
-  lines.push(i.teams.map((t) => `🔹 ${t.teamName}: ${formatPct(t.pct)}`).join(" · "));
+  lines.push(i.overall === null
+    ? `סה"כ תוצאה החודש: ${formatNum(i.totalResult)} (לא הוגדרו יעדים חודשיים רשמיים)`
+    : `סה"כ תוצאה החודש: ${formatNum(i.totalResult)} (${formatPct(i.overall)} מהיעד)`);
+  lines.push(i.teams.map((t) => `🔹 ${t.teamName}: ${t.target === null ? "לא הוגדר יעד" : formatPct(t.pct as number)}`).join(" · "));
   lines.push(...renewalSectionLines(i.renewalTeams));
   lines.push("");
   if (i.above.length) {
@@ -723,16 +761,21 @@ function generateCongrats(i: Inputs, repId: string): { title: string; body: stri
   const lines: string[] = [];
   lines.push(`כל הכבוד ${rep.name}! 🎉`);
   lines.push("");
-  const status = achievementStatus(rep.pct);
-  if (status === "above") {
-    lines.push(`עמדת ביעד עם ${formatPct(rep.pct)} - זה הישג משמעותי.`);
-    lines.push(`${formatNum(rep.currentResult)} תוצאות בצוות ${rep.teamName} מדברות בעד עצמן.`);
-  } else if (status === "onpace") {
-    lines.push(`אתה בקצב מעולה - ${formatPct(rep.pct)} מהיעד ועדיין נותרו ${i.workdaysLeft} ימי עבודה.`);
-    lines.push("ההתמדה שלך ניכרת בכל שיחה.");
+  if (rep.pct === null) {
+    lines.push(`${formatNum(rep.currentResult)} תוצאות בצוות ${rep.teamName} עד כה — עבודה יפה.`);
+    lines.push("(לא הוגדר יעד אישי לחודש זה, לכן אין השוואה לאחוז עמידה.)");
   } else {
-    lines.push("ראיתי את המאמץ והשיפור שלך בימים האחרונים.");
-    lines.push("כל שיחה טובה נספרת - המשך כך.");
+    const status = achievementStatus(rep.pct);
+    if (status === "above") {
+      lines.push(`עמדת ביעד עם ${formatPct(rep.pct)} - זה הישג משמעותי.`);
+      lines.push(`${formatNum(rep.currentResult)} תוצאות בצוות ${rep.teamName} מדברות בעד עצמן.`);
+    } else if (status === "onpace") {
+      lines.push(`אתה בקצב מעולה - ${formatPct(rep.pct)} מהיעד ועדיין נותרו ${i.workdaysLeft} ימי עבודה.`);
+      lines.push("ההתמדה שלך ניכרת בכל שיחה.");
+    } else {
+      lines.push("ראיתי את המאמץ והשיפור שלך בימים האחרונים.");
+      lines.push("כל שיחה טובה נספרת - המשך כך.");
+    }
   }
   lines.push("");
   lines.push("גאה בך 🙌");
@@ -748,10 +791,13 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   // Positive opening
   lines.push(`אני רוצה להתחיל בלהגיד שאני מעריך את הנוכחות והמחויבות שלך בצוות ${rep.teamName}.`);
   lines.push("");
-  // Current challenge
-  const gap = rep.monthlyTarget - rep.currentResult;
-  if (achievementStatus(rep.pct) === "attention") {
-    lines.push(`ראיתי בנתונים שאנחנו עומדים על ${formatPct(rep.pct)} מהיעד, ונותרו כ-${formatNum(Math.max(gap, 0))} יחידות למטרה החודשית.`);
+  // Current challenge — target is the official personal target only, never
+  // the legacy rep.monthlyTarget column.
+  const gap = rep.pct === null ? null : Math.max((rep.target as number) - rep.currentResult, 0);
+  if (rep.pct === null) {
+    lines.push(`לא הוגדר יעד אישי רשמי לחודש זה — כרגע נמצא/ת על ${formatNum(rep.currentResult)}. נגדיר יעד יחד כדי לעקוב אחרי ההתקדמות.`);
+  } else if (achievementStatus(rep.pct) === "attention") {
+    lines.push(`ראיתי בנתונים שאנחנו עומדים על ${formatPct(rep.pct)} מהיעד, ונותרו כ-${formatNum(gap as number)} יחידות למטרה החודשית.`);
   } else {
     lines.push(`אתה נמצא ב-${formatPct(rep.pct)} מהיעד, ויש עוד מרחב לסגור את הפער ולעבור אותו.`);
   }
@@ -760,7 +806,9 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   lines.push("הצעה קונקרטית:");
   lines.push("• נזמן פגישה קצרה של 15 דק' לעבור יחד על שיחה או שתיים.");
   lines.push("• נתמקד בשלב טיפול בהתנגדויות ובהצעת שדרוג בסיום.");
-  lines.push(`• יעד ביניים: ${Math.ceil(Math.max(gap, 5) / Math.max(i.workdaysLeft, 1))} יחידות ביום ב-${i.workdaysLeft} הימים הקרובים.`);
+  if (gap !== null) {
+    lines.push(`• יעד ביניים: ${Math.ceil(Math.max(gap, 5) / Math.max(i.workdaysLeft, 1))} יחידות ביום ב-${i.workdaysLeft} הימים הקרובים.`);
+  }
   lines.push("");
   // Encouragement
   lines.push("אני בטוח שיש לך את הכלים להגיע לשם, ואני כאן לכל שאלה או ליווי.");

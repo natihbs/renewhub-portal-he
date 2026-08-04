@@ -1036,6 +1036,88 @@ export type Database = {
         }
         Relationships: []
       }
+      team_goals: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          goal_month: string
+          id: string
+          target_value: number
+          team_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          goal_month: string
+          id?: string
+          target_value: number
+          team_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          goal_month?: string
+          id?: string
+          target_value?: number
+          team_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_goals_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      representative_goals: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          goal_month: string
+          id: string
+          representative_id: string
+          target_value: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          goal_month: string
+          id?: string
+          representative_id: string
+          target_value: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          goal_month?: string
+          id?: string
+          representative_id?: string
+          target_value?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "representative_goals_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

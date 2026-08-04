@@ -12,7 +12,6 @@ import {
   UNASSIGNED_TEAM_LABEL,
 } from "./seed";
 import { CRITERIA, type Feedback, type CriterionValue } from "./feedback-domain";
-import { calculateAchievement, achievementStatus, ACHIEVEMENT_STATUS_LABEL, ACHIEVEMENT_STATUS_TONE } from "./performance-domain";
 import type { KpiValueRow } from "./kpi-values";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
@@ -486,20 +485,6 @@ export function visibleFeedback(list: Feedback[], isManager: boolean, currentRep
   if (isManager) return list;
   if (!currentRepId) return [];
   return list.filter((f) => f.repId === currentRepId && f.published);
-}
-
-export function statusForRep(rep: Rep) {
-  const status = achievementStatus(calculateAchievement(rep.currentResult, rep.monthlyTarget));
-  return { label: ACHIEVEMENT_STATUS_LABEL[status], tone: ACHIEVEMENT_STATUS_TONE[status] };
-}
-
-/** Aggregates target/result for one team, identified by its cloud team id (null = unassigned reps). */
-export function teamSummary(reps: Rep[], teamId: string | null) {
-  const filtered = reps.filter((r) => r.teamId === teamId);
-  const target = filtered.reduce((a, r) => a + r.monthlyTarget, 0);
-  const result = filtered.reduce((a, r) => a + r.currentResult, 0);
-  const pct = calculateAchievement(result, target);
-  return { target, result, pct, count: filtered.length };
 }
 
 /**
