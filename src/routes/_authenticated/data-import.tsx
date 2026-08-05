@@ -819,7 +819,7 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
     <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">מה יקרה לכל עמודה בייבוא</div>
       <div>
-        <span className="font-medium text-[color:var(--success)]">יישמרו במערכת:</span>{" "}
+        <span className="font-medium text-[color:var(--success-foreground)]">יישמרו במערכת:</span>{" "}
         {persisted.length > 0 ? persisted.join(", ") : "—"}
       </div>
       {targetMapped && (
@@ -842,7 +842,7 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
       </div>
       {unsupported.length > 0 && (
         <div>
-          <span className="font-medium text-[color:var(--warning)]">לא ייכתבו למערכת:</span> {unsupported.join(", ")}
+          <span className="font-medium text-[color:var(--warning-foreground)]">לא ייכתבו למערכת:</span> {unsupported.join(", ")}
           <div className="text-xs text-muted-foreground">{UNSUPPORTED_FIELD_REASON}</div>
         </div>
       )}
@@ -906,25 +906,25 @@ function PreviewStep({
                 <TableRow key={r.index} className={cn(hasErr && "bg-destructive/5")}>
                   <TableCell className="text-muted-foreground">{r.index + 1}</TableCell>
                   <TableCell className={cn("font-medium", !r.name && "text-destructive")}>{r.name || "—"}</TableCell>
-                  <TableCell>{r.teamName ? r.teamName : <span className="text-[color:var(--warning)]">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
+                  <TableCell>{r.teamName ? r.teamName : <span className="text-[color:var(--warning-foreground)]">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
                   <TableCell>{r.monthlyTarget ?? "—"}</TableCell>
                   <TableCell>{r.currentResult ?? "—"}</TableCell>
                   {showRenewalColumns && (
-                    <TableCell className={cn(r.renewalFieldsSkipped && "text-[color:var(--warning)]")}>
+                    <TableCell className={cn(r.renewalFieldsSkipped && "text-[color:var(--warning-foreground)]")}>
                       {r.renewalOpportunities ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
                     </TableCell>
                   )}
                   {showRenewalColumns && (
-                    <TableCell className={cn(r.renewalFieldsSkipped && "text-[color:var(--warning)]")}>
+                    <TableCell className={cn(r.renewalFieldsSkipped && "text-[color:var(--warning-foreground)]")}>
                       {r.completedRenewals ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
                     </TableCell>
                   )}
                   <TableCell>{r.updatedAt ?? <span className="text-destructive">—</span>}</TableCell>
                   <TableCell className="space-y-1">
                     {r.issues.length === 0 ? (
-                      <Badge variant="secondary" className="bg-[color:var(--success)]/15 text-[color:var(--success)]">תקין</Badge>
+                      <Badge variant="secondary" className="bg-[color:var(--success)]/15 text-[color:var(--success-foreground)]">תקין</Badge>
                     ) : r.issues.map((i, k) => (
-                      <div key={k} className={cn("text-xs", i.severity === "error" ? "text-destructive" : "text-[color:var(--warning)]")}>
+                      <div key={k} className={cn("text-xs", i.severity === "error" ? "text-destructive" : "text-[color:var(--warning-foreground)]")}>
                         {i.severity === "error" ? <XCircle className="inline h-3 w-3 me-1" /> : <AlertTriangle className="inline h-3 w-3 me-1" />}
                         {i.message}
                       </div>
@@ -1154,7 +1154,7 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                       <TableCell>{h.rowsUpdated + h.rowsCreated}</TableCell>
                       <TableCell>
                         {h.warnings > 0
-                          ? <Badge variant="outline" className="bg-[color:var(--warning)]/15 text-[color:var(--warning)] border-[color:var(--warning)]/30">{h.warnings}</Badge>
+                          ? <Badge variant="outline" className="bg-[color:var(--warning)]/15 text-[color:var(--warning-foreground)] border-[color:var(--warning)]/30">{h.warnings}</Badge>
                           : <span className="text-muted-foreground">0</span>}
                       </TableCell>
                       <TableCell>
@@ -1164,7 +1164,7 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                       </TableCell>
                       <TableCell>
                         <Badge variant={h.status === "success" ? "secondary" : h.status === "partial" ? "outline" : "destructive"}
-                          className={h.status === "success" ? "bg-[color:var(--success)]/15 text-[color:var(--success)]" : ""}>
+                          className={h.status === "success" ? "bg-[color:var(--success)]/15 text-[color:var(--success-foreground)]" : ""}>
                           {h.status === "success" ? "הושלם" : h.status === "partial" ? "חלקי" : "נכשל"}
                         </Badge>
                       </TableCell>
@@ -1210,8 +1210,8 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-lg border bg-[color:var(--warning)]/5 p-3">
-                  <div className="text-xs font-semibold text-[color:var(--warning)]">אזהרות</div>
-                  <div className="mt-1 text-2xl font-bold text-[color:var(--warning)]">{detailFor.warnings}</div>
+                  <div className="text-xs font-semibold text-[color:var(--warning-foreground)]">אזהרות</div>
+                  <div className="mt-1 text-2xl font-bold text-[color:var(--warning-foreground)]">{detailFor.warnings}</div>
                 </div>
                 <div className="rounded-lg border bg-destructive/5 p-3">
                   <div className="text-xs font-semibold text-destructive">שגיאות</div>
@@ -1404,9 +1404,9 @@ function ManualEntryDialog() {
 function StatChip({ label, value, tone }: { label: string; value: number; tone: "muted" | "success" | "info" | "warning" | "danger" }) {
   const toneClass = {
     muted: "bg-muted text-muted-foreground",
-    success: "bg-[color:var(--success)]/15 text-[color:var(--success)]",
+    success: "bg-[color:var(--success)]/15 text-[color:var(--success-foreground)]",
     info: "bg-accent text-accent-foreground",
-    warning: "bg-[color:var(--warning)]/15 text-[color:var(--warning)]",
+    warning: "bg-[color:var(--warning)]/15 text-[color:var(--warning-foreground)]",
     danger: "bg-destructive/10 text-destructive",
   }[tone];
   return (

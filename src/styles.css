@@ -48,6 +48,8 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning-foreground: var(--warning-foreground);
   --color-brand-primary: var(--brand-primary);
   --color-brand-primary-light: var(--brand-primary-light);
   --color-brand-accent: var(--brand-accent);
@@ -104,6 +106,18 @@
   --destructive-foreground: #ffffff;
   --success: var(--brand-success);
   --warning: var(--brand-warning);
+  /*
+   * --success/--warning are fill hues (badge backgrounds, icons, chart
+   * bars) — too light to use as small text on white/card or on their own
+   * /10-/15 tint (~2.2:1, fails WCAG AA). --success-foreground and
+   * --warning-foreground are darkened variants of the same hue kept at
+   * >=7:1 against white/card and against the tinted badge backgrounds
+   * built from --success//--warning at low opacity (see the Product
+   * Polish accessibility follow-up). Always pair: bg-[color:var(--warning)]/10
+   * + text-[color:var(--warning-foreground)], never text-[color:var(--warning)].
+   */
+  --success-foreground: #065f46;
+  --warning-foreground: #92400e;
   --border: var(--brand-border);
   --input: var(--brand-border);
   --ring: var(--brand-primary-light);
@@ -147,6 +161,10 @@
   --destructive-foreground: #ffffff;
   --success: #4ade80;
   --warning: #fbbf24;
+  /* Already light enough against dark surfaces (~9.8:1 / ~10.2:1 on --card) —
+     no separate darker/lighter variant needed here, unlike light mode. */
+  --success-foreground: var(--success);
+  --warning-foreground: var(--warning);
   --border: var(--brand-border);
   --input: color-mix(in oklab, white 15%, transparent);
   --ring: var(--brand-primary-light);

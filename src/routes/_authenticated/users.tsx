@@ -412,9 +412,9 @@ function UsersPage() {
 
 function HealthBadge({ health }: { health: UserHealth }) {
   const cls = health.status === "healthy"
-    ? "bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15"
+    ? "bg-[color:var(--success)]/15 text-[color:var(--success-foreground)] hover:bg-[color:var(--success)]/15"
     : health.status === "attention"
-    ? "bg-[color:var(--warning)]/15 text-[color:var(--warning)] hover:bg-[color:var(--warning)]/15"
+    ? "bg-[color:var(--warning)]/15 text-[color:var(--warning-foreground)] hover:bg-[color:var(--warning)]/15"
     : "bg-destructive/15 text-destructive hover:bg-destructive/15";
   const badge = (
     <Badge className={cn("gap-1 font-normal", health.reasons.length > 0 && "cursor-help", cls)} tabIndex={health.reasons.length > 0 ? 0 : undefined}>
@@ -467,7 +467,7 @@ function UserTableRow({
       <TableCell className="hidden md:table-cell">{teamName}</TableCell>
       <TableCell className="hidden lg:table-cell">{managerName}</TableCell>
       <TableCell>
-        {user.active ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15">פעיל</Badge> : <Badge variant="outline">מושבת</Badge>}
+        {user.active ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success-foreground)] hover:bg-[color:var(--success)]/15">פעיל</Badge> : <Badge variant="outline">מושבת</Badge>}
       </TableCell>
       <TableCell className="hidden sm:table-cell whitespace-nowrap text-xs">{lastLogin ? formatDateIL(lastLogin) : <span className="text-muted-foreground">טרם התחבר</span>}</TableCell>
       <TableCell className="hidden lg:table-cell whitespace-nowrap text-xs">{formatDateIL(user.created_at)}</TableCell>
@@ -859,7 +859,7 @@ function DeleteUserDialog({
                     history/audit trail intact, and covers "this person shouldn't have
                     access anymore" for the vast majority of real cases. */}
                 {user.active && (
-                  <div className="rounded-lg border border-[color:var(--warning)]/30 bg-[color:var(--warning)]/10 p-3 text-sm text-[color:var(--warning)] flex items-center justify-between gap-3">
+                  <div className="rounded-lg border border-[color:var(--warning)]/30 bg-[color:var(--warning)]/10 p-3 text-sm text-[color:var(--warning-foreground)] flex items-center justify-between gap-3">
                     <div>מומלץ להשבית את המשתמש במקום למחוק אותו לצמיתות — השבתה הפיכה ושומרת את כל ההיסטוריה.</div>
                     <Button size="sm" variant="outline" className="shrink-0" onClick={onPreferDisable}>השבתה במקום</Button>
                   </div>
