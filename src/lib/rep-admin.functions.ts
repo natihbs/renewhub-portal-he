@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { assertTeamIsActiveForNewAssignment } from "@/lib/team-assignment-guards";
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
@@ -271,6 +272,11 @@ export const createRepresentative = createServerFn({ method: "POST" })
       throw new Error("קישור חשבון משתמש בעת יצירת נציג מתבצע דרך הזמנה או קישור ייעודי");
     }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (data.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
+    }
     if (data.user_id) await assertUserFree(supabaseAdmin, data.user_id, null);
     const { data: created, error } = await supabaseAdmin
       .from("representatives")
@@ -392,6 +398,11 @@ export const createRepresentativeWithInvite = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     await assertCanCreateRep(ctx, data.team_id);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (data.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
+    }
 
     const { data: created, error: repErr } = await supabaseAdmin
       .from("representatives")
@@ -486,6 +497,14 @@ export const updateRepresentative = createServerFn({ method: "POST" })
     if (!isAdmin && data.user_id !== before.user_id) {
       throw new Error("קישור חשבון משתמש מתבצע דרך פעולת הקישור הייעודית ברשימת הנציגים");
     }
+    // A new destination team (any actual change, not a no-op resubmission)
+    // must be active — mirrors setUserTeam's rule so "inactive team is
+    // unavailable for new assignments" holds on every path that writes team_id.
+    if (data.team_id && data.team_id !== before.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
+    }
     if (data.user_id && data.user_id !== before.user_id) await assertUserFree(supabaseAdmin, data.user_id, data.rep_id);
 
     const { error } = await supabaseAdmin
@@ -563,6 +582,11 @@ export const setRepresentativeTeam = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rep } = await supabaseAdmin.from("representatives").select("team_id, user_id, name").eq("id", data.rep_id).maybeSingle();
     if (!rep) throw new Error("הנציג לא נמצא");
+    if (data.team_id && data.team_id !== rep.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
+    }
 
     const { error } = await supabaseAdmin.from("representatives").update({ team_id: data.team_id }).eq("id", data.rep_id);
     if (error) throw new Error(error.message);
@@ -789,6 +813,11 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
     // path is also reachable from Data Import, which a manager may open.
     if (!isAdmin && data.team_id !== undefined && data.team_id !== before.team_id) {
       throw new Error("רק מנהל מערכת רשאי להעביר נציג בין צוותים");
+    }
+    if (data.team_id && data.team_id !== before.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
     }
 
     const update: { name?: string; team_id?: string | null; monthly_target?: number; current_result?: number } = {};

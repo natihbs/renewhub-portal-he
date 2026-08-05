@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { linkRepresentativeToUserCore } from "@/lib/rep-admin.functions";
 import { computeUserHealth, type UserHealth } from "@/lib/user-health";
+import { assertTeamIsActiveForNewAssignment } from "@/lib/team-assignment-guards";
 
 type AppRole = "admin" | "manager" | "representative";
 
@@ -281,6 +282,16 @@ export const updateUser = createServerFn({ method: "POST" })
     if (data.representative_id !== undefined) profileUpdate.representative_id = data.representative_id;
     if (data.active !== undefined) profileUpdate.active = data.active;
     if (data.must_change_password !== undefined) profileUpdate.must_change_password = data.must_change_password;
+
+    // A destination team, if set, must be active — mirrors setUserTeam
+    // (team-admin.functions.ts) and rep-admin.functions.ts's team-writing
+    // paths, so "inactive team is unavailable for new assignments" holds
+    // regardless of which admin screen the assignment is made from.
+    if (profileUpdate.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", profileUpdate.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
+    }
 
     if (Object.keys(profileUpdate).length > 0) {
       const { error } = await supabaseAdmin.from("profiles").update(profileUpdate).eq("id", data.user_id);

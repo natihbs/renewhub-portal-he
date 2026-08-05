@@ -26,6 +26,7 @@ import { requireRole } from "@/lib/require-role";
 import { formatDateIL } from "@/lib/format";
 import {
   listTeams, getTeamDetails, createTeam, updateTeam, deleteTeam, setTeamActive, setUserTeam,
+  listTeamAssignmentCandidates, canManagerRemoveTarget,
 } from "@/lib/team-admin.functions";
 import { useWorkspace } from "@/lib/workspace-context";
 import { type KpiProfile, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS } from "@/lib/performance-domain";
@@ -579,6 +580,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
   const details = useServerFn(getTeamDetails);
   const assign = useServerFn(setUserTeam);
   const update = useServerFn(updateTeam);
+  const listCandidates = useServerFn(listTeamAssignmentCandidates);
   const [addUserId, setAddUserId] = useState(NONE);
   const [description, setDescription] = useState("");
   // Pending confirmation for a transfer (the selected candidate already
@@ -598,16 +600,30 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
   // representative has no `profiles` row (and so is never in `members`) unless a
   // login account is linked to it. Do not derive this list from `members`.
   const reps = (q.data?.representatives ?? []) as RepMember[];
-  // Every candidate the picker below can select — unassigned users AND users
-  // already on another team (P3a: shown and clearly labeled, never hidden, so
-  // picking one is an informed transfer rather than a silent surprise).
-  const candidates = people.filter((p) => p.team_id !== teamId);
-  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
 
   // Admin manages every team; a manager only their own — mirrors
   // canManageTeamRow but recomputed here since `team` only exists once loaded
   // (server-side enforcement is the real boundary; this only gates the UI).
   const canManageThisTeam = !!team && (isAdmin || (isManager && !!currentUserId && team.manager_id === currentUserId));
+  // An inactive team is unavailable for new assignments (setUserTeam rejects
+  // this server-side regardless of who asks) — the add/transfer controls
+  // below only ever render when the team can actually accept one.
+  const canAssignToThisTeam = canManageThisTeam && !!team?.active;
+
+  // Correction (post-review): candidates now come from a dedicated,
+  // permission-checked server function — never derived from the `people`
+  // prop, which (for a manager) either omitted unassigned users entirely
+  // (under the original RLS policy) or, briefly, exposed every unassigned
+  // profile organization-wide (the reverted over-broad fix). See
+  // listTeamAssignmentCandidates in team-admin.functions.ts for the exact
+  // eligibility rule.
+  const candidatesQ = useQuery({
+    queryKey: ["admin", "team-assignment-candidates", teamId],
+    queryFn: () => listCandidates({ data: { team_id: teamId as string } }),
+    enabled: !!teamId && canAssignToThisTeam,
+  });
+  const candidates = candidatesQ.data ?? [];
+  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
 
   useEffect(() => {
     setDescription(team?.description ?? "");
@@ -620,7 +636,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
     // visible data (team-details sheet, admin teams table, header workspace
     // scope) is still the pre-mutation snapshot.
     onSuccess: async (_d, v) => {
-      await Promise.all([q.refetch(), onChanged()]);
+      await Promise.all([q.refetch(), candidatesQ.refetch(), onChanged()]);
       toast.success(v.team_id ? "המשתמש שויך לצוות" : "המשתמש הוסר מהצוות");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -689,12 +705,12 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
 
   function handleAddOrTransferClick() {
     if (addUserId === NONE) return toast.error("יש לבחור משתמש");
-    const candidate = people.find((p) => p.id === addUserId);
+    const candidate = candidates.find((p) => p.id === addUserId);
     if (candidate?.team_id) {
       setPendingTransfer({
         userId: addUserId,
         userName: personName(candidate),
-        fromTeamName: teamNameById.get(candidate.team_id) ?? "צוות אחר",
+        fromTeamName: candidate.team_name ?? teamNameById.get(candidate.team_id) ?? "צוות אחר",
       });
       return;
     }
@@ -709,7 +725,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
     setPendingTransfer(null);
   }
 
-  const selectedCandidate = people.find((p) => p.id === addUserId);
+  const selectedCandidate = candidates.find((p) => p.id === addUserId);
   const isTransferSelection = !!selectedCandidate?.team_id;
 
   return (
@@ -819,7 +835,12 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                           {m.business_id ? ` · ${m.business_id}` : ""}
                         </div>
                       </div>
-                      {canManageThisTeam && (
+                      {/* Requirement 6 (post-review): a manager may remove only an
+                          eligible representative member — never every row — since
+                          setUserTeam itself now rejects removing an admin/manager/
+                          non-representative account for a manager actor. Admin keeps
+                          the existing organization-wide capability. */}
+                      {canManageThisTeam && (isAdmin || canManagerRemoveTarget({ roles: m.roles })) && (
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button size="icon" variant="ghost" aria-label={`הסרת ${personName(m)} מהצוות`}>
@@ -877,11 +898,17 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
               </p>
             </div>
 
-            {canManageThisTeam && (
+            {canManageThisTeam && !team.active && (
+              <p className="text-xs text-muted-foreground">
+                לא ניתן להוסיף או להעביר משתמשים לצוות מושבת. יש להפעיל את הצוות מחדש כדי לשייך אליו משתמשים.
+              </p>
+            )}
+
+            {canAssignToThisTeam && (
               <div className="space-y-2">
                 <Label>{isTransferSelection ? "העברת משתמש לצוות" : "הוספת משתמש לצוות"}</Label>
                 <p className="text-xs text-muted-foreground">
-                  הרשימה כוללת גם משתמשים המשויכים כבר לצוות אחר — בחירה בהם מעבירה אותם לכאן, ולא רק "מוסיפה".
+                  הרשימה כוללת רק חשבונות נציג פעילים — משתמשים ללא שיוך, וכאלה המשויכים כבר לצוות אחר שבניהולכם. בחירה במשויך לצוות אחר מעבירה אותו לכאן, ולא רק "מוסיפה".
                 </p>
                 <div className="flex gap-2">
                   <Select value={addUserId} onValueChange={setAddUserId}>
@@ -890,7 +917,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                       <SelectItem value={NONE}>בחרו משתמש</SelectItem>
                       {candidates.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {personName(p)} — {p.team_id ? `משויך כרגע לצוות ${teamNameById.get(p.team_id) ?? "אחר"}` : "לא משויך לצוות"}
+                          {personName(p)} — {p.team_id ? `משויך כרגע לצוות ${p.team_name ?? "אחר"}` : "לא משויך לצוות"}
                         </SelectItem>
                       ))}
                     </SelectContent>

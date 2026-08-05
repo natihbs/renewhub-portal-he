@@ -300,6 +300,12 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
   }
   const data = q.data!;
   const diff = data.representative_target_sum - (data.team_target ?? 0);
+  // A deactivated team keeps its target HISTORY readable (every month, past
+  // and present) but must not silently accept new writes — enforced
+  // server-side too (setTeamGoal/setRepresentativeGoals/
+  // copyGoalsFromPreviousMonth's apply step), this is what explains the
+  // disabled controls below rather than just hiding them.
+  const readOnly = !data.team.active;
 
   return (
     <div className="space-y-4">
@@ -314,14 +320,25 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
             <ChevronLeft className="h-4 w-4" />
           </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setCopyOpen(true)}>
+        <Button variant="outline" size="sm" onClick={() => setCopyOpen(true)} disabled={readOnly}>
           <Copy className="ms-1 h-4 w-4" />העתקת יעדים מהחודש הקודם
         </Button>
       </div>
 
+      {readOnly && (
+        <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+          הצוות מושבת — היעדים ההיסטוריים מוצגים לצפייה בלבד. יש להפעיל את הצוות מחדש כדי לערוך יעדים.
+        </div>
+      )}
+
       {/* Team target + comparison */}
       <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Target className="h-4 w-4 text-primary" />יעד חודשי לצוות {data.team.name}</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Target className="h-4 w-4 text-primary" />יעד חודשי לצוות {data.team.name}
+            {readOnly && <Badge variant="secondary">מושבת</Badge>}
+          </CardTitle>
+        </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
@@ -335,11 +352,12 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
                 onChange={(e) => setTeamTargetInput(e.target.value)}
                 className="w-40"
                 placeholder="לא הוגדר"
+                disabled={readOnly}
               />
             </div>
             <Button
               size="sm"
-              disabled={!teamTargetDirty || teamGoalMutation.isPending}
+              disabled={readOnly || !teamTargetDirty || teamGoalMutation.isPending}
               onClick={() => {
                 const n = Number(teamTargetInput);
                 if (!Number.isFinite(n) || n < 0) return toast.error("יעד חייב להיות מספר לא שלילי");
@@ -375,6 +393,7 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
         dirtyRepIds={dirtyRepIds}
         onSave={saveDirtyRepGoals}
         saving={repGoalsMutation.isPending}
+        readOnly={readOnly}
       />
 
       <CopyGoalsDialog
@@ -388,13 +407,14 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
   );
 }
 
-function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRepIds, onSave, saving }: {
+function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRepIds, onSave, saving, readOnly }: {
   representatives: TargetWorkspaceRep[];
   inputs: Record<string, string>;
   onChange: (id: string, value: string) => void;
   dirtyRepIds: string[];
   onSave: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }) {
   if (representatives.length === 0) {
     return (
@@ -407,7 +427,7 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-base flex items-center gap-2"><Gauge className="h-4 w-4 text-primary" />יעדים אישיים</CardTitle>
-        {dirtyRepIds.length > 0 && (
+        {dirtyRepIds.length > 0 && !readOnly && (
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-primary border-primary/40">{dirtyRepIds.length} שינויים לא שמורים</Badge>
             <Button size="sm" onClick={onSave} disabled={saving}>
@@ -446,6 +466,7 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
                         onChange={(e) => onChange(r.id, e.target.value)}
                         className="w-28 h-8" placeholder="לא הוגדר"
                         aria-label={`יעד אישי עבור ${r.name}`}
+                        disabled={readOnly}
                       />
                     </TableCell>
                     <TableCell className="tabular-nums">{formatNum(r.current_result)}</TableCell>
@@ -478,6 +499,7 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
                       onChange={(e) => onChange(r.id, e.target.value)}
                       className="h-9" placeholder="לא הוגדר"
                       aria-label={`יעד אישי עבור ${r.name}`}
+                      disabled={readOnly}
                     />
                   </div>
                   <div className="text-xs text-muted-foreground pt-5">
