@@ -290,6 +290,7 @@ export type Database = {
       competitions: {
         Row: {
           active: boolean
+          archived: boolean
           created_at: string
           created_by: string | null
           end_date: string
@@ -302,6 +303,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          archived?: boolean
           created_at?: string
           created_by?: string | null
           end_date?: string
@@ -314,6 +316,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          archived?: boolean
           created_at?: string
           created_by?: string | null
           end_date?: string

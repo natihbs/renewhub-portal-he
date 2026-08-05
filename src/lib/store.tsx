@@ -32,12 +32,19 @@ type Ctx = {
   updateAnnouncement: (id: string, patch: Partial<Announcement>) => void;
   removeAnnouncement: (id: string) => void;
   // competitions
-  addCompetition: (c: Omit<Competition, "id" | "scores" | "active"> & { active?: boolean }) => void;
+  addCompetition: (c: Omit<Competition, "id" | "scores" | "active" | "archived"> & { active?: boolean }) => void;
   updateCompetition: (id: string, patch: Partial<Competition>) => void;
   addCompetitionCategory: (compId: string, cat: Omit<CompetitionCategory, "id">) => void;
   removeCompetitionCategory: (compId: string, catId: string) => void;
   setCompetitionScore: (compId: string, repId: string, catId: string, count: number) => void;
   closeCompetition: (id: string) => void;
+  /**
+   * Only allowed when the competition has no recorded scores (count > 0) —
+   * see hasRecordedScores in competitions.tsx. Anything with real history
+   * must be archived, not deleted, so completed competitions never become
+   * unmanageable dead ends but their record also can't silently disappear.
+   */
+  deleteCompetition: (id: string) => void;
   // articles
   addArticle: (a: Omit<Article, "id" | "updatedAt">) => void;
   updateArticle: (id: string, patch: Partial<Article>) => void;
@@ -67,6 +74,7 @@ type CompetitionRow = {
   rules: string;
   prize: string;
   active: boolean;
+  archived: boolean;
 };
 type CompetitionCategoryRow = { id: string; competition_id: string; label: string; points: number };
 type CompetitionScoreRow = {
@@ -198,6 +206,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         rules: c.rules,
         prize: c.prize,
         active: c.active,
+        archived: c.archived,
         categories: compCategories.rows
           .filter((k) => k.competition_id === c.id)
           .map((k) => ({ id: k.id, label: k.label, points: k.points })),
@@ -251,7 +260,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addCompetition: (c) =>
           patch((s) => ({
             ...s,
-            competitions: [...s.competitions, { ...c, id: uid(), scores: [], active: c.active ?? true }],
+            competitions: [...s.competitions, { ...c, id: uid(), scores: [], active: c.active ?? true, archived: false }],
           })),
         updateCompetition: (id, p) =>
           patch((s) => ({ ...s, competitions: s.competitions.map((c) => (c.id === id ? { ...c, ...p } : c)) })),
@@ -292,6 +301,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ...s,
             competitions: s.competitions.map((c) => (c.id === id ? { ...c, active: false } : c)),
           })),
+        deleteCompetition: (id) =>
+          patch((s) => ({ ...s, competitions: s.competitions.filter((c) => c.id !== id) })),
         addArticle: (a) =>
           patch((s) => ({ ...s, articles: [{ ...a, id: uid(), updatedAt: todayIso() }, ...s.articles] })),
         updateArticle: (id, p) =>
@@ -363,6 +374,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (p.rules !== undefined) row.rules = p.rules;
         if (p.prize !== undefined) row.prize = p.prize;
         if (p.active !== undefined) row.active = p.active;
+        if (p.archived !== undefined) row.archived = p.archived;
         void competitions.update(id, row);
       },
       addCompetitionCategory: (compId, cat) =>
@@ -374,6 +386,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           "competition_id,category_id,representative_id",
         ),
       closeCompetition: (id) => void competitions.update(id, { active: false }),
+      deleteCompetition: (id) => void competitions.remove(id),
       addArticle: (a) =>
         void articles.insert(
           {
