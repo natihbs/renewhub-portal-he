@@ -80,6 +80,25 @@ export function computeTeamReconciliation(
   return changes;
 }
 
+/**
+ * Whether a team's manager reassignment must cascade to profiles.manager_id
+ * for the team's existing members, and what to write. profiles.manager_id is
+ * a denormalized copy of "who runs my team", otherwise only ever stamped
+ * per-user by set_user_team_with_representative_sync at team-assignment time
+ * (see the migration) — without this cascade, every existing member keeps
+ * showing the OLD manager (e.g. on the Users page) after a team-level
+ * reassignment/removal, confirmed via a full local migration replay. Returns
+ * null when there's nothing to cascade (no prior team row, or manager_id
+ * unchanged) so the caller can skip the write entirely.
+ */
+export function computeManagerCascade(
+  before: { manager_id: string | null } | null,
+  data: { team_id: string; manager_id: string | null },
+): { team_id: string; manager_id: string | null } | null {
+  if (!before || before.manager_id === data.manager_id) return null;
+  return { team_id: data.team_id, manager_id: data.manager_id };
+}
+
 async function getRoles(ctx: Ctx): Promise<string[]> {
   const { data, error } = await ctx.supabase.from("user_roles").select("role").eq("user_id", ctx.userId);
   if (error) throw new Error("שגיאה באימות הרשאות");
@@ -341,8 +360,14 @@ export const updateTeam = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     await logAudit(supabaseAdmin, ctx, "team.update", { team_id: data.team_id, name: data.name });
-    if (before && before.manager_id !== data.manager_id) {
-      await logAudit(supabaseAdmin, ctx, "team.manager_assigned", { team_id: data.team_id, from: before.manager_id, to: data.manager_id });
+    const cascade = computeManagerCascade(before, data);
+    if (cascade) {
+      const { error: cascadeErr } = await supabaseAdmin
+        .from("profiles")
+        .update({ manager_id: cascade.manager_id })
+        .eq("team_id", cascade.team_id);
+      if (cascadeErr) throw new Error(cascadeErr.message);
+      await logAudit(supabaseAdmin, ctx, "team.manager_assigned", { team_id: data.team_id, from: before!.manager_id, to: data.manager_id });
     }
     if (before && before.active !== data.active) {
       await logAudit(supabaseAdmin, ctx, data.active ? "team.activate" : "team.deactivate", { team_id: data.team_id });

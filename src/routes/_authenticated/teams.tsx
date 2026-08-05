@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -82,6 +82,24 @@ type RepMember = {
 
 const NONE = "__none__";
 
+/**
+ * Every query key a team mutation (manager reassignment/removal, KPI profile,
+ * active toggle, member add/remove) must invalidate. Exported and unit-tested
+ * directly (see teams-cache.test.ts) — ["representatives"] is the query key
+ * useCloudTeams() reads (see teams-hooks.ts), shared by WorkspaceProvider
+ * (header scope line, WorkspaceSwitcher) and the home dashboard; omitting it
+ * previously left those screens showing a team's pre-mutation manager.
+ */
+export function invalidateTeamAdminCaches(qc: QueryClient): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["admin", "teams"] }),
+    qc.invalidateQueries({ queryKey: ["admin", "users"] }),
+    qc.invalidateQueries({ queryKey: ["admin", "audit"] }),
+    qc.invalidateQueries({ queryKey: ["admin", "team-details"] }),
+    qc.invalidateQueries({ queryKey: ["representatives"] }),
+  ]);
+}
+
 function personName(p: { full_name: string | null; email: string | null } | undefined | null) {
   return p?.full_name || p?.email || "—";
 }
@@ -126,12 +144,9 @@ function TeamsPage() {
     }
   }, [workspaceOptions]);
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["admin", "teams"] });
-    qc.invalidateQueries({ queryKey: ["admin", "users"] });
-    qc.invalidateQueries({ queryKey: ["admin", "audit"] });
-    qc.invalidateQueries({ queryKey: ["admin", "team-details"] });
-  };
+  // Returns the settle promise so callers can await a mutation's full refresh
+  // (not just its own request) before reporting success to the user.
+  const invalidate = () => invalidateTeamAdminCaches(qc);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -413,7 +428,7 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
   onOpenChange: (o: boolean) => void;
   managers: Person[];
   team?: TeamRow;
-  onSaved: () => void;
+  onSaved: () => Promise<unknown> | void;
 }) {
   const create = useServerFn(createTeam);
   const update = useServerFn(updateTeam);
@@ -437,9 +452,9 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
       if (team) return update({ data: { ...payload, team_id: team.id } });
       return create({ data: payload });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await onSaved();
       toast.success(team ? "הצוות עודכן" : "הצוות נוצר");
-      onSaved();
       onOpenChange(false);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -512,7 +527,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
   people: Person[];
   managers: Person[];
   canManage: boolean;
-  onChanged: () => void;
+  onChanged: () => Promise<unknown> | void;
 }) {
   const details = useServerFn(getTeamDetails);
   const assign = useServerFn(setUserTeam);
@@ -535,10 +550,13 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
 
   const assignM = useMutation({
     mutationFn: (v: { user_id: string; team_id: string | null }) => assign({ data: v }),
-    onSuccess: (_d, v) => {
+    // Await the refresh before reporting success — the mutation's own request
+    // already resolved, but the UI must not show a "done" toast while the
+    // visible data (team-details sheet, admin teams table, header workspace
+    // scope) is still the pre-mutation snapshot.
+    onSuccess: async (_d, v) => {
+      await Promise.all([q.refetch(), onChanged()]);
       toast.success(v.team_id ? "המשתמש שויך לצוות" : "המשתמש הוסר מהצוות");
-      q.refetch();
-      onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -555,7 +573,10 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
         kpi_profile: team!.kpi_profile,
       },
     }),
-    onSuccess: () => { toast.success("המנהל עודכן"); q.refetch(); onChanged(); },
+    onSuccess: async () => {
+      await Promise.all([q.refetch(), onChanged()]);
+      toast.success("המנהל עודכן");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -571,7 +592,10 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
         kpi_profile: kpiProfile,
       },
     }),
-    onSuccess: () => { toast.success("פרופיל ה-KPI עודכן"); q.refetch(); onChanged(); },
+    onSuccess: async () => {
+      await Promise.all([q.refetch(), onChanged()]);
+      toast.success("פרופיל ה-KPI עודכן");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 

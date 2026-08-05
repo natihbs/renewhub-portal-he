@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +44,21 @@ export const Route = createFileRoute("/_authenticated/targets")({
   }),
   component: TargetsPage,
 });
+
+// useTeamGoal/useTeamGoals/useRepresentativeGoals (goals-hooks.ts) read
+// team_goals/representative_goals through useCloudCollection, keyed
+// ["cloud", table, opts] — a completely separate cache namespace from this
+// page's own ["targets","workspace",...] query. Exported and unit-tested
+// directly (see targets-cache.test.ts): every save/copy mutation here must
+// invalidate these too, or Dashboard/MorningRoutine/Performance keep showing
+// the pre-save target while this page already shows the new one.
+export function invalidateTeamGoalReaders(qc: QueryClient): Promise<unknown> {
+  return qc.invalidateQueries({ queryKey: ["cloud", "team_goals"] });
+}
+
+export function invalidateRepresentativeGoalReaders(qc: QueryClient): Promise<unknown> {
+  return qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
+}
 
 function monthLabel(month: string): string {
   const d = new Date(`${month}T00:00:00`);
@@ -208,7 +223,10 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
 
   const teamGoalMutation = useMutation({
     mutationFn: (value: number) => saveTeamGoal({ data: { team_id: teamId, month, target_value: value } }),
-    onSuccess: () => { toast.success("יעד הצוות נשמר"); invalidate(); },
+    onSuccess: async () => {
+      await Promise.all([invalidate(), invalidateTeamGoalReaders(qc)]);
+      toast.success("יעד הצוות נשמר");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -234,9 +252,9 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
   const repGoalsMutation = useMutation({
     mutationFn: (goals: { representative_id: string; target_value: number }[]) =>
       saveRepGoals({ data: { team_id: teamId, month, goals } }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
+      await Promise.all([invalidate(), invalidateRepresentativeGoalReaders(qc)]);
       toast.success(`נשמרו יעדים: ${res.created + res.updated} נציגים`);
-      invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -356,7 +374,13 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
         saving={repGoalsMutation.isPending}
       />
 
-      <CopyGoalsDialog open={copyOpen} onOpenChange={setCopyOpen} teamId={teamId} month={month} onApplied={invalidate} />
+      <CopyGoalsDialog
+        open={copyOpen}
+        onOpenChange={setCopyOpen}
+        teamId={teamId}
+        month={month}
+        onApplied={() => Promise.all([invalidate(), invalidateTeamGoalReaders(qc), invalidateRepresentativeGoalReaders(qc)])}
+      />
     </div>
   );
 }
@@ -467,7 +491,7 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
 }
 
 function CopyGoalsDialog({ open, onOpenChange, teamId, month, onApplied }: {
-  open: boolean; onOpenChange: (o: boolean) => void; teamId: string; month: string; onApplied: () => void;
+  open: boolean; onOpenChange: (o: boolean) => void; teamId: string; month: string; onApplied: () => Promise<unknown> | void;
 }) {
   const copyFn = useServerFn(copyGoalsFromPreviousMonth);
   const previewQ = useQuery({
@@ -478,9 +502,9 @@ function CopyGoalsDialog({ open, onOpenChange, teamId, month, onApplied }: {
 
   const applyMutation = useMutation({
     mutationFn: () => copyFn({ data: { team_id: teamId, month, dry_run: false } }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
+      await onApplied();
       toast.success(`הועתקו יעדים: ${res.representatives_to_copy.length} נציגים${res.team_target_will_copy != null ? " + יעד צוות" : ""}`);
-      onApplied();
       onOpenChange(false);
     },
     onError: (e: Error) => toast.error(e.message),
