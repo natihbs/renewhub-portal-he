@@ -403,7 +403,7 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
           </CardHeader>
           <CardContent className="space-y-2">
             {criticalAlerts.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">אין התראות פעילות</p>
+              <EmptyState icon={ShieldCheck} title="אין התראות פעילות" compact />
             ) : criticalAlerts.map(({ r, last, avg, days }) => (
               <button
                 key={r.id}
@@ -529,7 +529,7 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                   <TableCell className="text-sm">{last ? `${formatDateIL(last.date)} · לפני ${days} ימים` : "טרם בוצע"}</TableCell>
                   <TableCell>
                     <span className={cn("font-bold",
-                      avg >= 80 ? "text-[color:var(--success)]" : avg >= 60 ? "text-[color:var(--warning)]" : "text-primary"
+                      avg >= 80 ? "text-success-foreground" : avg >= 60 ? "text-warning-foreground" : "text-primary"
                     )}>{avg || "—"}</span>
                   </TableCell>
                   <TableCell className="text-sm">{pct === null ? <span className="text-muted-foreground">לא הוגדר יעד</span> : `${Math.round(pct)}%`}</TableCell>
@@ -564,8 +564,8 @@ function reasonFor(level: string, days: number, avg: number, pct: number | null,
 function PriorityBadge({ level }: { level: "high" | "medium" | "low" }) {
   const cfg = {
     high: { text: "גבוהה", cls: "bg-primary/15 text-primary" },
-    medium: { text: "בינונית", cls: "bg-[color:var(--warning)]/15 text-[color:var(--warning)]" },
-    low: { text: "נמוכה", cls: "bg-[color:var(--success)]/15 text-[color:var(--success)]" },
+    medium: { text: "בינונית", cls: "bg-[color:var(--warning)]/15 text-warning-foreground" },
+    low: { text: "נמוכה", cls: "bg-[color:var(--success)]/15 text-success-foreground" },
   } as const;
   const c = cfg[level];
   return <Badge className={cn("border-0", c.cls)}>{c.text}</Badge>;
@@ -658,7 +658,7 @@ function AnalysisTab() {
                 {strengths.map((s) => (
                   <div key={s.key} className="flex items-center justify-between rounded-lg border p-2">
                     <span className="text-sm font-medium">{s.section}</span>
-                    <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] border-0">{s.avg}</Badge>
+                    <Badge className="bg-[color:var(--success)]/15 text-success-foreground border-0">{s.avg}</Badge>
                   </div>
                 ))}
               </CardContent>
@@ -693,11 +693,11 @@ function AnalysisTab() {
           <Card>
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[color:var(--success)]" />נושאים במגמת שיפור</CardTitle></CardHeader>
             <CardContent className="space-y-1.5">
-              {improving.length === 0 ? <p className="text-sm text-muted-foreground">אין שיפור מובהק</p> :
+              {improving.length === 0 ? <EmptyState title="אין שיפור מובהק" compact className="py-4" /> :
                 improving.map((t) => (
                   <div key={t.label} className="flex items-center justify-between text-sm rounded-md border p-2">
                     <span>{t.label}</span>
-                    <span className="text-[color:var(--success)] font-semibold">+{t.delta}</span>
+                    <span className="text-success-foreground font-semibold">+{t.delta}</span>
                   </div>
                 ))
               }
@@ -706,7 +706,7 @@ function AnalysisTab() {
           <Card>
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingDown className="h-4 w-4 text-primary" />נושאים במגמת ירידה</CardTitle></CardHeader>
             <CardContent className="space-y-1.5">
-              {declining.length === 0 ? <p className="text-sm text-muted-foreground">אין ירידה מובהקת</p> :
+              {declining.length === 0 ? <EmptyState title="אין ירידה מובהקת" compact className="py-4" /> :
                 declining.map((t) => (
                   <div key={t.label} className="flex items-center justify-between text-sm rounded-md border p-2">
                     <span>{t.label}</span>
@@ -732,8 +732,8 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
   };
   const bgFor = (v: number | null) => {
     if (v === null) return "bg-muted text-muted-foreground";
-    if (v >= 80) return "bg-[color:var(--success)]/20 text-[color:var(--success)]";
-    if (v >= 60) return "bg-[color:var(--warning)]/20 text-[color:var(--warning)]";
+    if (v >= 80) return "bg-[color:var(--success)]/20 text-success-foreground";
+    if (v >= 60) return "bg-[color:var(--warning)]/20 text-warning-foreground";
     return "bg-primary/15 text-primary";
   };
 
@@ -746,37 +746,35 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              <tr>
-                <th className="text-start p-2 sticky end-0 bg-card">נציג</th>
-                {SECTIONS.map((s) => (
-                  <th key={s.key} className="p-2 text-center font-medium text-muted-foreground whitespace-nowrap">{s.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {state.reps.map((r) => (
-                <tr key={r.id} className="border-t">
-                  <td className="p-2 font-medium whitespace-nowrap">
-                    <button onClick={() => openNewFor(r.id)} className="hover:underline text-start">{r.name}</button>
-                  </td>
-                  {SECTIONS.map((s) => {
-                    const v = cell(r.id, s.key);
-                    return (
-                      <td key={s.key} className="p-1">
-                        <div className={cn("rounded-md text-center py-2 font-semibold", bgFor(v))}>
-                          {v ?? "—"}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
+        <Table className="text-xs">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="sticky end-0 bg-card">נציג</TableHead>
+              {SECTIONS.map((s) => (
+                <TableHead key={s.key} className="text-center whitespace-nowrap">{s.label}</TableHead>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {state.reps.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="font-medium whitespace-nowrap">
+                  <button onClick={() => openNewFor(r.id)} className="hover:underline text-start">{r.name}</button>
+                </TableCell>
+                {SECTIONS.map((s) => {
+                  const v = cell(r.id, s.key);
+                  return (
+                    <TableCell key={s.key} className="p-1">
+                      <div className={cn("rounded-md text-center py-2 font-semibold", bgFor(v))}>
+                        {v ?? "—"}
+                      </div>
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
         <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[color:var(--success)]/40" />80+</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[color:var(--warning)]/40" />60-79</span>
@@ -865,7 +863,7 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
               </CardHeader>
               <CardContent className="space-y-2">
                 {weakest.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">אין נתונים מספיקים לגיבוש יעדים.</p>
+                  <EmptyState title="אין נתונים מספיקים לגיבוש יעדים" compact className="py-4" />
                 ) : weakest.map((w, i) => {
                   const article = recommendedArticleFor(w.section.key, state.articles);
                   return (
@@ -923,7 +921,7 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
 }
 
 function PlanRow({ label, value, tone }: { label: string; value: string; tone?: "success" | "danger" }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : "text-foreground";
   return (
     <div className="flex items-center justify-between rounded-lg border p-2.5">
       <span className="text-muted-foreground">{label}</span>
@@ -1153,7 +1151,7 @@ function MyTasksAndNotes() {
         <CardHeader><CardTitle className="text-base">המשימות שלי</CardTitle></CardHeader>
         <CardContent>
           {tasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">אין לך משימות פתוחות כרגע.</p>
+            <EmptyState icon={CheckCircle2} title="אין לך משימות פתוחות כרגע" compact />
           ) : (
             <div className="space-y-3">
               {openTasks.length > 0 && (
@@ -1187,7 +1185,7 @@ function MyTasksAndNotes() {
         <CardHeader><CardTitle className="text-base">הערות עבורי</CardTitle></CardHeader>
         <CardContent>
           {notes.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">אין הערות שהמנהל שלך שיתף איתך.</p>
+            <EmptyState icon={BookOpen} title="אין הערות שהמנהל שלך שיתף איתך" compact />
           ) : (
             <ul className="space-y-2">
               {notes.map((n) => (
@@ -1265,11 +1263,11 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: 
                   </TableCell>
                   <TableCell>
                     {f.published
-                      ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
+                      ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
                       : <Badge variant="outline">טיוטה</Badge>}
                   </TableCell>
                   <TableCell>
-                    <Button size="icon" variant="ghost" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" aria-label="צפייה בהאזנה" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1292,7 +1290,7 @@ function FeedbackView({ f, isManager, onEdit, onPublish }: {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">סטטוס:</span>
             {f.published
-              ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
+              ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
               : <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>}
           </div>
           <div className="flex gap-2">
@@ -1357,7 +1355,7 @@ function MiniKpi({ icon: Icon, label, value, sub, tone }: {
   label: string; value: string; sub?: string;
   tone?: "success" | "danger";
 }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : "text-foreground";
   return (
     <Card>
       <CardContent className="pt-5">

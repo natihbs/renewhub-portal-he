@@ -96,8 +96,8 @@ type Status = "above" | "onpace" | "attention" | "no_target";
 const STATUS_LABEL: Record<Status, string> = { ...PACE_STATUS_LABEL, no_target: "לא הוגדר יעד" };
 
 function statusBadgeClass(s: Status) {
-  if (s === "above") return "bg-[color:var(--success)]/12 text-[color:var(--success)] border border-[color:var(--success)]/25";
-  if (s === "onpace") return "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border border-[color:var(--warning)]/30";
+  if (s === "above") return "bg-[color:var(--success)]/12 text-success-foreground border border-[color:var(--success)]/25";
+  if (s === "onpace") return "bg-[color:var(--warning)]/15 text-warning-foreground border border-[color:var(--warning)]/30";
   if (s === "no_target") return "bg-muted text-muted-foreground border border-border";
   return "bg-primary/10 text-primary border border-primary/25";
 }
@@ -424,7 +424,7 @@ function PerformancePage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {coaching.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">כל הנציגים בקצב או מעליו 🎉</p>
+              <EmptyState icon={CheckCircle2} title="כל הנציגים בקצב או מעליו" description="אין כרגע נציגים הזקוקים לליווי מיוחד." compact />
             ) : (
               coaching.map((e, i) => {
                 const priority = i < 2 ? "high" : i < 4 ? "medium" : "low";
@@ -437,7 +437,7 @@ function PerformancePage() {
                     <span className={cn(
                       "grid h-8 w-8 place-items-center rounded-lg text-xs font-bold shrink-0",
                       priority === "high" ? "bg-primary/15 text-primary"
-                        : priority === "medium" ? "bg-[color:var(--warning)]/20 text-[color:oklch(0.45_0.14_75)]"
+                        : priority === "medium" ? "bg-[color:var(--warning)]/20 text-warning-foreground"
                         : "bg-muted text-muted-foreground"
                     )}>{i + 1}</span>
                     <div className="min-w-0 flex-1">
@@ -569,7 +569,7 @@ function PerformancePage() {
                             <span className="text-xs text-muted-foreground">—</span>
                           ) : e.gap >= 0 ? (
                             <span className="inline-flex flex-col items-end">
-                              <span className="text-[color:var(--success)] font-medium tabular-nums">+{formatNum(e.gap)}</span>
+                              <span className="text-success-foreground font-medium tabular-nums">+{formatNum(e.gap)}</span>
                               <span className="text-[10px] text-muted-foreground">מעל היעד</span>
                             </span>
                           ) : (
@@ -722,8 +722,8 @@ function ColoredBar({ pct, status, className }: { pct: number; status: Status; c
 
 function RiskBadge({ level }: { level: RiskLevel }) {
   const map = {
-    low: { label: "🟢 נמוכה", cls: "bg-[color:var(--success)]/12 text-[color:var(--success)] border-[color:var(--success)]/25" },
-    medium: { label: "🟡 בינונית", cls: "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border-[color:var(--warning)]/30" },
+    low: { label: "🟢 נמוכה", cls: "bg-[color:var(--success)]/12 text-success-foreground border-[color:var(--success)]/25" },
+    medium: { label: "🟡 בינונית", cls: "bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30" },
     high: { label: "🔴 גבוהה", cls: "bg-primary/10 text-primary border-primary/25" },
   } as const;
   const m = map[level];
@@ -754,7 +754,7 @@ function RowQuickActions({ rep, onOpen }: { rep: Rep; onOpen: () => void }) {
 function PriorityBadge({ level }: { level: "high" | "medium" | "low" }) {
   const map = {
     high: { label: "עדיפות גבוהה", cls: "bg-primary/10 text-primary border-primary/25" },
-    medium: { label: "עדיפות בינונית", cls: "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border-[color:var(--warning)]/30" },
+    medium: { label: "עדיפות בינונית", cls: "bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30" },
     low: { label: "עדיפות נמוכה", cls: "bg-muted text-muted-foreground border-border" },
   } as const;
   const m = map[level];
@@ -767,8 +767,8 @@ function MobileStat({ label, value, tone }: { label: string; value: string; tone
       <div className="text-[10px] text-muted-foreground">{label}</div>
       <div className={cn(
         "text-sm font-bold tabular-nums",
-        tone === "success" && "text-[color:var(--success)]",
-        tone === "warning" && "text-[color:oklch(0.45_0.14_75)]",
+        tone === "success" && "text-success-foreground",
+        tone === "warning" && "text-warning-foreground",
         tone === "danger" && "text-primary",
       )}>{value}</div>
     </div>

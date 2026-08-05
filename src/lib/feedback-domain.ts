@@ -54,14 +54,14 @@ export function scoreTone(score: number): ScoreTone {
 
 /** Plain text-color utility class per tone. */
 export const SCORE_TEXT_CLASS: Record<ScoreTone, string> = {
-  success: "text-[color:var(--success)]",
-  warning: "text-[color:var(--warning)]",
+  success: "text-success-foreground",
+  warning: "text-warning-foreground",
   danger: "text-primary",
 };
 
 /** Background+text badge-style utility classes per tone. */
 export const SCORE_BADGE_CLASS: Record<ScoreTone, string> = {
-  success: "bg-[color:var(--success)]/15 text-[color:var(--success)]",
-  warning: "bg-[color:var(--warning)]/15 text-[color:var(--warning)]",
+  success: "bg-[color:var(--success)]/15 text-success-foreground",
+  warning: "bg-[color:var(--warning)]/15 text-warning-foreground",
   danger: "bg-primary/15 text-primary",
 };

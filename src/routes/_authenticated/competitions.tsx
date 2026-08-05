@@ -146,7 +146,7 @@ function ActiveCompetitionCard({ comp, onClose, isManager }: { comp: Competition
         <div>
           <h3 className="font-bold mb-3">טבלת מובילים</h3>
           {leaderboard.length === 0 ? (
-            <div className="text-sm text-muted-foreground text-center py-6">אין ניקוד עדיין.</div>
+            <EmptyState icon={Medal} title="אין ניקוד עדיין" compact />
           ) : (
             <div className="space-y-2">
               {leaderboard.map((row, i) => (
@@ -176,7 +176,7 @@ function ActiveCompetitionCard({ comp, onClose, isManager }: { comp: Competition
               <div key={cat.id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{cat.label}</div>
-                  <div className={`text-xs ${cat.points < 0 ? "text-primary" : "text-[color:var(--success)]"}`}>
+                  <div className={`text-xs ${cat.points < 0 ? "text-primary" : "text-success-foreground"}`}>
                     {cat.points > 0 ? "+" : ""}{cat.points} נקודות ליחידה
                   </div>
                 </div>

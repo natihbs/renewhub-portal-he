@@ -20,7 +20,7 @@ export function ModeToggle() {
               aria-label="מצב פעיל - נתוני ענן"
               className={cn(
                 "inline-flex items-center gap-1.5 h-9 rounded-lg border px-2.5 text-xs font-medium",
-                "border-success/40 bg-success/10 text-success cursor-default select-none"
+                "border-success/40 bg-success/10 text-success-foreground cursor-default select-none"
               )}
             >
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
@@ -44,12 +44,12 @@ export function ModeToggle() {
             aria-label={full}
             className={cn(
               "inline-flex items-center gap-1.5 h-9 rounded-lg border px-2.5 text-xs font-medium",
-              "border-warning/40 bg-warning/10 text-warning select-none"
+              "border-warning/40 bg-warning/10 text-warning-foreground select-none"
             )}
           >
             <FlaskConical className="h-3.5 w-3.5 shrink-0" />
             <span className="hidden sm:inline whitespace-nowrap">מצב הדגמה</span>
-            <span className="hidden lg:inline text-warning/80 font-normal">· יציאה למצב פעיל</span>
+            <span className="hidden lg:inline text-warning-foreground/80 font-normal">· יציאה למצב פעיל</span>
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">{full} לחץ ליציאה למצב פעיל.</TooltipContent>

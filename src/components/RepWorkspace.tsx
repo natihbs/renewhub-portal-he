@@ -63,9 +63,9 @@ export function riskOf(rep: Rep, target: number | null, avgScore: number | null,
 // ---------- helpers ----------
 function StatusBadge({ s }: { s: Status }) {
   const cls = s === "above"
-    ? "bg-[color:var(--success)]/12 text-[color:var(--success)] border-[color:var(--success)]/25"
+    ? "bg-[color:var(--success)]/12 text-success-foreground border-[color:var(--success)]/25"
     : s === "onpace"
-    ? "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border-[color:var(--warning)]/30"
+    ? "bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30"
     : s === "no_target"
     ? "bg-muted text-muted-foreground border-border"
     : "bg-primary/10 text-primary border-primary/25";
@@ -74,8 +74,8 @@ function StatusBadge({ s }: { s: Status }) {
 
 function RiskBadge({ level }: { level: RiskLevel }) {
   const map = {
-    low: { label: "🟢 סיכון נמוך", cls: "bg-[color:var(--success)]/12 text-[color:var(--success)] border-[color:var(--success)]/25" },
-    medium: { label: "🟡 סיכון בינוני", cls: "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border-[color:var(--warning)]/30" },
+    low: { label: "🟢 סיכון נמוך", cls: "bg-[color:var(--success)]/12 text-success-foreground border-[color:var(--success)]/25" },
+    medium: { label: "🟡 סיכון בינוני", cls: "bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30" },
     high: { label: "🔴 סיכון גבוה", cls: "bg-primary/10 text-primary border-primary/25" },
   } as const;
   const m = map[level];
@@ -295,7 +295,7 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                         <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate">{f.managerSummary || f.keep || "—"}</TableCell>
                         <TableCell>
                           {f.published
-                            ? <Badge className="text-[10px] bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
+                            ? <Badge className="text-[10px] bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
                             : <Badge variant="outline" className="text-[10px]">טיוטה</Badge>}
                         </TableCell>
                       </TableRow>
@@ -453,7 +453,7 @@ function SummaryRow({ label, value, tone }: { label: string; value: string; tone
   return (
     <div className="min-w-0">
       <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={cn("text-sm font-bold tabular-nums truncate", tone === "success" && "text-[color:var(--success)]", tone === "danger" && "text-primary")}>{value}</div>
+      <div className={cn("text-sm font-bold tabular-nums truncate", tone === "success" && "text-success-foreground", tone === "danger" && "text-primary")}>{value}</div>
     </div>
   );
 }
@@ -463,15 +463,15 @@ function AnalyticStat({ label, value, tone }: { label: string; value: string; to
     <div className="rounded-xl border p-3 text-center">
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className={cn("mt-1 text-base font-extrabold tabular-nums",
-        tone === "success" && "text-[color:var(--success)]",
-        tone === "warning" && "text-[color:oklch(0.45_0.14_75)]",
+        tone === "success" && "text-success-foreground",
+        tone === "warning" && "text-warning-foreground",
         tone === "danger" && "text-primary")}>{value}</div>
     </div>
   );
 }
 
 function TaskRow({ task, onToggle, onDelete }: { task: { id: string; title: string; due: string; priority: "low" | "medium" | "high"; done: boolean }; onToggle: () => void; onDelete: () => void }) {
-  const priorityCls = task.priority === "high" ? "text-primary" : task.priority === "medium" ? "text-[color:oklch(0.45_0.14_75)]" : "text-muted-foreground";
+  const priorityCls = task.priority === "high" ? "text-primary" : task.priority === "medium" ? "text-warning-foreground" : "text-muted-foreground";
   const priorityLabel = { low: "נמוכה", medium: "בינונית", high: "גבוהה" }[task.priority];
   return (
     <li className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", task.done && "opacity-60")}>

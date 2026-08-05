@@ -819,7 +819,7 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
     <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">מה יקרה לכל עמודה בייבוא</div>
       <div>
-        <span className="font-medium text-[color:var(--success)]">יישמרו במערכת:</span>{" "}
+        <span className="font-medium text-success-foreground">יישמרו במערכת:</span>{" "}
         {persisted.length > 0 ? persisted.join(", ") : "—"}
       </div>
       {targetMapped && (
@@ -842,7 +842,7 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
       </div>
       {unsupported.length > 0 && (
         <div>
-          <span className="font-medium text-amber-700">לא ייכתבו למערכת:</span> {unsupported.join(", ")}
+          <span className="font-medium text-warning-foreground">לא ייכתבו למערכת:</span> {unsupported.join(", ")}
           <div className="text-xs text-muted-foreground">{UNSUPPORTED_FIELD_REASON}</div>
         </div>
       )}
@@ -868,7 +868,7 @@ function PreviewStep({
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatChip label="שורות" value={processed.length} tone="muted" />
-        <StatChip label="להתעדכן" value={processed.filter((p) => p.action === "update").length} tone="success" />
+        <StatChip label="לעדכון" value={processed.filter((p) => p.action === "update").length} tone="success" />
         <StatChip label="חדשים" value={processed.filter((p) => p.action === "create").length} tone="info" />
         <StatChip label="שגיאות" value={criticalCount} tone={criticalCount > 0 ? "danger" : "muted"} />
       </div>
@@ -906,25 +906,25 @@ function PreviewStep({
                 <TableRow key={r.index} className={cn(hasErr && "bg-destructive/5")}>
                   <TableCell className="text-muted-foreground">{r.index + 1}</TableCell>
                   <TableCell className={cn("font-medium", !r.name && "text-destructive")}>{r.name || "—"}</TableCell>
-                  <TableCell>{r.teamName ? r.teamName : <span className="text-amber-700">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
+                  <TableCell>{r.teamName ? r.teamName : <span className="text-warning-foreground">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
                   <TableCell>{r.monthlyTarget ?? "—"}</TableCell>
                   <TableCell>{r.currentResult ?? "—"}</TableCell>
                   {showRenewalColumns && (
-                    <TableCell className={cn(r.renewalFieldsSkipped && "text-amber-700")}>
+                    <TableCell className={cn(r.renewalFieldsSkipped && "text-warning-foreground")}>
                       {r.renewalOpportunities ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
                     </TableCell>
                   )}
                   {showRenewalColumns && (
-                    <TableCell className={cn(r.renewalFieldsSkipped && "text-amber-700")}>
+                    <TableCell className={cn(r.renewalFieldsSkipped && "text-warning-foreground")}>
                       {r.completedRenewals ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
                     </TableCell>
                   )}
                   <TableCell>{r.updatedAt ?? <span className="text-destructive">—</span>}</TableCell>
                   <TableCell className="space-y-1">
                     {r.issues.length === 0 ? (
-                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-800">תקין</Badge>
+                      <Badge variant="secondary" className="bg-[color:var(--success)]/15 text-success-foreground">תקין</Badge>
                     ) : r.issues.map((i, k) => (
-                      <div key={k} className={cn("text-xs", i.severity === "error" ? "text-destructive" : "text-amber-700")}>
+                      <div key={k} className={cn("text-xs", i.severity === "error" ? "text-destructive" : "text-warning-foreground")}>
                         {i.severity === "error" ? <XCircle className="inline h-3 w-3 me-1" /> : <AlertTriangle className="inline h-3 w-3 me-1" />}
                         {i.message}
                       </div>
@@ -1154,7 +1154,7 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                       <TableCell>{h.rowsUpdated + h.rowsCreated}</TableCell>
                       <TableCell>
                         {h.warnings > 0
-                          ? <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">{h.warnings}</Badge>
+                          ? <Badge variant="outline" className="bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30">{h.warnings}</Badge>
                           : <span className="text-muted-foreground">0</span>}
                       </TableCell>
                       <TableCell>
@@ -1164,7 +1164,7 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                       </TableCell>
                       <TableCell>
                         <Badge variant={h.status === "success" ? "secondary" : h.status === "partial" ? "outline" : "destructive"}
-                          className={h.status === "success" ? "bg-emerald-100 text-emerald-800" : ""}>
+                          className={h.status === "success" ? "bg-[color:var(--success)]/15 text-success-foreground" : ""}>
                           {h.status === "success" ? "הושלם" : h.status === "partial" ? "חלקי" : "נכשל"}
                         </Badge>
                       </TableCell>
@@ -1209,9 +1209,9 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                 <SummaryField label="סטטוס" value={detailFor.status === "success" ? "הושלם" : detailFor.status === "partial" ? "חלקי" : "נכשל"} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg border bg-amber-50 p-3">
-                  <div className="text-xs font-semibold text-amber-800">אזהרות</div>
-                  <div className="mt-1 text-2xl font-bold text-amber-900">{detailFor.warnings}</div>
+                <div className="rounded-lg border bg-[color:var(--warning)]/5 p-3">
+                  <div className="text-xs font-semibold text-warning-foreground">אזהרות</div>
+                  <div className="mt-1 text-2xl font-bold text-warning-foreground">{detailFor.warnings}</div>
                 </div>
                 <div className="rounded-lg border bg-destructive/5 p-3">
                   <div className="text-xs font-semibold text-destructive">שגיאות</div>
@@ -1404,9 +1404,9 @@ function ManualEntryDialog() {
 function StatChip({ label, value, tone }: { label: string; value: number; tone: "muted" | "success" | "info" | "warning" | "danger" }) {
   const toneClass = {
     muted: "bg-muted text-muted-foreground",
-    success: "bg-emerald-100 text-emerald-800",
-    info: "bg-sky-100 text-sky-800",
-    warning: "bg-amber-100 text-amber-800",
+    success: "bg-[color:var(--success)]/15 text-success-foreground",
+    info: "bg-accent text-accent-foreground",
+    warning: "bg-[color:var(--warning)]/15 text-warning-foreground",
     danger: "bg-destructive/10 text-destructive",
   }[tone];
   return (

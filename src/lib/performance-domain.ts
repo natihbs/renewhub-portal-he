@@ -35,14 +35,14 @@ export const ACHIEVEMENT_STATUS_TONE: Record<AchievementStatus, Tone> = {
 };
 
 export const ACHIEVEMENT_TEXT_CLASS: Record<Tone, string> = {
-  success: "text-[color:var(--success)]",
-  warning: "text-[color:oklch(0.45_0.14_75)]",
+  success: "text-success-foreground",
+  warning: "text-warning-foreground",
   danger: "text-primary",
 };
 
 export const ACHIEVEMENT_BADGE_CLASS: Record<Tone, string> = {
-  success: "bg-[color:var(--success)]/12 text-[color:var(--success)] border border-[color:var(--success)]/25",
-  warning: "bg-[color:var(--warning)]/15 text-[color:oklch(0.45_0.14_75)] border border-[color:var(--warning)]/30",
+  success: "bg-[color:var(--success)]/12 text-success-foreground border border-[color:var(--success)]/25",
+  warning: "bg-[color:var(--warning)]/15 text-warning-foreground border border-[color:var(--warning)]/30",
   danger: "bg-primary/10 text-primary border border-primary/25",
 };
 
