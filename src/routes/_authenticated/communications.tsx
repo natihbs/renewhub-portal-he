@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useApp, useIsManager, teamsFromReps, competitionLeaderboard } from "@/lib/store";
 import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
-import { useCloudTeams } from "@/lib/teams-hooks";
+import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useTeamGoals, useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
 import { renewalTotalsForTeam } from "@/lib/kpi-values";
 import { calculateRenewalRate } from "@/lib/renewal-rate";
@@ -106,7 +106,9 @@ function CommsPage() {
 
 function useGenerationInputs() {
   const { state } = useApp();
-  const { teams: cloudTeams } = useCloudTeams();
+  // Visible teams — communications history for a deactivated team's reps
+  // must stay reachable and correctly labeled (KPI profile lookup below).
+  const { teams: cloudTeams } = useVisibleTeams();
   const reps = state.reps;
   const teamList = useMemo(() => teamsFromReps(reps), [reps]);
 

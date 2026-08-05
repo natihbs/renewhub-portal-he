@@ -12,7 +12,7 @@ import type { Feedback } from "@/lib/feedback-domain";
 import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth } from "@/lib/format";
 import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
-import { useCloudTeams } from "@/lib/teams-hooks";
+import { useVisibleTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForTeam } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -89,7 +89,9 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
 function AdminHome() {
   const { state } = useApp();
   const { reps, announcements, competitions } = state;
-  const { teams: cloudTeams } = useCloudTeams();
+  // Visible teams — the dashboard's KPI-profile lookups must resolve for a
+  // deactivated team too, and "X מתוך Y סה״כ" below must count every team.
+  const { teams: cloudTeams } = useVisibleTeams();
   const teamGroups = teamsFromReps(reps);
   const profileByTeamId = useMemo(() => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])), [cloudTeams]);
   const teamIds = useMemo(() => teamGroups.map((t) => t.teamId), [teamGroups]);
@@ -164,7 +166,7 @@ function ManagerHome() {
     () => (workspaceTeamId ? reps.filter((r) => r.teamId === workspaceTeamId) : reps),
     [reps, workspaceTeamId],
   );
-  const { teams: cloudTeams } = useCloudTeams();
+  const { teams: cloudTeams } = useVisibleTeams();
   const profileByTeamId = useMemo(() => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])), [cloudTeams]);
   const teamGoal = useTeamGoal(workspaceTeamId);
   const scopedRepIds = useMemo(() => scopedReps.map((r) => r.id), [scopedReps]);

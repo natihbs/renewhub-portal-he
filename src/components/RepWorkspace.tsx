@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { cn } from "@/lib/utils";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
-import { useCloudTeams } from "@/lib/teams-hooks";
+import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useRepresentativeGoal, currentGoalMonth } from "@/lib/goals-hooks";
 import { renewalTotalsForMonth } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone } from "@/lib/renewal-rate";
@@ -148,7 +148,9 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   // Renewal-specific section: only ever shown for a team whose KPI profile is
   // explicitly "renewals" — never inferred from the team's name — and only when
   // real dated values exist. calculateRenewalRate never derives from target/result.
-  const { teams: cloudTeams } = useCloudTeams();
+  // Visible teams — this workspace is opened for a specific rep's own record,
+  // including one whose team has since been deactivated (history must remain viewable).
+  const { teams: cloudTeams } = useVisibleTeams();
   const kpiProfile = rep.teamId
     ? cloudTeams.find((t) => t.id === rep.teamId)?.kpiProfile ?? DEFAULT_KPI_PROFILE
     : DEFAULT_KPI_PROFILE;
