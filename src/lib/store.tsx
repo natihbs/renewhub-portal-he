@@ -11,7 +11,7 @@ import {
   type Role,
   UNASSIGNED_TEAM_LABEL,
 } from "./seed";
-import { CRITERIA, type Feedback, type CriterionValue } from "./feedback-domain";
+import { computeFeedbackScore, type Feedback, type CriterionValue } from "./feedback-domain";
 import type { KpiValueRow } from "./kpi-values";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
@@ -50,7 +50,9 @@ type Ctx = {
   updateArticle: (id: string, patch: Partial<Article>) => void;
   removeArticle: (id: string) => void;
   // feedback
-  addFeedback: (f: Omit<Feedback, "id" | "score" | "published"> & { score?: number }) => void;
+  // updatedAt/publishedAt are lifecycle fields the writer assigns, never
+  // caller input — the caller cannot know either one.
+  addFeedback: (f: Omit<Feedback, "id" | "score" | "published" | "updatedAt" | "publishedAt"> & { score?: number }) => void;
   updateFeedback: (id: string, patch: Partial<Omit<Feedback, "id">>) => void;
   resetAll: () => void;
 };
@@ -98,7 +100,9 @@ type FeedbackRow = {
   manager_summary: string;
   next_task: string;
   published: boolean;
+  published_at: string | null;
   schedule_id: string | null;
+  updated_at: string;
 };
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -229,6 +233,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         nextTask: f.next_task,
         published: f.published,
         scheduleId: f.schedule_id,
+        updatedAt: f.updated_at,
+        publishedAt: f.published_at ?? null,
       })),
       feedbackLoading: feedback.isLoading,
       feedbackError: feedback.isError ? (feedback.error?.message ?? "שגיאה בטעינת נתוני משוב") : null,
@@ -313,15 +319,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeArticle: (id) => patch((s) => ({ ...s, articles: s.articles.filter((a) => a.id !== id) })),
         addFeedback: (f) => {
           const score = f.score ?? computeScore(f.criteria);
-          patch((s) => ({ ...s, feedback: [{ ...f, id: uid(), score, published: false }, ...s.feedback] }));
+          patch((s) => ({
+            ...s,
+            feedback: [
+              { ...f, id: uid(), score, published: false, updatedAt: new Date().toISOString(), publishedAt: null },
+              ...s.feedback,
+            ],
+          }));
         },
         updateFeedback: (id, p) =>
           patch((s) => ({
             ...s,
             feedback: s.feedback.map((f) => {
               if (f.id !== id) return f;
-              const next = { ...f, ...p };
-              return { ...next, score: p.criteria ? computeScore(next.criteria) : next.score };
+              const next = { ...f, ...p, updatedAt: new Date().toISOString() };
+              return {
+                ...next,
+                score: p.criteria ? computeScore(next.criteria) : next.score,
+                publishedAt: p.published === true ? (f.publishedAt ?? new Date().toISOString()) : p.published === false ? null : next.publishedAt,
+              };
             }),
           })),
         resetAll: () => setDemo(SEED),
@@ -410,46 +426,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         void articles.update(id, row);
       },
       removeArticle: (id) => void articles.remove(id),
-      addFeedback: (f) =>
-        void feedback.insert(
-          {
-            representative_id: f.repId,
-            feedback_date: f.date,
-            call_id: f.callId,
-            call_type: f.callType,
-            listener: f.listener,
-            criteria: f.criteria as never,
-            score: f.score ?? computeScore(f.criteria),
-            keep_doing: f.keep,
-            improve: f.improve,
-            manager_summary: f.managerSummary,
-            next_task: f.nextTask,
-            // New feedback always starts as a draft — a representative must never see
-            // it until a manager explicitly publishes it (updateFeedback with published: true).
-            published: false,
-            schedule_id: f.scheduleId,
-          },
-          "created_by",
-        ),
-      updateFeedback: (id, p) => {
-        const row: Record<string, string | number | boolean | null> = {};
-        if (p.date !== undefined) row.feedback_date = p.date;
-        if (p.callId !== undefined) row.call_id = p.callId;
-        if (p.callType !== undefined) row.call_type = p.callType;
-        if (p.listener !== undefined) row.listener = p.listener;
-        if (p.criteria !== undefined) {
-          row.criteria = p.criteria as never;
-          // Editing must recalculate the score immediately from the same formula
-          // used everywhere else — never trust a stale score passed alongside it.
-          row.score = computeScore(p.criteria);
-        }
-        if (p.keep !== undefined) row.keep_doing = p.keep;
-        if (p.improve !== undefined) row.improve = p.improve;
-        if (p.managerSummary !== undefined) row.manager_summary = p.managerSummary;
-        if (p.nextTask !== undefined) row.next_task = p.nextTask;
-        if (p.published !== undefined) row.published = p.published;
-        if (p.scheduleId !== undefined) row.schedule_id = p.scheduleId;
-        void feedback.update(id, row);
+      // §Feedback hardening: in Live Mode these no longer exist as generic
+      // cloud writes. An evaluation needs a server-derived score, a
+      // future-date rule, optimistic concurrency, a revision row written in
+      // the same transaction as the change, and a publish that is its own
+      // audited act — none of which the generic proxy can provide (it
+      // forwarded whatever the browser asserted, fire-and-forget, and the
+      // caller was told it had succeeded either way).
+      //
+      // These throw rather than no-op deliberately: a silent no-op is the
+      // exact failure mode this sprint exists to remove. Every real caller
+      // goes through useFeedbackActions() (src/lib/feedback-hooks.ts), and
+      // `feedback` is now on CLOUD_WRITE_PROTECTED_TABLES so the old route is
+      // closed at the server boundary too.
+      addFeedback: () => {
+        throw new Error("שמירת משוב במצב מחובר מתבצעת דרך useFeedbackActions().createFeedback");
+      },
+      updateFeedback: () => {
+        throw new Error("עדכון משוב במצב מחובר מתבצע דרך useFeedbackActions().updateFeedback");
       },
       resetAll: () => {},
     };
@@ -479,13 +473,12 @@ export function useIsManager() {
 }
 
 // Derived helpers
-export function computeScore(criteria: Record<string, CriterionValue>) {
-  const values = CRITERIA.map((c) => criteria[c.key]).filter(Boolean);
-  const relevant = values.filter((v) => v !== "na");
-  if (relevant.length === 0) return 0;
-  const sum = relevant.reduce((acc, v) => acc + (v === "done" ? 1 : v === "partial" ? 0.5 : 0), 0);
-  return Math.round((sum / relevant.length) * 100);
-}
+/**
+ * Re-export of the single canonical implementation in feedback-domain.ts,
+ * which the server now shares (§P1 — the score is no longer client-asserted).
+ * Kept as a named export here so existing call sites are unaffected.
+ */
+export const computeScore = computeFeedbackScore;
 
 /**
  * Single source of truth for "which feedback rows can this viewer see" on the client

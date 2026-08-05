@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, useIsManager, computeScore, teamsFromReps, visibleFeedback } from "@/lib/store";
 import type { Rep, Article } from "@/lib/seed";
-import { CRITERIA, type CriterionValue, type Feedback, scoreTone, SCORE_TEXT_CLASS, SCORE_BADGE_CLASS } from "@/lib/feedback-domain";
+import {
+  CRITERIA, type CriterionValue, type Feedback, scoreTone, SCORE_TEXT_CLASS, SCORE_BADGE_CLASS,
+  computeQueuePriority, queuePriorityLevel, daysSinceIsoDate, isFutureFeedbackDate, todayIsoDate,
+} from "@/lib/feedback-domain";
+import { useFeedbackActions, useCoachingPlans, countDrafts } from "@/lib/feedback-hooks";
+import { listFeedbackRevisions, type FeedbackRevision } from "@/lib/feedback.functions";
 import { useListening } from "@/lib/listening-store";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useAuth } from "@/lib/auth";
@@ -104,9 +109,11 @@ function sectionScoreFor(f: Feedback, section: SectionKey): number | null {
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
 
-function daysSince(dateStr: string) {
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
-}
+// Clamped at zero — see daysSinceIsoDate. A feedback row dated in the future
+// (possible for rows created before the server-side rule) used to produce a
+// negative gap, which made that representative look MORE recently heard than
+// one listened to today.
+const daysSince = (dateStr: string) => daysSinceIsoDate(dateStr);
 
 function lastFeedbackFor(feedback: Feedback[], repId: string) {
   return feedback
@@ -141,11 +148,12 @@ export const Route = createFileRoute("/_authenticated/feedback")({
 });
 
 function ListeningCenter() {
-  const { state, updateFeedback } = useApp();
+  const { state } = useApp();
   const isManager = useIsManager();
   const { isAdmin } = useAuth();
   const { isDemo } = useAppMode();
   const { pushActivity } = useUx();
+  const actions = useFeedbackActions();
   const [openForm, setOpenForm] = useState(false);
   const [openSchedule, setOpenSchedule] = useState(false);
   const [openBulkPublish, setOpenBulkPublish] = useState(false);
@@ -159,14 +167,25 @@ function ListeningCenter() {
   // real boundary.
   const { workspace } = useWorkspace();
   const feedbackListAll = visibleFeedback(state.feedback, isManager, state.currentRepId);
-  // History tab only: narrow to the current Workspace team for a manager who
-  // manages more than one (workspace.type is only ever "team" for a manager —
-  // see WorkspaceProvider). A single-team manager's feedback was already
-  // scoped to just their team via the RLS-backed cloud query, so this is a
-  // no-op for them; it only matters for a multi-team manager.
-  const feedbackList = isManager && workspace.type === "team"
-    ? feedbackListAll.filter((f) => state.reps.find((r) => r.id === f.repId)?.teamId === workspace.teamId)
-    : feedbackListAll;
+
+  // §P2 workspace-scope consistency. This narrowing used to be applied to the
+  // History tab ONLY: every other tab (Dashboard, Queue, Analysis, Heat map,
+  // Coaching) read state.feedback and state.reps directly, so a manager of two
+  // teams who had selected one team in the Workspace switcher still saw
+  // averages, a heat map, a coaching queue and an alert list computed across
+  // BOTH teams — while the history table beside them showed only one. The two
+  // scoped datasets below are now computed once and passed to every tab, so
+  // every number on the page describes the same population.
+  const inWorkspace = isManager && workspace.type === "team";
+  const scopedReps = useMemo(
+    () => (inWorkspace ? state.reps.filter((r) => r.teamId === workspace.teamId) : state.reps),
+    [inWorkspace, state.reps, workspace],
+  );
+  const scopedRepIds = useMemo(() => new Set(scopedReps.map((r) => r.id)), [scopedReps]);
+  const feedbackList = useMemo(
+    () => (inWorkspace ? feedbackListAll.filter((f) => scopedRepIds.has(f.repId)) : feedbackListAll),
+    [inWorkspace, feedbackListAll, scopedRepIds],
+  );
   const viewed = view ? state.feedback.find((f) => f.id === view) : null;
   const editing = editingId ? state.feedback.find((f) => f.id === editingId) ?? null : null;
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
@@ -198,11 +217,41 @@ function ListeningCenter() {
     setView(null);
     setOpenForm(true);
   };
-  const publish = (id: string) => {
-    updateFeedback(id, { published: true });
-    const f = state.feedback.find((x) => x.id === id);
-    if (f) pushActivity({ kind: "feedback", text: `משוב פורסם עבור ${nameOf(f.repId)}` });
-    toast.success("המשוב פורסם לנציג");
+  // §P0: this was `updateFeedback(id, { published: true })` — a fire-and-forget
+  // write followed by an UNCONDITIONAL success toast. The manager was told
+  // "המשוב פורסם לנציג" even when the write was rejected, and the record stayed
+  // a draft the representative could not see. Now awaited, with the real
+  // outcome reported (including the idempotent "already published" case).
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const publish = async (id: string) => {
+    setPublishingId(id);
+    try {
+      const res = await actions.setPublished({ id, published: true });
+      const f = state.feedback.find((x) => x.id === id);
+      if (res.changed) {
+        if (f) pushActivity({ kind: "feedback", text: `משוב פורסם עבור ${nameOf(f.repId)}` });
+        toast.success("המשוב פורסם והנציג קיבל התראה");
+      } else {
+        toast.info("המשוב כבר היה מפורסם — לא נשלחה התראה נוספת");
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPublishingId(null);
+    }
+  };
+  const retract = async (id: string, reason: string) => {
+    setPublishingId(id);
+    try {
+      const res = await actions.setPublished({ id, published: false, reason });
+      toast[res.changed ? "success" : "info"](
+        res.changed ? "פרסום המשוב בוטל והוא אינו גלוי לנציג" : "המשוב כבר היה בסטטוס טיוטה",
+      );
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPublishingId(null);
+    }
   };
 
   return (
@@ -247,22 +296,22 @@ function ListeningCenter() {
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-4 space-y-4">
-            <DashboardTab openNewFor={openNewFor} onOpenSchedule={() => setOpenSchedule(true)} onView={setView} />
+            <DashboardTab reps={scopedReps} feedback={feedbackList} openNewFor={openNewFor} onOpenSchedule={() => setOpenSchedule(true)} onView={setView} />
           </TabsContent>
           <TabsContent value="queue" className="mt-4">
-            <QueueTab openNewFor={openNewFor} />
+            <QueueTab reps={scopedReps} feedback={feedbackList} openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="analysis" className="mt-4 space-y-4">
-            <AnalysisTab />
+            <AnalysisTab reps={scopedReps} feedback={feedbackList} />
           </TabsContent>
           <TabsContent value="heatmap" className="mt-4">
-            <HeatMapTab openNewFor={openNewFor} />
+            <HeatMapTab reps={scopedReps} feedback={feedbackList} openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="coaching" className="mt-4">
-            <CoachingTab openNewFor={openNewFor} />
+            <CoachingTab reps={scopedReps} feedback={feedbackList} openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="calendar" className="mt-4">
-            <CalendarTab openNewFor={openNewFor} />
+            <CalendarTab reps={scopedReps} openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="history" className="mt-4">
             <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} isLoading={state.feedbackLoading} isError={!!state.feedbackError} />
@@ -299,8 +348,10 @@ function ListeningCenter() {
             <FeedbackView
               f={viewed}
               isManager={isManager}
+              busy={publishingId === viewed.id}
               onEdit={() => openEditFor(viewed.id)}
               onPublish={() => publish(viewed.id)}
+              onRetract={(reason) => retract(viewed.id, reason)}
             />
           )}
         </DialogContent>
@@ -309,22 +360,46 @@ function ListeningCenter() {
   );
 }
 
+/**
+ * §P2 manager-analytics draft consistency.
+ *
+ * Every manager-facing aggregate on this page (weekly counts, averages, radar,
+ * heat map, coaching queue) counts DRAFT evaluations alongside published ones.
+ * That is the correct rule — the listening happened and the manager's own
+ * assessment exists, so excluding it would understate real coaching activity
+ * and would make a manager's "בוצעו השבוע" disagree with their own history
+ * table. What was missing was saying so: the same figure meant two different
+ * things depending on which screen you read it from, with nothing on screen to
+ * tell you which. One rule, stated wherever it applies.
+ */
+function DraftInclusionNote({ list, className }: { list: Feedback[]; className?: string }) {
+  const drafts = countDrafts(list);
+  if (drafts === 0) return null;
+  return (
+    <span className={cn("text-xs text-muted-foreground", className)}>
+      כולל {drafts} טיוטות שטרם פורסמו לנציגים
+    </span>
+  );
+}
+
 // -------------------- Dashboard tab --------------------
-function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
+function DashboardTab({ reps, feedback, openNewFor, onOpenSchedule, onView }: {
+  reps: Rep[];
+  feedback: Feedback[];
   openNewFor: (repId?: string) => void;
   onOpenSchedule: () => void;
   onView: (id: string) => void;
 }) {
-  const { state } = useApp();
   const { schedules } = useListening();
+  const repIdSet = useMemo(() => new Set(reps.map((r) => r.id)), [reps]);
   const now = Date.now();
   const weekAgo = now - 7 * 86400000;
   const monthAgo = now - 30 * 86400000;
   const prevMonthAgo = now - 60 * 86400000;
 
-  const thisWeek = state.feedback.filter((f) => new Date(f.date).getTime() >= weekAgo);
-  const thisMonth = state.feedback.filter((f) => new Date(f.date).getTime() >= monthAgo);
-  const prevMonth = state.feedback.filter((f) => {
+  const thisWeek = feedback.filter((f) => new Date(f.date).getTime() >= weekAgo);
+  const thisMonth = feedback.filter((f) => new Date(f.date).getTime() >= monthAgo);
+  const prevMonth = feedback.filter((f) => {
     const t = new Date(f.date).getTime();
     return t >= prevMonthAgo && t < monthAgo;
   });
@@ -335,9 +410,12 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
   const improvement = avgPrev > 0 ? Math.round(((avgMonth - avgPrev) / avgPrev) * 100) : 0;
 
   const repIdsHeardThisWeek = new Set(thisWeek.map((f) => f.repId));
-  const notHeardThisWeek = state.reps.filter((r) => !repIdsHeardThisWeek.has(r.id));
+  const notHeardThisWeek = reps.filter((r) => !repIdsHeardThisWeek.has(r.id));
+  // Scoped to the same representatives as every other figure here — the
+  // listening store is scoped to everything the manager can manage, which for
+  // a multi-team manager is wider than the selected workspace team.
   const plannedThisWeek = schedules.filter((s) =>
-    s.status === "planned" && new Date(s.date).getTime() >= now
+    s.status === "planned" && repIdSet.has(s.repId) && new Date(s.date).getTime() >= now
   );
 
   // Trend last 6 weeks
@@ -346,7 +424,7 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
     for (let i = 5; i >= 0; i--) {
       const to = now - i * 7 * 86400000;
       const from = to - 7 * 86400000;
-      const list = state.feedback.filter((f) => {
+      const list = feedback.filter((f) => {
         const t = new Date(f.date).getTime();
         return t >= from && t < to;
       });
@@ -358,12 +436,12 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
       });
     }
     return points;
-  }, [state.feedback, now]);
+  }, [feedback, now]);
 
-  const criticalAlerts = state.reps
+  const criticalAlerts = reps
     .map((r) => {
-      const last = lastFeedbackFor(state.feedback, r.id);
-      const avg = avgScoreFor(state.feedback, r.id);
+      const last = lastFeedbackFor(feedback, r.id);
+      const avg = avgScoreFor(feedback, r.id);
       return { r, last, avg, days: last ? daysSince(last.date) : 999 };
     })
     .filter((x) => (x.last && x.avg < 60) || x.days > 14)
@@ -372,14 +450,14 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MiniKpi icon={Headphones} label="בוצעו השבוע" value={String(thisWeek.length)} sub={`${state.feedback.length} סה"כ`} />
+        <MiniKpi icon={Headphones} label="בוצעו השבוע" value={String(thisWeek.length)} sub={`${feedback.length} סה"כ`} />
         <MiniKpi icon={CalendarIcon} label="מתוכננות" value={String(plannedThisWeek.length)} sub="ביומן ההאזנות" />
         <MiniKpi
           icon={Users}
           label="ללא האזנה השבוע"
           value={String(notHeardThisWeek.length)}
-          sub={`מתוך ${state.reps.length} נציגים`}
-          tone={notHeardThisWeek.length > state.reps.length / 2 ? "danger" : undefined}
+          sub={`מתוך ${reps.length} נציגים`}
+          tone={notHeardThisWeek.length > reps.length / 2 ? "danger" : undefined}
         />
         <MiniKpi
           icon={Award}
@@ -397,7 +475,10 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
               <TrendingUp className="h-4 w-4 text-primary" />
               מגמת ציון איכות - 6 שבועות אחרונים
             </CardTitle>
-            <Badge variant="outline">ממוצע שבועי</Badge>
+            <div className="flex items-center gap-2">
+              <DraftInclusionNote list={feedback} />
+              <Badge variant="outline">ממוצע שבועי</Badge>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="h-64 w-full" dir="ltr">
@@ -446,14 +527,13 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
         </Card>
       </div>
 
-      <RecentSessions list={state.feedback.slice(0, 5)} onView={onView} />
+      <RecentSessions list={feedback.slice(0, 5)} reps={reps} onView={onView} />
     </>
   );
 }
 
-function RecentSessions({ list, onView }: { list: Feedback[]; onView: (id: string) => void }) {
-  const { state } = useApp();
-  const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
+function RecentSessions({ list, reps, onView }: { list: Feedback[]; reps: Rep[]; onView: (id: string) => void }) {
+  const nameOf = (id: string) => reps.find((r) => r.id === id)?.name ?? "—";
   return (
     <Card>
       <CardHeader>
@@ -472,7 +552,10 @@ function RecentSessions({ list, onView }: { list: Feedback[]; onView: (id: strin
                     SCORE_BADGE_CLASS[scoreTone(f.score)]
                   )}>{f.score}</div>
                   <div className="min-w-0 flex-1 text-start">
-                    <div className="font-medium text-sm">{nameOf(f.repId)} <span className="text-muted-foreground font-normal">· {f.callType}</span></div>
+                    <div className="font-medium text-sm flex items-center gap-1.5">
+                      <span>{nameOf(f.repId)} <span className="text-muted-foreground font-normal">· {f.callType}</span></span>
+                      {!f.published && <Badge variant="outline" className="text-[10px] py-0">טיוטה</Badge>}
+                    </div>
                     <div className="text-xs text-muted-foreground mt-0.5 truncate">{f.managerSummary || f.keep || "—"}</div>
                   </div>
                   <div className="text-xs text-muted-foreground shrink-0">{formatDateIL(f.date)}</div>
@@ -487,34 +570,34 @@ function RecentSessions({ list, onView }: { list: Feedback[]; onView: (id: strin
 }
 
 // -------------------- Queue tab --------------------
-function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
-  const { state } = useApp();
+function QueueTab({ reps, feedback, openNewFor }: {
+  reps: Rep[]; feedback: Feedback[]; openNewFor: (repId?: string) => void;
+}) {
   const { open: openRepWorkspace } = useRepWorkspace();
   // Official monthly target (representative_goals) — the sole source of
   // truth for "עמידה ביעד" here too (§19), never the legacy
   // rep.monthlyTarget column.
-  const repIds = useMemo(() => state.reps.map((r) => r.id), [state.reps]);
+  const repIds = useMemo(() => reps.map((r) => r.id), [reps]);
   const { goalsByRepId } = useRepresentativeGoals(repIds, currentGoalMonth());
 
   const ranked = useMemo(() => {
-    return state.reps.map((r) => {
-      const last = lastFeedbackFor(state.feedback, r.id);
-      const days = last ? daysSince(last.date) : 30;
-      const avg = avgScoreFor(state.feedback, r.id);
+    return reps.map((r) => {
+      const last = lastFeedbackFor(feedback, r.id);
+      const days = last ? daysSince(last.date) : null;
+      const repFeedback = feedback.filter((f) => f.repId === r.id);
+      // null, not 0, when there is nothing to average — the two mean very
+      // different things and the old code conflated them (see
+      // computeQueuePriority).
+      const avg = repFeedback.length > 0 ? avgScoreFor(feedback, r.id) : null;
       const target = goalsByRepId.get(r.id) ?? null;
       const pct = target === null ? null : calculateAchievement(r.currentResult, target);
-      // Priority score (higher = more urgent)
-      let priority = 0;
-      priority += Math.min(days, 30);            // time since last
-      if (avg && avg < 60) priority += 30;       // low quality
-      else if (avg && avg < 75) priority += 15;
-      if (pct !== null && pct < 80) priority += 20; // performance decline proxy — never fabricated when target is unset
-      if (!last) priority += 25;
-      const level: "high" | "medium" | "low" =
-        priority >= 45 ? "high" : priority >= 25 ? "medium" : "low";
-      return { r, last, days, avg, pct, priority, level };
+      // §P2: the ranking rule now lives in feedback-domain.ts, pure and
+      // unit-tested. It no longer double-counts "never listened to" as both a
+      // synthetic 30-day gap and a separate +25 bonus.
+      const priority = computeQueuePriority({ daysSinceLast: days, avgScore: avg, achievementPct: pct });
+      return { r, last, days, avg, pct, priority, level: queuePriorityLevel(priority) };
     }).sort((a, b) => b.priority - a.priority);
-  }, [state.reps, state.feedback, goalsByRepId]);
+  }, [reps, feedback, goalsByRepId]);
 
   return (
     <Card>
@@ -523,7 +606,10 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
           <Flame className="h-4 w-4 text-primary" />
           תור האזנות מומלץ
         </CardTitle>
-        <Badge variant="outline">ממוין לפי דחיפות</Badge>
+        <div className="flex items-center gap-2">
+          <DraftInclusionNote list={feedback} />
+          <Badge variant="outline">ממוין לפי דחיפות</Badge>
+        </div>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
@@ -546,15 +632,15 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                   <TableCell><PriorityBadge level={level} /></TableCell>
                   <TableCell className="font-medium">{r.name}</TableCell>
                   <TableCell><Badge variant="secondary">{r.teamName}</Badge></TableCell>
-                  <TableCell className="text-sm">{last ? `${formatDateIL(last.date)} · לפני ${days} ימים` : "טרם בוצע"}</TableCell>
+                  <TableCell className="text-sm">{last && days !== null ? `${formatDateIL(last.date)} · לפני ${days} ימים` : "טרם בוצע"}</TableCell>
                   <TableCell>
-                    <span className={cn("font-bold",
-                      avg >= 80 ? "text-success-foreground" : avg >= 60 ? "text-warning-foreground" : "text-primary"
-                    )}>{avg || "—"}</span>
+                    {avg === null
+                      ? <span className="text-muted-foreground">—</span>
+                      : <span className={cn("font-bold", SCORE_TEXT_CLASS[scoreTone(avg)])}>{avg}</span>}
                   </TableCell>
                   <TableCell className="text-sm">{pct === null ? <span className="text-muted-foreground">לא הוגדר יעד</span> : `${Math.round(pct)}%`}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {reasonFor(level, days, avg, pct, !!last)}
+                    {reasonFor(level, days, avg, pct)}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Button size="sm" variant="outline" onClick={() => openNewFor(r.id)}>
@@ -571,11 +657,13 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
   );
 }
 
-function reasonFor(level: string, days: number, avg: number, pct: number | null, hasAny: boolean) {
+// Mirrors computeQueuePriority's inputs exactly, so the stated reason can
+// never describe a different rule than the one that produced the ranking.
+function reasonFor(level: string, days: number | null, avg: number | null, pct: number | null) {
   const reasons: string[] = [];
-  if (!hasAny) reasons.push("ללא היסטוריה");
+  if (days === null) reasons.push("ללא היסטוריה");
   else if (days > 14) reasons.push(`${days} ימים ללא האזנה`);
-  if (avg && avg < 60) reasons.push("ציון נמוך");
+  if (avg !== null && avg < 60) reasons.push("ציון נמוך");
   if (pct === null) reasons.push("לא הוגדר יעד אישי");
   else if (pct < 80) reasons.push("ירידה בביצוע");
   return reasons.join(" · ") || (level === "low" ? "מעקב שגרתי" : "—");
@@ -592,11 +680,11 @@ function PriorityBadge({ level }: { level: "high" | "medium" | "low" }) {
 }
 
 // -------------------- Analysis tab (Radar + strengths/weaknesses) --------------------
-function AnalysisTab() {
+function AnalysisTab({ reps, feedback }: { reps: Rep[]; feedback: Feedback[] }) {
   const { state } = useApp();
   const [repId, setRepId] = useState<string>("__all__");
 
-  const list = repId === "__all__" ? state.feedback : state.feedback.filter((f) => f.repId === repId);
+  const list = repId === "__all__" ? feedback : feedback.filter((f) => f.repId === repId);
 
   const sectionAverages = SECTIONS.map((s) => {
     const nums = list.map((f) => sectionScoreFor(f, s.key)).filter((n): n is number => n !== null);
@@ -629,15 +717,16 @@ function AnalysisTab() {
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Label className="text-sm">היקף:</Label>
         <Select value={repId} onValueChange={setRepId}>
           <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">כלל הצוות</SelectItem>
-            {state.reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            {reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <DraftInclusionNote list={list} />
       </div>
 
       {list.length === 0 ? (
@@ -743,10 +832,11 @@ function AnalysisTab() {
 }
 
 // -------------------- Heat map --------------------
-function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
-  const { state } = useApp();
+function HeatMapTab({ reps, feedback, openNewFor }: {
+  reps: Rep[]; feedback: Feedback[]; openNewFor: (repId?: string) => void;
+}) {
   const cell = (repId: string, section: SectionKey) => {
-    const list = state.feedback.filter((f) => f.repId === repId);
+    const list = feedback.filter((f) => f.repId === repId);
     const nums = list.map((f) => sectionScoreFor(f, section)).filter((n): n is number => n !== null);
     return nums.length ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length) : null;
   };
@@ -764,6 +854,7 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
           <Grid3x3 className="h-4 w-4 text-primary" />
           מפת חום צוותית - איכות שיחות לפי נציג וסעיף
         </CardTitle>
+        <DraftInclusionNote list={feedback} />
       </CardHeader>
       <CardContent>
         <Table className="text-xs">
@@ -776,7 +867,7 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {state.reps.map((r) => (
+            {reps.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium whitespace-nowrap">
                   <button onClick={() => openNewFor(r.id)} className="hover:underline text-start">{r.name}</button>
@@ -807,12 +898,27 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
 }
 
 // -------------------- Coaching plan --------------------
-function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
+function CoachingTab({ reps, feedback, openNewFor }: {
+  reps: Rep[]; feedback: Feedback[]; openNewFor: (repId?: string) => void;
+}) {
   const { state } = useApp();
-  const [repId, setRepId] = useState<string>(state.reps[0]?.id ?? "");
+  const actions = useFeedbackActions();
+  const [repId, setRepId] = useState<string>(reps[0]?.id ?? "");
+  const [planOpen, setPlanOpen] = useState(false);
+  const [assignArticle, setAssignArticle] = useState<Article | null>(null);
+  const repIds = useMemo(() => reps.map((r) => r.id), [reps]);
+  const { byRepId: plansByRep, isLoading: plansLoading } = useCoachingPlans(repIds);
 
-  const rep = state.reps.find((r) => r.id === repId);
-  const list = state.feedback.filter((f) => f.repId === repId);
+  // The selected representative must always be one that is actually in scope —
+  // switching the workspace team used to leave a rep from the other team
+  // selected, showing their plan under the new team's heading.
+  useEffect(() => {
+    if (reps.length > 0 && !reps.some((r) => r.id === repId)) setRepId(reps[0].id);
+  }, [reps, repId]);
+
+  const rep = reps.find((r) => r.id === repId);
+  const list = feedback.filter((f) => f.repId === repId);
+  const plan = plansByRep.get(repId) ?? null;
 
   const sectionAvgs = SECTIONS.map((s) => {
     const nums = list.map((f) => sectionScoreFor(f, s.key)).filter((n): n is number => n !== null);
@@ -820,15 +926,24 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
   });
   const withData = sectionAvgs.filter((s) => s.avg !== null) as { section: typeof SECTIONS[number]; avg: number }[];
   const weakest = [...withData].sort((a, b) => a.avg - b.avg).slice(0, 3);
-  const currentAvg = avgScoreFor(state.feedback, repId);
+  const currentAvg = avgScoreFor(feedback, repId);
 
-  const nextTargetScore = Math.min(100, currentAvg + 10);
-  const last = lastFeedbackFor(state.feedback, repId);
-  const daysGap = last ? daysSince(last.date) : 30;
+  const last = lastFeedbackFor(feedback, repId);
+  const daysGap = last ? daysSince(last.date) : null;
   const frequencyRec = currentAvg < 60 ? "פעמיים בשבוע" : currentAvg < 75 ? "שבועית" : "כל שבועיים";
 
-  const nextMeeting = new Date();
-  nextMeeting.setDate(nextMeeting.getDate() + (currentAvg < 60 ? 3 : 7));
+  // §P2 action-plan persistence. The target score and "next manager meeting"
+  // used to be recomputed on every render (currentAvg + 10, and today + 3 or 7
+  // days) and stored nowhere at all — reloading the page moved the meeting,
+  // and nothing was ever booked or followed up. These are now only SUGGESTED
+  // defaults for the save dialog; what the card displays is the plan that was
+  // actually agreed and stored, or an explicit "no plan yet".
+  const suggestedTarget = Math.min(100, currentAvg + 10);
+  const suggestedReviewOn = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + (currentAvg < 60 ? 3 : 7));
+    return d.toISOString().slice(0, 10);
+  }, [currentAvg]);
 
   // AI-style rule based summary
   const summary = useMemo(() => {
@@ -848,14 +963,15 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Label className="text-sm">נציג:</Label>
         <Select value={repId} onValueChange={setRepId}>
           <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {state.reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            {reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <DraftInclusionNote list={list} />
       </div>
 
       {rep && (
@@ -896,9 +1012,14 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                       <Badge variant="outline">ציון נוכחי: {w.avg}</Badge>
                     </div>
                     {article && (
-                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                        <BookOpen className="h-3.5 w-3.5" />
-                        מאמר מומלץ: {article.title}
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+                          <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">מאמר מומלץ: {article.title}</span>
+                        </div>
+                        <Button size="sm" variant="outline" className="shrink-0" onClick={() => setAssignArticle(article)}>
+                          הקצאה
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -908,35 +1029,252 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
             </Card>
 
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-primary" />
                   תוכנית פעולה
                 </CardTitle>
+                {plan
+                  ? <Badge variant="outline">עודכנה {formatDateIL(plan.updated_at.slice(0, 10))}</Badge>
+                  : <Badge variant="outline">טרם נקבעה</Badge>}
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
+                {/* Measured facts — always true, never stored. */}
                 <PlanRow label="ציון איכות נוכחי" value={String(currentAvg || "—")} />
-                <PlanRow label="יעד ציון לחודש הבא" value={String(nextTargetScore)} tone="success" />
                 <PlanRow label="תדירות האזנה מומלצת" value={frequencyRec} />
-                <PlanRow label="פגישת מנהל הבאה" value={formatDateIL(nextMeeting)} />
-                <PlanRow label="ימים מהאזנה אחרונה" value={last ? String(daysGap) : "טרם בוצע"} tone={daysGap > 14 ? "danger" : undefined} />
-                <div className="pt-2 flex gap-2">
+                <PlanRow
+                  label="ימים מהאזנה אחרונה"
+                  value={daysGap === null ? "טרם בוצע" : String(daysGap)}
+                  tone={daysGap !== null && daysGap > 14 ? "danger" : undefined}
+                />
+
+                {/* Agreed plan — stored, or honestly absent. */}
+                {plansLoading ? (
+                  <div className="h-20 animate-pulse rounded-lg bg-muted" />
+                ) : plan ? (
+                  <>
+                    <PlanRow label="יעד ציון מוסכם" value={String(plan.target_score)} tone="success" />
+                    <PlanRow label="פגישת סקירה" value={formatDateIL(plan.review_on)} />
+                    {plan.review_schedule_id && (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <CalendarIcon className="h-3.5 w-3.5" />הפגישה משובצת ביומן ההאזנות
+                      </div>
+                    )}
+                    {plan.focus_sections && <PlanRow label="מוקדי שיפור" value={plan.focus_sections} />}
+                    {plan.notes && (
+                      <p className="text-xs rounded-lg bg-secondary p-2.5 whitespace-pre-wrap">{plan.notes}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                    טרם נקבעה תוכנית אימון ל{rep.name}. קביעת יעד ותאריך סקירה תישמר ותהיה זמינה גם לנציג.
+                  </p>
+                )}
+
+                <div className="pt-2 flex flex-wrap gap-2">
                   <Button size="sm" onClick={() => openNewFor(rep.id)}>
                     <Headphones className="ms-1 h-3.5 w-3.5" />פתיחת האזנה
                   </Button>
-                  <Button size="sm" variant="outline">
-                    <Award className="ms-1 h-3.5 w-3.5" />הקצאת מאמר
+                  <Button size="sm" variant="outline" onClick={() => setPlanOpen(true)} disabled={!actions.canPersistCoaching}>
+                    <Target className="ms-1 h-3.5 w-3.5" />{plan ? "עדכון תוכנית" : "קביעת תוכנית"}
                   </Button>
                 </div>
+                {!actions.canPersistCoaching && (
+                  <p className="text-xs text-muted-foreground">
+                    שמירת תוכנית אימון והקצאת מאמרים זמינות במצב מחובר בלבד — במצב הדגמה אין נתונים לשמור אליהם.
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
 
           <QualityHistoryChart list={list} />
           <RepBadges list={list} currentAvg={currentAvg} />
+
+          <CoachingPlanDialog
+            open={planOpen}
+            onOpenChange={setPlanOpen}
+            rep={rep}
+            plan={plan}
+            suggestedTarget={suggestedTarget}
+            suggestedReviewOn={suggestedReviewOn}
+            suggestedFocus={weakest.map((w) => w.section.label).join(", ")}
+          />
+          <AssignArticleDialog
+            article={assignArticle}
+            rep={rep}
+            onClose={() => setAssignArticle(null)}
+          />
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * §P2 article assignment. The "הקצאת מאמר" button had no onClick handler at
+ * all — a manager could press it for every representative and nothing was ever
+ * written, no task appeared and no representative was ever told to read
+ * anything. It now creates a real task and notifies the representative, and
+ * reports honestly when the rep has no linked login to notify.
+ */
+function AssignArticleDialog({ article, rep, onClose }: {
+  article: Article | null; rep: Rep; onClose: () => void;
+}) {
+  const actions = useFeedbackActions();
+  const [dueOn, setDueOn] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (article) setDueOn(""); }, [article]);
+
+  const submit = async () => {
+    if (!article) return;
+    setSaving(true);
+    try {
+      const res = await actions.assignArticle({ repId: rep.id, articleId: article.id, dueOn: dueOn || null });
+      toast.success(
+        res.representative_notified
+          ? `המאמר הוקצה ל${rep.name} ונשלחה לו התראה`
+          : `המאמר הוקצה ל${rep.name}. לנציג אין חשבון כניסה מקושר, ולכן לא נשלחה התראה.`,
+      );
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!article} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md" dir="rtl">
+        <DialogHeader><DialogTitle>הקצאת מאמר ל{rep.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-lg border p-3">
+            <div className="font-semibold">{article?.title}</div>
+            <div className="text-xs text-muted-foreground mt-1">{article?.summary}</div>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            תיווצר משימה אישית לנציג ברשימת המשימות שלו, והוא יקבל התראה במערכת.
+          </p>
+          <div className="space-y-1">
+            <Label>תאריך יעד (אופציונלי)</Label>
+            <Input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>ביטול</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? "מקצה..." : "הקצאה"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * §P2 action-plan persistence. Saves the agreed target and review date to
+ * coaching_plans, and optionally books the review as a real listening session
+ * so the follow-up actually appears on the calendar.
+ */
+function CoachingPlanDialog({ open, onOpenChange, rep, plan, suggestedTarget, suggestedReviewOn, suggestedFocus }: {
+  open: boolean; onOpenChange: (v: boolean) => void; rep: Rep;
+  plan: { target_score: number; review_on: string; focus_sections: string; notes: string; review_schedule_id: string | null } | null;
+  suggestedTarget: number; suggestedReviewOn: string; suggestedFocus: string;
+}) {
+  const actions = useFeedbackActions();
+  const [target, setTarget] = useState(String(suggestedTarget));
+  const [reviewOn, setReviewOn] = useState(suggestedReviewOn);
+  const [focus, setFocus] = useState(suggestedFocus);
+  const [notes, setNotes] = useState("");
+  const [bookReview, setBookReview] = useState(false);
+  const [reviewTime, setReviewTime] = useState("10:00");
+  const [saving, setSaving] = useState(false);
+
+  // Reload from the stored plan (or from the suggestions when there is none)
+  // every time the dialog opens for a representative.
+  useEffect(() => {
+    if (!open) return;
+    setTarget(String(plan?.target_score ?? suggestedTarget));
+    setReviewOn(plan?.review_on ?? suggestedReviewOn);
+    setFocus(plan?.focus_sections ?? suggestedFocus);
+    setNotes(plan?.notes ?? "");
+    setBookReview(false);
+  }, [open, plan, suggestedTarget, suggestedReviewOn, suggestedFocus]);
+
+  const submit = async () => {
+    const t = Number(target);
+    if (!Number.isFinite(t) || t < 0 || t > 100) return toast.error("יעד הציון חייב להיות בין 0 ל-100");
+    if (!reviewOn) return toast.error("יש לבחור תאריך פגישת סקירה");
+    setSaving(true);
+    try {
+      const res = await actions.saveCoachingPlan({
+        repId: rep.id,
+        targetScore: Math.round(t),
+        reviewOn,
+        focusSections: focus,
+        notes,
+        bookReview,
+        reviewTime,
+      });
+      // Honest partial result: the plan is saved either way, but the caller is
+      // never told a meeting was booked when it wasn't.
+      if (bookReview && !res.review_booked) {
+        toast.warning(`תוכנית האימון נשמרה, אך שיבוץ הפגישה ביומן נכשל: ${res.review_booking_error ?? "שגיאה לא ידועה"}`);
+      } else if (res.review_booked) {
+        toast.success("תוכנית האימון נשמרה והפגישה שובצה ביומן ההאזנות");
+      } else {
+        toast.success("תוכנית האימון נשמרה");
+      }
+      onOpenChange(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md" dir="rtl">
+        <DialogHeader><DialogTitle>תוכנית אימון — {rep.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>יעד ציון איכות</Label>
+              <Input type="number" min={0} max={100} value={target} onChange={(e) => setTarget(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>תאריך פגישת סקירה</Label>
+              <Input type="date" value={reviewOn} onChange={(e) => setReviewOn(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>מוקדי שיפור</Label>
+            <Input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="למשל: טיפול בהתנגדויות, סיכום וסגירה" />
+          </div>
+          <div className="space-y-1">
+            <Label>הערות למעקב</Label>
+            <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+          <label className="flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer">
+            <Checkbox checked={bookReview} onCheckedChange={(v) => setBookReview(!!v)} />
+            <span className="flex-1">שיבוץ פגישת הסקירה ביומן ההאזנות</span>
+            {bookReview && (
+              <Input type="time" className="w-28" value={reviewTime} onChange={(e) => setReviewTime(e.target.value)} />
+            )}
+          </label>
+          {plan?.review_schedule_id && (
+            <p className="text-xs text-muted-foreground">
+              לתוכנית הקיימת כבר משובצת פגישה ביומן. סימון האפשרות למעלה ישבץ פגישה נוספת.
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>ביטול</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? "שומר..." : "שמירת תוכנית"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1020,10 +1358,47 @@ function RepBadges({ list, currentAvg }: { list: Feedback[]; currentAvg: number 
 }
 
 // -------------------- Calendar tab --------------------
-function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?: string) => void }) {
-  const { state } = useApp();
-  const { schedules, updateSchedule, removeSchedule, isLoading, isError } = useListening();
-  const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
+function CalendarTab({ reps, openNewFor }: {
+  reps: Rep[]; openNewFor: (repId?: string, scheduleId?: string) => void;
+}) {
+  const { schedules: allSchedules, isLoading, isError } = useListening();
+  const actions = useFeedbackActions();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const nameOf = (id: string) => reps.find((r) => r.id === id)?.name ?? "—";
+
+  // Same workspace scope as every other tab (§P2). The listening store is
+  // scoped to every representative the manager can manage, which for a
+  // multi-team manager is wider than the selected team.
+  const repIdSet = useMemo(() => new Set(reps.map((r) => r.id)), [reps]);
+  const schedules = useMemo(() => allSchedules.filter((s) => repIdSet.has(s.repId)), [allSchedules, repIdSet]);
+
+  // §P0: cancelling and deleting were `void cloud.update/remove(...)` — the row
+  // vanished from the UI on the next refetch whether or not the write landed,
+  // and a failure was never shown. Both are awaited now, and deleting a session
+  // that produced an evaluation is refused with an explanation instead of
+  // silently detaching that evaluation from the listening it came from.
+  const cancelSchedule = async (id: string) => {
+    setBusyId(id);
+    try {
+      await actions.updateSchedule({ id, status: "cancelled" });
+      toast.success("ההאזנה סומנה כמבוטלת");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const deleteSchedule = async (id: string) => {
+    setBusyId(id);
+    try {
+      await actions.deleteSchedule(id);
+      toast.success("רשומת ההאזנה נמחקה");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof schedules>();
@@ -1076,7 +1451,7 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
                             </Button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
-                                <Button size="icon" variant="ghost" aria-label={`ביטול ההאזנה עם ${nameOf(s.repId)}`}>
+                                <Button size="icon" variant="ghost" disabled={busyId === s.id} aria-label={`ביטול ההאזנה עם ${nameOf(s.repId)}`}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </AlertDialogTrigger>
@@ -1089,7 +1464,7 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>חזרה</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => updateSchedule(s.id, { status: "cancelled" })}>
+                                  <AlertDialogAction onClick={() => void cancelSchedule(s.id)}>
                                     ביטול ההאזנה
                                   </AlertDialogAction>
                                 </AlertDialogFooter>
@@ -1100,7 +1475,7 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
                         {s.status !== "planned" && (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button size="icon" variant="ghost" aria-label={`מחיקת רשומת ההאזנה עם ${nameOf(s.repId)}`}>
+                              <Button size="icon" variant="ghost" disabled={busyId === s.id} aria-label={`מחיקת רשומת ההאזנה עם ${nameOf(s.repId)}`}>
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </AlertDialogTrigger>
@@ -1109,11 +1484,12 @@ function CalendarTab({ openNewFor }: { openNewFor: (repId?: string, scheduleId?:
                                 <AlertDialogTitle>מחיקת רשומת ההאזנה?</AlertDialogTitle>
                                 <AlertDialogDescription>
                                   הפעולה תמחק לצמיתות את רשומת ההאזנה עם {nameOf(s.repId)} מתאריך {formatDateIL(s.date)}. לא ניתן לשחזר לאחר המחיקה.
+                                  {" "}האזנה שכבר תועד עבורה משוב אינה ניתנת למחיקה, כדי שהמשוב לא ינותק מההאזנה שיצרה אותו.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>ביטול</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => removeSchedule(s.id)}>מחיקה</AlertDialogAction>
+                                <AlertDialogAction onClick={() => void deleteSchedule(s.id)}>מחיקה</AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
@@ -1300,23 +1676,74 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: 
 }
 
 // -------------------- Feedback view (read-only) --------------------
-function FeedbackView({ f, isManager, onEdit, onPublish }: {
-  f: Feedback; isManager?: boolean; onEdit?: () => void; onPublish?: () => void;
+function FeedbackView({ f, isManager, busy, onEdit, onPublish, onRetract }: {
+  f: Feedback; isManager?: boolean; busy?: boolean;
+  onEdit?: () => void; onPublish?: () => void; onRetract?: (reason: string) => void;
 }) {
+  const [retractReason, setRetractReason] = useState("");
   return (
     <div className="space-y-4">
       {isManager && (
-        <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">סטטוס:</span>
-            {f.published
-              ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
-              : <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>}
+        <div className="rounded-xl border p-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">סטטוס:</span>
+              {f.published
+                ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
+                : <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>}
+              {f.published && f.publishedAt && (
+                <span className="text-xs text-muted-foreground">מאז {formatDateIL(f.publishedAt.slice(0, 10))}</span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {!f.published && onPublish && (
+                <Button size="sm" onClick={onPublish} disabled={busy}>{busy ? "מפרסם..." : "פרסום לנציג"}</Button>
+              )}
+              {/*
+                §P0: retraction is a material event — it hides something the
+                representative may already have read — so it requires a stated
+                reason, is recorded as a revision, and is never a silent toggle.
+              */}
+              {f.published && onRetract && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" variant="outline" disabled={busy}>ביטול פרסום</Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent dir="rtl">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>ביטול פרסום המשוב?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        המשוב יוסתר מהנציג, שייתכן שכבר קרא אותו. הסיבה תישמר בהיסטוריית השינויים של המשוב.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-1">
+                      <Label>סיבת ביטול הפרסום</Label>
+                      <Textarea rows={2} value={retractReason} onChange={(e) => setRetractReason(e.target.value)} />
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>חזרה</AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={!retractReason.trim()}
+                        onClick={() => { onRetract(retractReason.trim()); setRetractReason(""); }}
+                      >
+                        ביטול הפרסום
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+              {onEdit && (
+                <Button size="sm" variant="outline" onClick={onEdit}>
+                  {f.published ? "תיקון משוב שפורסם" : "עריכה"}
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="flex gap-2">
-            {!f.published && onPublish && <Button size="sm" onClick={onPublish}>פרסום לנציג</Button>}
-            {onEdit && <Button size="sm" variant="outline" onClick={onEdit}>עריכה</Button>}
-          </div>
+          {f.published && (
+            <p className="text-xs text-muted-foreground">
+              המשוב כבר גלוי לנציג. תיקון יחייב ציון סיבה, יישמר בהיסטוריית השינויים, והנציג יקבל התראה על העדכון.
+            </p>
+          )}
         </div>
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
@@ -1348,6 +1775,63 @@ function FeedbackView({ f, isManager, onEdit, onPublish }: {
       <TextBlock label="נקודות לשיפור" value={f.improve} />
       <TextBlock label="סיכום מנהל" value={f.managerSummary} />
       <TextBlock label="משימה להמשך" value={f.nextTask} />
+      <RevisionHistory feedbackId={f.id} />
+    </div>
+  );
+}
+
+/**
+ * The change history of one evaluation. This is the visible half of the
+ * feedback_revisions table: before this sprint a published evaluation could be
+ * rewritten with no record at all, so nobody could answer "what did this say
+ * when the representative read it". Read-only, and scoped by RLS to exactly
+ * whoever may read the parent evaluation — so a representative sees the
+ * history of their own published feedback too.
+ */
+function RevisionHistory({ feedbackId }: { feedbackId: string }) {
+  const { isDemo } = useAppMode();
+  const listRevisions = useServerFn(listFeedbackRevisions);
+  const [revisions, setRevisions] = useState<FeedbackRevision[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isDemo) return;
+    let cancelled = false;
+    setRevisions(null);
+    setError(null);
+    listRevisions({ data: { feedback_id: feedbackId } })
+      .then((res) => { if (!cancelled) setRevisions(res.revisions); })
+      .catch((e: Error) => { if (!cancelled) setError(e.message); });
+    return () => { cancelled = true; };
+  }, [feedbackId, isDemo, listRevisions]);
+
+  if (isDemo) return null;
+  if (error) {
+    return <p className="text-xs text-destructive">שגיאה בטעינת היסטוריית השינויים: {error}</p>;
+  }
+  if (revisions === null) return <div className="h-8 animate-pulse rounded-lg bg-muted" />;
+  if (revisions.length === 0) return null;
+
+  return (
+    <div>
+      <div className="text-sm font-semibold mb-1">היסטוריית שינויים ({revisions.length})</div>
+      <ul className="space-y-1.5">
+        {revisions.map((r) => (
+          <li key={r.id} className="rounded-lg border p-2.5 text-xs">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-muted-foreground">
+                {formatDateIL(r.created_at.slice(0, 10))}
+                {r.changed_by_name ? ` · ${r.changed_by_name}` : ""}
+              </span>
+              {r.was_published_at_change && (
+                <Badge variant="outline" className="text-[10px] py-0">שינוי במשוב שכבר פורסם</Badge>
+              )}
+            </div>
+            <div className="mt-1">ציון קודם: <span className="font-semibold">{r.previous_score}</span></div>
+            {r.reason && <div className="mt-0.5 text-muted-foreground">סיבה: {r.reason}</div>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -1397,8 +1881,8 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
   open: boolean; onOpenChange: (v: boolean) => void; defaultRepId?: string;
   defaultScheduleId?: string; editing?: Feedback | null;
 }) {
-  const { state, addFeedback, updateFeedback } = useApp();
-  const { completeSchedule } = useListening();
+  const { state } = useApp();
+  const actions = useFeedbackActions();
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
   const initialRep = state.reps.find((r) => r.id === (editing?.repId ?? defaultRepId));
   const [teamId, setTeamId] = useState<string>(initialRep?.teamId ?? teamOptions[0]?.teamId ?? "");
@@ -1415,8 +1899,15 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
   const [improve, setImprove] = useState(editing?.improve ?? "");
   const [managerSummary, setManagerSummary] = useState(editing?.managerSummary ?? "");
   const [nextTask, setNextTask] = useState(editing?.nextTask ?? "");
+  // Required by the server when correcting a record the representative can
+  // already see; kept here so the requirement is visible before submitting
+  // rather than arriving as a rejection.
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const score = computeScore(criteria);
+  const dateIsFuture = isFutureFeedbackDate(date);
+  const needsCorrectionReason = !!editing?.published;
   const teamReps = state.reps.filter((r) => r.teamId === teamId);
 
   // Reload the form whenever a different feedback record is opened for editing, or a
@@ -1436,6 +1927,7 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
       setImprove(editing.improve);
       setManagerSummary(editing.managerSummary);
       setNextTask(editing.nextTask);
+      setCorrectionReason("");
     } else if (defaultRepId) {
       setRepId(defaultRepId);
       const r = state.reps.find((x) => x.id === defaultRepId);
@@ -1447,32 +1939,69 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
 
   const resetForm = () => {
     setCallId(""); setListener(""); setKeep(""); setImprove(""); setManagerSummary(""); setNextTask("");
+    setCorrectionReason("");
     setCriteria(Object.fromEntries(allKeys.map((k) => [k, "done"])) as Record<string, CriterionValue>);
   };
 
-  const submit = () => {
+  /**
+   * §P0: this used to call the fire-and-forget store writers and then show a
+   * success toast unconditionally, on the very next line — for BOTH the
+   * evaluation and (separately, unatomically) the completion of the listening
+   * session it came from. The manager was told the evaluation was saved
+   * whether or not either write landed. It is now one awaited call to one
+   * transactional server function, and the toast reports what actually
+   * happened, using the score the SERVER derived.
+   */
+  const submit = async () => {
     if (!repId) return toast.error("יש לבחור נציג");
     if (!callId.trim()) return toast.error("יש להזין מזהה שיחה");
     if (!listener.trim()) return toast.error("יש להזין שם מאזין");
-    if (editing) {
-      // Reassigning feedback to a different representative isn't supported here —
-      // the rep/team pickers are locked during edit (see JSX below).
-      updateFeedback(editing.id, {
-        date, callId: callId.trim(), callType,
-        listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
-      });
-      toast.success(`המשוב עודכן. ציון: ${score}`);
-    } else {
-      addFeedback({
-        repId, date, callId: callId.trim(), callType,
-        listener: listener.trim(), criteria, keep, improve, managerSummary, nextTask,
-        scheduleId: defaultScheduleId ?? null,
-      });
-      if (defaultScheduleId) completeSchedule(defaultScheduleId);
-      toast.success(`ההאזנה נשמרה כטיוטה (ציון: ${score}). יש לפרסם אותה כדי שתוצג לנציג.`);
+    // Client-side copy of the server rule, for immediate feedback only — the
+    // server is the enforcement point (assertFeedbackDateNotFuture).
+    if (dateIsFuture) return toast.error("לא ניתן לתעד משוב בתאריך עתידי");
+    if (needsCorrectionReason && !correctionReason.trim()) {
+      return toast.error("המשוב כבר פורסם לנציג — יש לציין סיבת תיקון");
     }
-    onOpenChange(false);
-    resetForm();
+
+    const fields = {
+      date, callId: callId.trim(), callType, listener: listener.trim(),
+      criteria, keep, improve, managerSummary, nextTask,
+    };
+    setSaving(true);
+    try {
+      if (editing) {
+        // Reassigning feedback to a different representative isn't supported here —
+        // the rep/team pickers are locked during edit (see JSX below).
+        const res = await actions.updateFeedback({
+          ...fields,
+          id: editing.id,
+          expectedUpdatedAt: editing.updatedAt || null,
+          reason: correctionReason.trim(),
+        });
+        toast.success(
+          res.wasPublished
+            ? `המשוב תוקן (ציון: ${res.score}). התיקון נשמר בהיסטוריית השינויים${res.representativeNotified ? " והנציג קיבל התראה" : ""}.`
+            : `המשוב עודכן. ציון: ${res.score}`,
+        );
+      } else {
+        const res = await actions.createFeedback({
+          ...fields,
+          repId,
+          scheduleId: defaultScheduleId ?? null,
+        });
+        toast.success(
+          res.scheduleCompleted
+            ? `ההאזנה נשמרה כטיוטה (ציון: ${res.score}) וההאזנה המתוזמנת סומנה כבוצעה. יש לפרסם את המשוב כדי שיוצג לנציג.`
+            : `ההאזנה נשמרה כטיוטה (ציון: ${res.score}). יש לפרסם אותה כדי שתוצג לנציג.`,
+        );
+      }
+      onOpenChange(false);
+      resetForm();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1505,7 +2034,13 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
                 </Select>
               )}
             </div>
-            <div className="space-y-1"><Label>תאריך ההאזנה</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+            <div className="space-y-1">
+              <Label>תאריך ההאזנה</Label>
+              <Input type="date" max={todayIsoDate()} value={date} onChange={(e) => setDate(e.target.value)} />
+              {dateIsFuture && (
+                <p className="text-xs text-destructive">משוב מתעד שיחה שכבר התקיימה — לא ניתן לבחור תאריך עתידי</p>
+              )}
+            </div>
             <div className="space-y-1"><Label>מזהה שיחה פנימי</Label><Input value={callId} onChange={(e) => setCallId(e.target.value)} placeholder="למשל: CAR-1234" /></div>
             <div className="space-y-1"><Label>סוג השיחה</Label>
               <Select value={callType} onValueChange={setCallType}>
@@ -1562,9 +2097,21 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
             <div className="space-y-1"><Label>משימה להמשך</Label><Textarea rows={3} value={nextTask} onChange={(e) => setNextTask(e.target.value)} /></div>
           </div>
 
+          {needsCorrectionReason && (
+            <div className="space-y-1 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <Label>סיבת התיקון (חובה)</Label>
+              <p className="text-xs text-muted-foreground">
+                המשוב כבר גלוי לנציג. הסיבה תישמר בהיסטוריית השינויים לצד הערכים הקודמים, והנציג יקבל התראה על העדכון.
+              </p>
+              <Textarea rows={2} value={correctionReason} onChange={(e) => setCorrectionReason(e.target.value)} />
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>ביטול</Button>
-            <Button onClick={submit}>{editing ? "עדכון משוב" : "שמירת האזנה"}</Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>ביטול</Button>
+            <Button onClick={submit} disabled={saving || dateIsFuture}>
+              {saving ? "שומר..." : editing ? "עדכון משוב" : "שמירת האזנה"}
+            </Button>
           </div>
         </div>
       </DialogContent>
@@ -1717,18 +2264,30 @@ function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenC
 // -------------------- Schedule dialog --------------------
 function ScheduleDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { state } = useApp();
-  const { addSchedule } = useListening();
+  const actions = useFeedbackActions();
   const [repId, setRepId] = useState<string>("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState("10:00");
   const [topic, setTopic] = useState("האזנה שבועית");
+  const [saving, setSaving] = useState(false);
 
-  const submit = () => {
+  // §P0: was `addSchedule(...)` (fire-and-forget) followed by an unconditional
+  // "ההאזנה נוספה ליומן". A rejected write left the calendar unchanged while
+  // the manager believed the session was booked.
+  const submit = async () => {
     if (!repId) return toast.error("יש לבחור נציג");
-    addSchedule({ repId, date, time, topic });
-    toast.success("ההאזנה נוספה ליומן");
-    onOpenChange(false);
-    setRepId("");
+    if (!topic.trim()) return toast.error("יש להזין נושא להאזנה");
+    setSaving(true);
+    try {
+      await actions.createSchedule({ repId, date, time, topic: topic.trim() });
+      toast.success("ההאזנה נוספה ליומן");
+      onOpenChange(false);
+      setRepId("");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1751,8 +2310,8 @@ function ScheduleDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
           <div className="space-y-1"><Label>נושא</Label><Input value={topic} onChange={(e) => setTopic(e.target.value)} /></div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>ביטול</Button>
-          <Button onClick={submit}>שמירה ליומן</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>ביטול</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? "שומר..." : "שמירה ליומן"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
