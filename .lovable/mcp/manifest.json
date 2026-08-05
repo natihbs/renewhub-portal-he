@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "sdk_version": "0.26.1",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://gtitpscdpbdvnmvdgrjv.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "remix-of-renewhub-dashboard",
+      "version": "0.1.0",
+      "title": "Remix of RenewHub Dashboard"
+    },
+    "tools": [
+      {
+        "name": "whoami",
+        "title": "Who am I",
+        "description": "Return the signed-in user's profile and application roles (admin, manager, representative).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_teams",
+        "title": "List teams",
+        "description": "List the sales teams the signed-in user is allowed to see.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_representatives",
+        "title": "List representatives",
+        "description": "List sales representatives visible to the signed-in user, with their monthly target and current result. Optionally filter by team.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "team_id": {
+              "description": "Only return representatives on this team.",
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "include_inactive": {
+              "description": "Include deactivated representatives (default false).",
+              "type": "boolean"
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_goals",
+        "title": "List monthly goals",
+        "description": "List monthly target goals for teams and representatives that the signed-in user may read. Optionally filter to a single month.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "goal_month": {
+              "description": "Month to filter on, as the first day of the month in YYYY-MM-DD form, e.g. 2026-08-01.",
+              "type": "string"
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_representative_goal",
+        "title": "Set a representative's monthly goal",
+        "description": "Create or update the monthly target for one representative. Only admins and the representative's manager are permitted; representatives cannot write targets.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "representative_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "The representative the goal belongs to."
+            },
+            "goal_month": {
+              "type": "string",
+              "description": "First day of the goal month in YYYY-MM-DD form, e.g. 2026-08-01."
+            },
+            "target_value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Monthly target value (must be zero or more)."
+            }
+          },
+          "required": [
+            "representative_id",
+            "goal_month",
+            "target_value"
+          ]
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
