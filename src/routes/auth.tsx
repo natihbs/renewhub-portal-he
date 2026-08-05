@@ -10,8 +10,20 @@ import { toast } from "sonner";
 import { PulseLogo } from "@/components/PulseLogo";
 import { APP_DESCRIPTOR, APP_TAGLINE } from "@/lib/app-meta";
 
+/** Only same-origin relative paths are accepted as a post-login redirect. */
+function safeNext(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (!value.startsWith("/") || value.startsWith("//")) return undefined;
+  return value;
+}
+
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  validateSearch: (s: Record<string, unknown>): { next?: string } => {
+    const next = safeNext(s.next);
+    return next ? { next } : {};
+  },
+
   head: () => ({
     meta: [
       { title: "התחברות · Pulse" },
@@ -22,6 +34,7 @@ export const Route = createFileRoute("/auth")({
   }),
   component: AuthPage,
 });
+
 
 /** Wide, ambient heartbeat trace for the desktop branded panel. Gently animated; respects reduced motion. */
 function HeartbeatVisual() {
@@ -42,16 +55,26 @@ function HeartbeatVisual() {
 
 function AuthPage() {
   const navigate = useNavigate();
+  const { next } = Route.useSearch();
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  function goAfterAuth() {
+    if (next) {
+      window.location.href = next;
+      return;
+    }
+    navigate({ to: "/" });
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/" });
+      if (data.session) goAfterAuth();
     });
-  }, [navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate, next]);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -62,8 +85,9 @@ function AuthPage() {
       toast.error(hebrewAuthError(error.message));
       return;
     }
-    navigate({ to: "/" });
+    goAfterAuth();
   }
+
 
   async function onForgot(e: React.FormEvent) {
     e.preventDefault();
