@@ -10,8 +10,16 @@ import { toast } from "sonner";
 import { PulseLogo } from "@/components/PulseLogo";
 import { APP_DESCRIPTOR, APP_TAGLINE } from "@/lib/app-meta";
 
+/** Only same-origin relative paths are accepted as a post-login redirect. */
+function safeNext(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (!value.startsWith("/") || value.startsWith("//")) return undefined;
+  return value;
+}
+
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  validateSearch: (s: Record<string, unknown>) => ({ next: safeNext(s.next) }),
   head: () => ({
     meta: [
       { title: "התחברות · Pulse" },
@@ -22,6 +30,7 @@ export const Route = createFileRoute("/auth")({
   }),
   component: AuthPage,
 });
+
 
 /** Wide, ambient heartbeat trace for the desktop branded panel. Gently animated; respects reduced motion. */
 function HeartbeatVisual() {
