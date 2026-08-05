@@ -529,7 +529,7 @@ function QueueTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
                   <TableCell className="text-sm">{last ? `${formatDateIL(last.date)} · לפני ${days} ימים` : "טרם בוצע"}</TableCell>
                   <TableCell>
                     <span className={cn("font-bold",
-                      avg >= 80 ? "text-[color:var(--success)]" : avg >= 60 ? "text-[color:var(--warning)]" : "text-primary"
+                      avg >= 80 ? "text-success-foreground" : avg >= 60 ? "text-warning-foreground" : "text-primary"
                     )}>{avg || "—"}</span>
                   </TableCell>
                   <TableCell className="text-sm">{pct === null ? <span className="text-muted-foreground">לא הוגדר יעד</span> : `${Math.round(pct)}%`}</TableCell>
@@ -564,8 +564,8 @@ function reasonFor(level: string, days: number, avg: number, pct: number | null,
 function PriorityBadge({ level }: { level: "high" | "medium" | "low" }) {
   const cfg = {
     high: { text: "גבוהה", cls: "bg-primary/15 text-primary" },
-    medium: { text: "בינונית", cls: "bg-[color:var(--warning)]/15 text-[color:var(--warning)]" },
-    low: { text: "נמוכה", cls: "bg-[color:var(--success)]/15 text-[color:var(--success)]" },
+    medium: { text: "בינונית", cls: "bg-[color:var(--warning)]/15 text-warning-foreground" },
+    low: { text: "נמוכה", cls: "bg-[color:var(--success)]/15 text-success-foreground" },
   } as const;
   const c = cfg[level];
   return <Badge className={cn("border-0", c.cls)}>{c.text}</Badge>;
@@ -658,7 +658,7 @@ function AnalysisTab() {
                 {strengths.map((s) => (
                   <div key={s.key} className="flex items-center justify-between rounded-lg border p-2">
                     <span className="text-sm font-medium">{s.section}</span>
-                    <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] border-0">{s.avg}</Badge>
+                    <Badge className="bg-[color:var(--success)]/15 text-success-foreground border-0">{s.avg}</Badge>
                   </div>
                 ))}
               </CardContent>
@@ -697,7 +697,7 @@ function AnalysisTab() {
                 improving.map((t) => (
                   <div key={t.label} className="flex items-center justify-between text-sm rounded-md border p-2">
                     <span>{t.label}</span>
-                    <span className="text-[color:var(--success)] font-semibold">+{t.delta}</span>
+                    <span className="text-success-foreground font-semibold">+{t.delta}</span>
                   </div>
                 ))
               }
@@ -732,8 +732,8 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
   };
   const bgFor = (v: number | null) => {
     if (v === null) return "bg-muted text-muted-foreground";
-    if (v >= 80) return "bg-[color:var(--success)]/20 text-[color:var(--success)]";
-    if (v >= 60) return "bg-[color:var(--warning)]/20 text-[color:var(--warning)]";
+    if (v >= 80) return "bg-[color:var(--success)]/20 text-success-foreground";
+    if (v >= 60) return "bg-[color:var(--warning)]/20 text-warning-foreground";
     return "bg-primary/15 text-primary";
   };
 
@@ -921,7 +921,7 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
 }
 
 function PlanRow({ label, value, tone }: { label: string; value: string; tone?: "success" | "danger" }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : "text-foreground";
   return (
     <div className="flex items-center justify-between rounded-lg border p-2.5">
       <span className="text-muted-foreground">{label}</span>
@@ -1263,7 +1263,7 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: 
                   </TableCell>
                   <TableCell>
                     {f.published
-                      ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
+                      ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
                       : <Badge variant="outline">טיוטה</Badge>}
                   </TableCell>
                   <TableCell>
@@ -1290,7 +1290,7 @@ function FeedbackView({ f, isManager, onEdit, onPublish }: {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">סטטוס:</span>
             {f.published
-              ? <Badge className="bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
+              ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם לנציג</Badge>
               : <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>}
           </div>
           <div className="flex gap-2">
@@ -1355,7 +1355,7 @@ function MiniKpi({ icon: Icon, label, value, sub, tone }: {
   label: string; value: string; sub?: string;
   tone?: "success" | "danger";
 }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : "text-foreground";
   return (
     <Card>
       <CardContent className="pt-5">

@@ -418,9 +418,9 @@ function KPICard({
   tone?: "success" | "warning" | "danger";
   trend?: { dir: "up" | "down"; text: string };
 }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-[color:var(--warning)]" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-warning-foreground" : "text-foreground";
   const TrendIcon = trend?.dir === "down" ? TrendingDown : TrendingUp;
-  const trendColor = trend?.dir === "up" ? "text-[color:var(--success)]" : "text-primary";
+  const trendColor = trend?.dir === "up" ? "text-success-foreground" : "text-primary";
   return (
     <Card className="card-interactive">
       <CardContent className="pt-5">
@@ -477,7 +477,7 @@ function TeamCard({ teamName, reps, teamTarget, kpiProfile, renewal }: {
           {hasTarget && pct !== null && (
             <Badge
               variant="secondary"
-              className={cn(onTrack ? "bg-[color:var(--success)]/10 text-[color:var(--success)]" : "bg-primary/10 text-primary")}
+              className={cn(onTrack ? "bg-[color:var(--success)]/10 text-success-foreground" : "bg-primary/10 text-primary")}
             >
               {formatPct(pct)}
             </Badge>

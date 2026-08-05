@@ -650,7 +650,7 @@ function DeleteDialog({
             <ul className="text-sm list-disc pe-5 space-y-1">
               {blockers.map((b) => <li key={b.label}>{b.label} — {b.count}</li>)}
             </ul>
-            <div className="rounded-lg border border-[color:var(--warning)]/30 bg-[color:var(--warning)]/10 p-3 text-sm text-[color:var(--warning-foreground)] flex items-center justify-between gap-3">
+            <div className="rounded-lg border border-[color:var(--warning)]/30 bg-[color:var(--warning)]/10 p-3 text-sm text-warning-foreground flex items-center justify-between gap-3">
               <div>מומלץ להשבית את הנציג במקום למחוק אותו לצמיתות — השבתה הפיכה ושומרת את כל ההיסטוריה.</div>
               <Button size="sm" variant="outline" className="shrink-0" onClick={onPreferDisable}>השבתה במקום</Button>
             </div>

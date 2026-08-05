@@ -161,8 +161,8 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
   const m = useMorning();
   const tone = m.refreshStatus === "complete" ? "success" : m.refreshStatus === "partial" ? "warning" : "danger";
   const toneClass =
-    tone === "success" ? "bg-[color:var(--success)]/10 text-[color:var(--success)] border-[color:var(--success)]/30" :
-    tone === "warning" ? "bg-[color:var(--warning)]/10 text-[color:var(--warning)] border-[color:var(--warning)]/30" :
+    tone === "success" ? "bg-[color:var(--success)]/10 text-success-foreground border-[color:var(--success)]/30" :
+    tone === "warning" ? "bg-[color:var(--warning)]/10 text-warning-foreground border-[color:var(--warning)]/30" :
     "bg-primary/10 text-primary border-primary/30";
   const label = m.refreshStatus === "complete" ? "הושלם" : m.refreshStatus === "partial" ? "חלקי" : "נכשל";
   const dotClass =
@@ -297,7 +297,7 @@ function AchievementCard({ achievementPct, change, hasTarget, totalResult }: {
           <div className="font-semibold">אחוז עמידה ביעד</div>
         </div>
         {change !== null && (
-          <Badge variant="outline" className={cn("gap-1", up ? "text-[color:var(--success)]" : "text-primary")}>
+          <Badge variant="outline" className={cn("gap-1", up ? "text-success-foreground" : "text-primary")}>
             {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
             {up ? "+" : ""}{change.toFixed(1)}%
           </Badge>
@@ -494,7 +494,7 @@ function StatusPill({ status }: { status: ManagerCall["status"] }) {
   const map = {
     planned: { label: "מתוכנן", cls: "bg-accent text-foreground" },
     overdue: { label: "באיחור", cls: "bg-primary/10 text-primary" },
-    completed: { label: "הושלם", cls: "bg-[color:var(--success)]/10 text-[color:var(--success)]" },
+    completed: { label: "הושלם", cls: "bg-[color:var(--success)]/10 text-success-foreground" },
   } as const;
   const m = map[status];
   return <Badge variant="secondary" className={m.cls}>{m.label}</Badge>;
@@ -637,7 +637,7 @@ function UnderwritingCard({ reps }: { reps: Rep[] }) {
 
 function useUwMeta(u: UnderwritingIssue, reps: Rep[]) {
   const rep = reps.find((r) => r.id === u.repId);
-  const priorityCls = u.priority === "high" ? "bg-primary/10 text-primary" : u.priority === "medium" ? "bg-[color:var(--warning)]/10 text-[color:var(--warning)]" : "bg-accent text-foreground";
+  const priorityCls = u.priority === "high" ? "bg-primary/10 text-primary" : u.priority === "medium" ? "bg-[color:var(--warning)]/10 text-warning-foreground" : "bg-accent text-foreground";
   const priorityLabel = UW_PRIORITIES.find((p) => p.value === u.priority)?.label;
   return { rep, priorityCls, priorityLabel };
 }
@@ -876,7 +876,7 @@ function ChecklistCard() {
 
 /* ============ Bits ============ */
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "success" | "danger" | "warning" }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-[color:var(--warning)]" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-warning-foreground" : "text-foreground";
   return (
     <div>
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -886,7 +886,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "su
 }
 
 function MiniStat({ label, value, tone }: { label: string; value: string; tone?: "success" | "danger" | "warning" }) {
-  const color = tone === "success" ? "text-[color:var(--success)]" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-[color:var(--warning)]" : "text-foreground";
+  const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-warning-foreground" : "text-foreground";
   return (
     <div className="rounded-lg border p-2 text-center bg-card">
       <div className="text-[11px] text-muted-foreground">{label}</div>

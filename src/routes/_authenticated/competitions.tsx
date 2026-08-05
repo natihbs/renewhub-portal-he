@@ -176,7 +176,7 @@ function ActiveCompetitionCard({ comp, onClose, isManager }: { comp: Competition
               <div key={cat.id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{cat.label}</div>
-                  <div className={`text-xs ${cat.points < 0 ? "text-primary" : "text-[color:var(--success)]"}`}>
+                  <div className={`text-xs ${cat.points < 0 ? "text-primary" : "text-success-foreground"}`}>
                     {cat.points > 0 ? "+" : ""}{cat.points} נקודות ליחידה
                   </div>
                 </div>
