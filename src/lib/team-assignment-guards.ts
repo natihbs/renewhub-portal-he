@@ -21,6 +21,23 @@ export function assertTeamIsActiveForNewAssignment(team: { active: boolean } | n
 }
 
 /**
+ * Correction (post-review, PR #19): whether a submitted team_id is an actual
+ * NEW assignment that assertTeamIsActiveForNewAssignment should gate — never
+ * true for a resubmission of the entity's current team_id, and never true for
+ * `undefined` (the field wasn't part of this edit at all) or `null` (removal,
+ * always allowed). updateUser previously gated on `if (profileUpdate.team_id)`
+ * alone, which fired even when an edit form resubmitted a user's unchanged
+ * (and possibly inactive) team_id alongside an unrelated field change —
+ * blocking a rename with an error about team assignment. The rule an entity's
+ * OWN existing team_id, active or not, must remain fully manageable (rename,
+ * activate/deactivate, remove, or transfer OUT to an active team) — only a
+ * transfer INTO a different, inactive team is ever rejected.
+ */
+export function isNewTeamAssignment(currentTeamId: string | null, submittedTeamId: string | null | undefined): submittedTeamId is string {
+  return submittedTeamId !== undefined && submittedTeamId !== null && submittedTeamId !== currentTeamId;
+}
+
+/**
  * A deactivated team keeps every write surface it already had readable
  * (historical targets, past months) but must not silently accept NEW
  * operational writes — team_goals/representative_goals for an inactive team
