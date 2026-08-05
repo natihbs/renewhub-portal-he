@@ -14,6 +14,7 @@ import {
 import { useResolvedRole } from "@/lib/use-resolved-role";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
+import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Select,
@@ -199,10 +200,11 @@ function WorkspaceSwitcher() {
     return (
       <span
         className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-background px-2.5 sm:px-3 text-xs font-medium text-muted-foreground"
-        title="סביבת העבודה שלך נעולה לצוות זה"
+        title={only.type === "team" && !only.active ? "סביבת העבודה שלך נעולה לצוות זה — הצוות מושבת, הנתונים וההיסטוריה שלו עדיין זמינים" : "סביבת העבודה שלך נעולה לצוות זה"}
       >
         <UsersRound className="h-3.5 w-3.5 shrink-0" />
         <span className="max-w-24 truncate sm:max-w-none">{only.label}</span>
+        {only.type === "team" && !only.active && <Badge variant="secondary" className="px-1 py-0 text-[10px]">מושבת</Badge>}
       </span>
     );
   }
@@ -216,7 +218,10 @@ function WorkspaceSwitcher() {
       <SelectContent>
         {options.map((o) => (
           <SelectItem key={o.type === "org" ? "org" : o.teamId} value={o.type === "org" ? "org" : o.teamId}>
-            {o.label}
+            <span className="inline-flex items-center gap-1.5">
+              {o.label}
+              {o.type === "team" && !o.active && <Badge variant="secondary" className="px-1 py-0 text-[10px]">מושבת</Badge>}
+            </span>
           </SelectItem>
         ))}
       </SelectContent>

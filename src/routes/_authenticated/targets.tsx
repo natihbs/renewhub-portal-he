@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { calculateAchievement } from "@/lib/performance-domain";
 import { useApp } from "@/lib/store";
 import { useWorkspace } from "@/lib/workspace-context";
-import { useCloudTeams } from "@/lib/teams-hooks";
+import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useResolvedRole } from "@/lib/use-resolved-role";
 import { useTeamGoal, useRepresentativeGoal, currentGoalMonth } from "@/lib/goals-hooks";
 import {
@@ -154,7 +154,10 @@ function Stat({ label, value }: { label: string; value: string }) {
 // ============================================================================
 function ManagerAdminTargetsView() {
   const { workspace, options, setWorkspaceTeam } = useWorkspace();
-  const { teams: cloudTeams } = useCloudTeams();
+  // Visible teams — target *history* for a deactivated team must stay
+  // reachable; the workspace switcher itself is what actually restricts which
+  // team a manager may currently be scoped into.
+  const { teams: cloudTeams } = useVisibleTeams();
   const [month, setMonth] = useState(currentGoalMonth());
 
   const selectedTeamId = workspace.type === "team" ? workspace.teamId : null;

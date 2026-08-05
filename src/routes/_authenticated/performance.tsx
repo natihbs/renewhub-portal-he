@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useApp, useIsManager, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
-import { useCloudTeams } from "@/lib/teams-hooks";
+import { useCloudTeams, useVisibleTeams } from "@/lib/teams-hooks";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import { downloadCsv } from "@/lib/csv-export";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
@@ -133,7 +133,10 @@ function PerformancePage() {
   const isManager = useIsManager();
   const { open: openWorkspace } = useRepWorkspace();
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
-  const { teams: cloudTeams } = useCloudTeams();
+  // Visible (not just active) teams — this page shows historical performance
+  // for reps regardless of whether their team has since been deactivated, so
+  // the KPI-profile lookup below must resolve for an inactive team too.
+  const { teams: cloudTeams } = useVisibleTeams();
   const profileByTeamId = useMemo(() => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])), [cloudTeams]);
   const profileFor = (teamId: string | null) => (teamId ? profileByTeamId.get(teamId) ?? DEFAULT_KPI_PROFILE : DEFAULT_KPI_PROFILE);
   const renewalTeams = useMemo(
@@ -819,6 +822,8 @@ function buildInsights(items: TargetedRep[]) {
 function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }) {
   const { isDemo } = useAppMode();
   const { state, addRep, updateRep } = useApp();
+  // Active-only — this picker creates/edits a representative's team
+  // assignment, and an inactive team must never be offered for a new one.
   const { teams: cloudTeams } = useCloudTeams();
   const demoTeams = useMemo(() => teamsFromReps(state.reps), [state.reps]);
   const teamOptions = isDemo ? demoTeams.map((t) => ({ id: t.teamId, name: t.teamName })) : cloudTeams;

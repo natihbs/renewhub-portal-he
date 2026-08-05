@@ -104,6 +104,24 @@ function personName(p: { full_name: string | null; email: string | null } | unde
   return p?.full_name || p?.email || "—";
 }
 
+/**
+ * P2b: an admin may manage every team; a manager may manage only the team(s)
+ * they personally manage (team.manager_id === their own id) — never every
+ * team RLS happens to let them read, and never a team someone else manages.
+ * Pure so the exact scoping rule is unit-tested directly; server-side
+ * enforcement lives in assertCanManageTeam (team-admin.functions.ts) — this
+ * only ever controls which UI affordances render, never a security boundary
+ * by itself.
+ */
+export function canManageTeamRow(
+  team: { manager_id: string | null },
+  ctx: { isAdmin: boolean; isManager: boolean; currentUserId: string | null },
+): boolean {
+  if (ctx.isAdmin) return true;
+  if (!ctx.isManager) return false;
+  return !!ctx.currentUserId && team.manager_id === ctx.currentUserId;
+}
+
 function KpiProfileBadge({ profile }: { profile: KpiProfile }) {
   return <Badge variant="secondary" className={KPI_PROFILE_BADGE_CLASS[profile]}>{KPI_PROFILE_LABEL[profile]}</Badge>;
 }
@@ -115,7 +133,14 @@ function TeamsPage() {
 
   const teams = (teamsQ.data?.teams ?? []) as TeamRow[];
   const people = (teamsQ.data?.people ?? []) as Person[];
+  // canManage: organization-wide capabilities only (create team, full edit
+  // dialog, activate/deactivate, delete) — always admin-only. A manager's
+  // scoped capability for their own team (description, KPI profile, members)
+  // is computed per-row via canManageTeamRow and enforced server-side.
   const canManage = !!teamsQ.data?.canManage;
+  const isAdmin = !!teamsQ.data?.isAdmin;
+  const isManager = !!teamsQ.data?.isManager;
+  const currentUserId = (teamsQ.data?.currentUserId as string | undefined) ?? null;
 
   const managers = people.filter((p) => p.roles.includes("manager") || p.roles.includes("admin"));
   const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
@@ -176,12 +201,15 @@ function TeamsPage() {
 
   const delM = useMutation({
     mutationFn: (team_id: string) => del({ data: { team_id } }),
-    onSuccess: () => { toast.success("הצוות נמחק"); invalidate(); },
+    // Await the full invalidation/refetch before the success toast — the
+    // deleted team must actually be gone from the table by the time "הצוות
+    // נמחק" appears, matching every other Teams mutation's pattern (P3b).
+    onSuccess: async () => { await invalidate(); toast.success("הצוות נמחק"); },
     onError: (e: Error) => toast.error(e.message),
   });
   const activeM = useMutation({
     mutationFn: (v: { team_id: string; active: boolean }) => toggleActive({ data: v }),
-    onSuccess: (_d, v) => { toast.success(v.active ? "הצוות הופעל" : "הצוות הושבת"); invalidate(); },
+    onSuccess: async (_d, v) => { await invalidate(); toast.success(v.active ? "הצוות הופעל" : "הצוות הושבת"); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -295,6 +323,7 @@ function TeamsPage() {
                           <RowActions
                             team={t}
                             canManage={canManage}
+                            canManageThisTeam={canManageTeamRow(t, { isAdmin, isManager, currentUserId })}
                             onEdit={() => setEditTeam(t)}
                             onToggle={() => activeM.mutate({ team_id: t.id, active: !t.active })}
                             onDelete={() => delM.mutate(t.id)}
@@ -327,6 +356,7 @@ function TeamsPage() {
                       <RowActions
                         team={t}
                         canManage={canManage}
+                        canManageThisTeam={canManageTeamRow(t, { isAdmin, isManager, currentUserId })}
                         onEdit={() => setEditTeam(t)}
                         onToggle={() => activeM.mutate({ team_id: t.id, active: !t.active })}
                         onDelete={() => delM.mutate(t.id)}
@@ -363,17 +393,31 @@ function TeamsPage() {
         onOpenChange={(o) => { if (!o) setOpenTeamId(null); }}
         people={people}
         managers={managers}
-        canManage={canManage}
+        teams={teams}
+        isAdmin={isAdmin}
+        isManager={isManager}
+        currentUserId={currentUserId}
         onChanged={invalidate}
       />
     </div>
   );
 }
 
-function RowActions({ team, canManage, onEdit, onToggle, onDelete }: {
-  team: TeamRow; canManage: boolean; onEdit: () => void; onToggle: () => void; onDelete: () => void;
+function RowActions({ team, canManage, canManageThisTeam, onEdit, onToggle, onDelete }: {
+  team: TeamRow; canManage: boolean; canManageThisTeam: boolean; onEdit: () => void; onToggle: () => void; onDelete: () => void;
 }) {
-  if (!canManage) return <span className="text-xs text-muted-foreground">צפייה בלבד</span>;
+  if (!canManage) {
+    // A manager of this specific team gets full editing inside the details
+    // sheet (description, KPI profile, members) — clicking the row opens it
+    // regardless of these row-level icons, which stay admin-only (create,
+    // rename, reassign manager, activate/deactivate, delete). "צפייה בלבד" is
+    // only accurate when the viewer can't manage this team at all.
+    return (
+      <span className="text-xs text-muted-foreground">
+        {canManageThisTeam ? "לחצו על הצוות לניהול" : "צפייה בלבד"}
+      </span>
+    );
+  }
   return (
     <div className="flex items-center gap-1">
       <Button size="icon" variant="ghost" aria-label={`עריכת הצוות ${team.name}`} onClick={onEdit}>
@@ -410,7 +454,7 @@ function RowActions({ team, canManage, onEdit, onToggle, onDelete }: {
           <AlertDialogHeader>
             <AlertDialogTitle>מחיקת הצוות "{team.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              מחיקה אפשרית רק כאשר אין משתמשים או נציגים המשויכים לצוות. אם קיימים שיוכים, תוצג הודעה עם הפרטים שיש לשייך מחדש.
+              מחיקה אפשרית רק כשלצוות אין שום נתון היסטורי משויך — לא משתמשים, לא נציגים, לא יעדים ולא רשומות ביצועים. אם קיימים נתונים כאלה, תוצג הודעה עם הפירוט המלא; מומלץ להשבית את הצוות במקום זאת כדי לשמר את ההיסטוריה.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -521,18 +565,26 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
   );
 }
 
-function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, onChanged }: {
+function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdmin, isManager, currentUserId, onChanged }: {
   teamId: string | null;
   onOpenChange: (o: boolean) => void;
   people: Person[];
   managers: Person[];
-  canManage: boolean;
+  teams: TeamRow[];
+  isAdmin: boolean;
+  isManager: boolean;
+  currentUserId: string | null;
   onChanged: () => Promise<unknown> | void;
 }) {
   const details = useServerFn(getTeamDetails);
   const assign = useServerFn(setUserTeam);
   const update = useServerFn(updateTeam);
   const [addUserId, setAddUserId] = useState(NONE);
+  const [description, setDescription] = useState("");
+  // Pending confirmation for a transfer (the selected candidate already
+  // belongs to another team) — P3a requires an explicit warning before an
+  // "add" silently becomes a "remove from X, add to Y".
+  const [pendingTransfer, setPendingTransfer] = useState<{ userId: string; userName: string; fromTeamName: string } | null>(null);
 
   const q = useQuery({
     queryKey: ["admin", "team-details", teamId],
@@ -546,7 +598,20 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
   // representative has no `profiles` row (and so is never in `members`) unless a
   // login account is linked to it. Do not derive this list from `members`.
   const reps = (q.data?.representatives ?? []) as RepMember[];
-  const unassigned = people.filter((p) => p.team_id !== teamId);
+  // Every candidate the picker below can select — unassigned users AND users
+  // already on another team (P3a: shown and clearly labeled, never hidden, so
+  // picking one is an informed transfer rather than a silent surprise).
+  const candidates = people.filter((p) => p.team_id !== teamId);
+  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
+
+  // Admin manages every team; a manager only their own — mirrors
+  // canManageTeamRow but recomputed here since `team` only exists once loaded
+  // (server-side enforcement is the real boundary; this only gates the UI).
+  const canManageThisTeam = !!team && (isAdmin || (isManager && !!currentUserId && team.manager_id === currentUserId));
+
+  useEffect(() => {
+    setDescription(team?.description ?? "");
+  }, [team?.id, team?.description]);
 
   const assignM = useMutation({
     mutationFn: (v: { user_id: string; team_id: string | null }) => assign({ data: v }),
@@ -599,6 +664,54 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Description is the one field a manager may edit for their own team
+  // (P2b) — kept as its own mutation (not reused from managerM/profileM) so
+  // saving it can never accidentally resubmit a manager_id/active value the
+  // caller isn't allowed to change.
+  const descriptionM = useMutation({
+    mutationFn: (value: string) => update({
+      data: {
+        team_id: team!.id,
+        name: team!.name,
+        department: team!.department,
+        description: value || null,
+        manager_id: team!.manager_id,
+        active: team!.active,
+        kpi_profile: team!.kpi_profile,
+      },
+    }),
+    onSuccess: async () => {
+      await Promise.all([q.refetch(), onChanged()]);
+      toast.success("התיאור עודכן");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  function handleAddOrTransferClick() {
+    if (addUserId === NONE) return toast.error("יש לבחור משתמש");
+    const candidate = people.find((p) => p.id === addUserId);
+    if (candidate?.team_id) {
+      setPendingTransfer({
+        userId: addUserId,
+        userName: personName(candidate),
+        fromTeamName: teamNameById.get(candidate.team_id) ?? "צוות אחר",
+      });
+      return;
+    }
+    assignM.mutate({ user_id: addUserId, team_id: team!.id });
+    setAddUserId(NONE);
+  }
+
+  function confirmTransfer() {
+    if (!pendingTransfer || !team) return;
+    assignM.mutate({ user_id: pendingTransfer.userId, team_id: team.id });
+    setAddUserId(NONE);
+    setPendingTransfer(null);
+  }
+
+  const selectedCandidate = people.find((p) => p.id === addUserId);
+  const isTransferSelection = !!selectedCandidate?.team_id;
+
   return (
     <Sheet open={!!teamId} onOpenChange={onOpenChange}>
       <SheetContent side="left" dir="rtl" className="overflow-y-auto sm:max-w-md">
@@ -618,12 +731,37 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
               <Stat label="משתמשים פעילים" value={String(members.filter((m) => m.active).length)} />
               <Stat label="סטטוס" value={team.active ? "פעיל" : "מושבת"} />
             </div>
+            {!team.active && (
+              <p className="text-xs text-muted-foreground">
+                הצוות מושבת ואינו זמין לשיוך חדש — הנתונים וההיסטוריה שלו (חברים, נציגים, יעדים, ביצועים) נותרים זמינים לצפייה במלואם.
+              </p>
+            )}
 
-            {team.description && <p className="text-sm text-muted-foreground">{team.description}</p>}
+            <div className="space-y-2">
+              <Label htmlFor="team-description">תיאור</Label>
+              {canManageThisTeam ? (
+                <div className="space-y-2">
+                  <Textarea
+                    id="team-description"
+                    rows={3}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="תיאור הצוות"
+                  />
+                  {description !== (team.description ?? "") && (
+                    <Button size="sm" onClick={() => descriptionM.mutate(description)} disabled={descriptionM.isPending}>
+                      שמירת תיאור
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{team.description || "—"}</p>
+              )}
+            </div>
 
             <div className="space-y-2">
               <Label>מנהל הצוות</Label>
-              {canManage ? (
+              {isAdmin ? (
                 <Select
                   value={team.manager_id ?? NONE}
                   onValueChange={(v) => managerM.mutate(v === NONE ? null : v)}
@@ -635,13 +773,16 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
                   </SelectContent>
                 </Select>
               ) : (
-                <div className="text-sm">{team.manager_id ? personName(people.find((p) => p.id === team.manager_id)) : "—"}</div>
+                <div className="text-sm">
+                  {team.manager_id ? personName(people.find((p) => p.id === team.manager_id)) : "—"}
+                  {canManageThisTeam && <span className="ms-1 text-xs text-muted-foreground">(שינוי מנהל מיועד למנהלי מערכת בלבד)</span>}
+                </div>
               )}
             </div>
 
             <div className="space-y-2">
               <Label>פרופיל KPI</Label>
-              {canManage ? (
+              {canManageThisTeam ? (
                 <Select
                   value={team.kpi_profile ?? DEFAULT_KPI_PROFILE}
                   onValueChange={(v) => profileM.mutate(v as KpiProfile)}
@@ -678,7 +819,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
                           {m.business_id ? ` · ${m.business_id}` : ""}
                         </div>
                       </div>
-                      {canManage && (
+                      {canManageThisTeam && (
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button size="icon" variant="ghost" aria-label={`הסרת ${personName(m)} מהצוות`}>
@@ -736,28 +877,46 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, canManage, o
               </p>
             </div>
 
-            {canManage && (
+            {canManageThisTeam && (
               <div className="space-y-2">
-                <Label>הוספת משתמש לצוות</Label>
+                <Label>{isTransferSelection ? "העברת משתמש לצוות" : "הוספת משתמש לצוות"}</Label>
+                <p className="text-xs text-muted-foreground">
+                  הרשימה כוללת גם משתמשים המשויכים כבר לצוות אחר — בחירה בהם מעבירה אותם לכאן, ולא רק "מוסיפה".
+                </p>
                 <div className="flex gap-2">
                   <Select value={addUserId} onValueChange={setAddUserId}>
-                    <SelectTrigger aria-label="בחירת משתמש להוספה"><SelectValue placeholder="בחרו משתמש" /></SelectTrigger>
+                    <SelectTrigger aria-label="בחירת משתמש להוספה או העברה"><SelectValue placeholder="בחרו משתמש" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE}>בחרו משתמש</SelectItem>
-                      {unassigned.map((p) => <SelectItem key={p.id} value={p.id}>{personName(p)}</SelectItem>)}
+                      {candidates.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {personName(p)} — {p.team_id ? `משויך כרגע לצוות ${teamNameById.get(p.team_id) ?? "אחר"}` : "לא משויך לצוות"}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button
-                    onClick={() => {
-                      if (addUserId === NONE) return toast.error("יש לבחור משתמש");
-                      assignM.mutate({ user_id: addUserId, team_id: team.id });
-                      setAddUserId(NONE);
-                    }}
-                    aria-label="הוספת משתמש לצוות"
+                    onClick={handleAddOrTransferClick}
+                    aria-label={isTransferSelection ? "העברת משתמש לצוות" : "הוספת משתמש לצוות"}
                   >
                     <UserPlus className="h-4 w-4" />
                   </Button>
                 </div>
+
+                <AlertDialog open={!!pendingTransfer} onOpenChange={(o) => { if (!o) setPendingTransfer(null); }}>
+                  <AlertDialogContent dir="rtl">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>העברת משתמש לצוות אחר?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {pendingTransfer && `המשתמש ${pendingTransfer.userName} יוסר מצוות ${pendingTransfer.fromTeamName} ויועבר לצוות ${team.name}.`}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>ביטול</AlertDialogCancel>
+                      <AlertDialogAction onClick={confirmTransfer}>העברה</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             )}
           </div>

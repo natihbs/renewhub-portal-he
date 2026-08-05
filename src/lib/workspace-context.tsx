@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
-import { useCloudTeams } from "@/lib/teams-hooks";
+import { useVisibleTeams } from "@/lib/teams-hooks";
 
 /**
  * Workspace = the operational scope the current screen should be read/filtered
@@ -22,7 +22,7 @@ export type Workspace =
 
 export type WorkspaceOption =
   | { type: "org"; label: string }
-  | { type: "team"; teamId: string; label: string };
+  | { type: "team"; teamId: string; label: string; active: boolean };
 
 type Ctx = {
   workspace: Workspace;
@@ -43,15 +43,19 @@ export function workspaceTeamId(workspace: Workspace): "all" | string {
   return workspace.type === "org" ? "all" : workspace.teamId;
 }
 
-export type WorkspaceTeamInput = { id: string; name: string; managerId: string | null };
+export type WorkspaceTeamInput = { id: string; name: string; managerId: string | null; active: boolean };
 
 /**
  * Pure derivation of "which workspaces can this user switch into" — the actual
  * role rules from the sprint spec, factored out so they're unit-testable
  * without mounting the provider:
- *  - System Administrator: entire organization + every team.
+ *  - System Administrator: entire organization + every team, including
+ *    inactive ones (P2a — deactivating a team must not make its history
+ *    unreachable; the UI marks it with a "מושבת" badge, see WorkspaceOption.active).
  *  - Manager: only the teams they personally manage (never every team RLS
- *    happens to let them read — e.g. one they're merely a member of).
+ *    happens to let them read — e.g. one they're merely a member of),
+ *    including an inactive team they manage — otherwise a manager whose only
+ *    team gets deactivated would lose all workspace access.
  *  - Representative / Demo Mode: no switcher at all.
  */
 export function computeWorkspaceOptions(params: {
@@ -67,13 +71,13 @@ export function computeWorkspaceOptions(params: {
   if (isAdmin) {
     return [
       { type: "org", label: ORG_WORKSPACE_LABEL },
-      ...teams.map((t) => ({ type: "team" as const, teamId: t.id, label: t.name })),
+      ...teams.map((t) => ({ type: "team" as const, teamId: t.id, label: t.name, active: t.active })),
     ];
   }
   if (isManager) {
     return teams
       .filter((t) => t.managerId === userId)
-      .map((t) => ({ type: "team" as const, teamId: t.id, label: t.name }));
+      .map((t) => ({ type: "team" as const, teamId: t.id, label: t.name, active: t.active }));
   }
   return [];
 }
@@ -81,7 +85,7 @@ export function computeWorkspaceOptions(params: {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { isAdmin, isManager, isRepresentative, user } = useAuth();
   const { isDemo } = useAppMode();
-  const { teams, isLoading } = useCloudTeams();
+  const { teams, isLoading } = useVisibleTeams();
 
   const managedTeams = useMemo(
     () => teams.filter((t) => isManager && !isAdmin && t.managerId === user?.id),
