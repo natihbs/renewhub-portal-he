@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { DEFAULT_KPI_PROFILE, type KpiProfile } from "@/lib/performance-domain";
 import { syncLinkedProfileTeam } from "@/lib/rep-admin.functions";
+import { assertTeamIsActiveForNewAssignment } from "@/lib/team-assignment-guards";
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
@@ -189,6 +190,43 @@ async function assertAdminOrManager(ctx: Ctx) {
  */
 export function canManagerPerformTeamAssignment(teamIdsInvolved: string[], managedTeamIds: Set<string>): boolean {
   return teamIdsInvolved.every((id) => managedTeamIds.has(id));
+}
+
+/** True if the given role set holds admin or manager — accounts a team manager must never touch via setUserTeam. */
+export function isPrivilegedRoleSet(roles: string[]): boolean {
+  return roles.includes("admin") || roles.includes("manager");
+}
+
+export type AssignmentEligibilityTarget = { roles: string[]; representativeActive: boolean | null };
+
+/**
+ * Correction (post-review): the original manager scoping only ever checked
+ * WHICH TEAMS a reassignment touched, never WHO was being moved. A manager
+ * could otherwise have assigned/removed an admin or another manager, or
+ * touched an account with no representative link at all, as long as the team
+ * scope check passed. representatives.user_id is the authoritative link
+ * (never profiles.team_id alone, never a role name by itself) — a target is
+ * only ever eligible for a manager-initiated ADD when it is a representative-
+ * role account, linked to a representative record, and that representative
+ * is currently active. Privileged accounts (admin/manager) are never
+ * eligible, regardless of any other field.
+ */
+export function canManagerAssignTarget(target: AssignmentEligibilityTarget): boolean {
+  if (isPrivilegedRoleSet(target.roles)) return false;
+  if (!target.roles.includes("representative")) return false;
+  return target.representativeActive === true;
+}
+
+/**
+ * Removal/cleanup is deliberately more permissive than an add — a
+ * representative who has since gone inactive, or whose representative link
+ * was later cleared, may still be removed from a team a manager manages.
+ * The one rule that never relaxes: a manager may never remove a privileged
+ * (admin/manager) account, and may never operate on a non-representative one.
+ */
+export function canManagerRemoveTarget(target: { roles: string[] }): boolean {
+  if (isPrivilegedRoleSet(target.roles)) return false;
+  return target.roles.includes("representative");
 }
 
 /**
@@ -387,6 +425,96 @@ export const getTeamDetails = createServerFn({ method: "POST" })
       }),
       representatives: (reps ?? []) as { id: string; name: string; external_ref: string | null; user_id: string | null; active: boolean }[],
     };
+  });
+
+export type TeamAssignmentCandidate = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  team_id: string | null;
+  team_name: string | null;
+};
+
+/**
+ * Correction (post-review): candidates for the "add/transfer user" picker
+ * (teams.tsx) used to come from the RLS-scoped `people` list returned by
+ * listTeams — which, for a manager, only ever contains their own team's
+ * existing members, never an unassigned user. The original fix for that gap
+ * widened a profiles RLS SELECT policy to expose every unassigned profile in
+ * the organization (admins, other managers, unrelated accounts included) to
+ * every manager — a real privacy/authorization regression that has been
+ * reverted. This is the correct replacement: a dedicated, permission-checked
+ * server function, using supabaseAdmin only after assertCanManageTeam passes,
+ * that returns the minimal fields the picker needs and nothing else.
+ *
+ * - Admin: every profile (unchanged, pre-existing capability — "organization-
+ *   wide" per the product requirement).
+ * - Manager: only representative-role accounts linked (via the authoritative
+ *   representatives.user_id relationship, never a role name alone) to a
+ *   currently-active representative, that are either unassigned or already on
+ *   a team this same manager also manages. Never an admin, a manager, a
+ *   non-representative account, or anyone on a team this manager doesn't
+ *   manage — mirrors exactly what setUserTeam itself will (re-)enforce at
+ *   write time (canManagerAssignTarget / canManagerPerformTeamAssignment), so
+ *   the picker never even offers a choice the write would reject.
+ */
+export const listTeamAssignmentCandidates = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { team_id: string }) => {
+    if (!data?.team_id) throw new Error("חסר מזהה צוות");
+    return data;
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    const { isAdmin } = await assertCanManageTeam(ctx, data.team_id);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: teams, error: teamsErr } = await supabaseAdmin.from("teams").select("id, name, manager_id");
+    if (teamsErr) throw new Error(teamsErr.message);
+    const teamNameById = new Map(((teams ?? []) as { id: string; name: string }[]).map((t) => [t.id, t.name]));
+
+    if (isAdmin) {
+      const { data: profiles, error } = await supabaseAdmin.from("profiles").select("id, full_name, email, team_id");
+      if (error) throw new Error(error.message);
+      return ((profiles ?? []) as { id: string; full_name: string | null; email: string | null; team_id: string | null }[])
+        .filter((p) => p.team_id !== data.team_id)
+        .map((p) => ({ ...p, team_name: p.team_id ? (teamNameById.get(p.team_id) ?? null) : null })) as TeamAssignmentCandidate[];
+    }
+
+    const managedTeamIds = new Set(
+      ((teams ?? []) as { id: string; manager_id: string | null }[])
+        .filter((t) => t.manager_id === ctx.userId)
+        .map((t) => t.id),
+    );
+
+    const [{ data: profiles, error: pErr }, { data: roleRows, error: rErr }, { data: reps, error: repErr }] = await Promise.all([
+      supabaseAdmin.from("profiles").select("id, full_name, email, team_id"),
+      supabaseAdmin.from("user_roles").select("user_id, role"),
+      supabaseAdmin.from("representatives").select("user_id, active").not("user_id", "is", null),
+    ]);
+    if (pErr) throw new Error(pErr.message);
+    if (rErr) throw new Error(rErr.message);
+    if (repErr) throw new Error(repErr.message);
+
+    const rolesByUser = new Map<string, string[]>();
+    for (const r of (roleRows ?? []) as { user_id: string; role: string }[]) {
+      const arr = rolesByUser.get(r.user_id) ?? [];
+      arr.push(r.role);
+      rolesByUser.set(r.user_id, arr);
+    }
+    const repActiveByUser = new Map<string, boolean>();
+    for (const r of (reps ?? []) as { user_id: string; active: boolean }[]) {
+      repActiveByUser.set(r.user_id, r.active);
+    }
+
+    return ((profiles ?? []) as { id: string; full_name: string | null; email: string | null; team_id: string | null }[])
+      .filter((p) => p.team_id !== data.team_id)
+      .filter((p) => p.team_id === null || managedTeamIds.has(p.team_id))
+      .filter((p) => canManagerAssignTarget({
+        roles: rolesByUser.get(p.id) ?? [],
+        representativeActive: repActiveByUser.get(p.id) ?? null,
+      }))
+      .map((p) => ({ ...p, team_name: p.team_id ? (teamNameById.get(p.team_id) ?? null) : null })) as TeamAssignmentCandidate[];
   });
 
 type TeamInput = {
@@ -610,6 +738,18 @@ export const setUserTeam = createServerFn({ method: "POST" })
     if (!isAdmin && !roles.includes("manager")) throw new Error("אין לך הרשאה לשייך משתמשים לצוותים");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
+    // A destination team, if any, must be active — a deactivated team is
+    // unavailable for new assignments (unaffected by who the actor is; even
+    // an admin must reactivate the team first). Removal (team_id: null) is
+    // never blocked by this — an existing member must always be cleanable
+    // out of a team that's since been deactivated.
+    if (data.team_id) {
+      const { data: destTeam, error: destErr } = await supabaseAdmin
+        .from("teams").select("active").eq("id", data.team_id).maybeSingle();
+      if (destErr) throw new Error(destErr.message);
+      assertTeamIsActiveForNewAssignment(destTeam);
+    }
+
     // A manager may only move a user between "unassigned" and a team they
     // personally manage — never touch a user currently on, or being moved
     // into, a team they don't manage (P2b: "must not transfer users into
@@ -630,6 +770,29 @@ export const setUserTeam = createServerFn({ method: "POST" })
         if (!canManagerPerformTeamAssignment(teamIdsInvolved, managedIds)) {
           throw new Error("אין לך הרשאה לשייך משתמש זה — הפעולה מוגבלת למשתמשים ולצוותים שבניהולך");
         }
+      }
+
+      // Correction (post-review): the team-scope check above says nothing
+      // about WHO is being moved. A manager must never be able to assign or
+      // remove an admin/manager account, or one with no active representative
+      // link, through this workflow — checked against the authoritative
+      // representatives.user_id relationship, never a role name alone.
+      const [{ data: targetRoleRows, error: trErr }, { data: targetRep, error: trepErr }] = await Promise.all([
+        supabaseAdmin.from("user_roles").select("role").eq("user_id", data.user_id),
+        supabaseAdmin.from("representatives").select("active").eq("user_id", data.user_id).maybeSingle(),
+      ]);
+      if (trErr) throw new Error(trErr.message);
+      if (trepErr) throw new Error(trepErr.message);
+      const targetRoles = ((targetRoleRows ?? []) as { role: string }[]).map((r) => r.role);
+      const eligible = data.team_id
+        ? canManagerAssignTarget({ roles: targetRoles, representativeActive: targetRep?.active ?? null })
+        : canManagerRemoveTarget({ roles: targetRoles });
+      if (!eligible) {
+        throw new Error(
+          data.team_id
+            ? "מנהל צוות יכול לשייך רק חשבונות נציג פעילים לצוות שבניהולו — לא ניתן לשייך חשבון מנהל מערכת, מנהל צוות, או חשבון שאינו נציג"
+            : "מנהל צוות אינו רשאי להסיר חשבון מנהל מערכת או מנהל צוות מהצוות",
+        );
       }
     }
 

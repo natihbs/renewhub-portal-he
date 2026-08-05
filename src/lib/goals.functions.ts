@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { assertTeamIsActiveForOperationalWrite } from "@/lib/team-assignment-guards";
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
@@ -94,7 +95,7 @@ export const getTargetWorkspace = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const [{ data: team, error: teamErr }, { data: goal }, { data: reps, error: repsErr }] = await Promise.all([
-      supabaseAdmin.from("teams").select("id, name").eq("id", data.team_id).maybeSingle(),
+      supabaseAdmin.from("teams").select("id, name, active").eq("id", data.team_id).maybeSingle(),
       supabaseAdmin.from("team_goals").select("target_value").eq("team_id", data.team_id).eq("goal_month", data.month).maybeSingle(),
       supabaseAdmin.from("representatives").select("id, name, active, current_result").eq("team_id", data.team_id).order("name"),
     ]);
@@ -122,7 +123,7 @@ export const getTargetWorkspace = createServerFn({ method: "POST" })
     const activeRepresentativesWithoutTarget = representatives.filter((r) => r.active && r.target_value === null).length;
 
     return {
-      team: { id: team.id as string, name: team.name as string },
+      team: { id: team.id as string, name: team.name as string, active: team.active as boolean },
       month: data.month,
       team_target: (goal?.target_value as number | undefined) ?? null,
       representative_target_sum: representativeTargetSum,
@@ -142,6 +143,9 @@ export const setTeamGoal = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     await assertCanManageTeam(ctx, data.team_id);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: team, error: teamErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+    if (teamErr) throw new Error(teamErr.message);
+    assertTeamIsActiveForOperationalWrite(team);
 
     // Two-step (not a blind upsert): an upsert would overwrite created_by on
     // every edit, losing who originally set the target.
@@ -195,6 +199,9 @@ export const setRepresentativeGoals = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     await assertCanManageTeam(ctx, data.team_id);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: team, error: teamErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+    if (teamErr) throw new Error(teamErr.message);
+    assertTeamIsActiveForOperationalWrite(team);
 
     const repIds = data.goals.map((g) => g.representative_id);
     const { data: reps, error: repsErr } = await supabaseAdmin.from("representatives").select("id, team_id").in("id", repIds);
@@ -268,6 +275,12 @@ export type RepresentativeGoalRestoreEntry =
  * that had a prior value is set back to it. Every representative_id is
  * re-verified server-side to belong to the authorized team, exactly like
  * setRepresentativeGoals — a snapshot the client holds is never trusted blindly.
+ *
+ * Deliberately NOT gated by team.active (unlike setTeamGoal/
+ * setRepresentativeGoals/copyGoalsFromPreviousMonth's apply step): this is an
+ * undo of a specific prior write, not new operational activity, so it stays
+ * available even for a team that's since been deactivated — the same reasoning
+ * that keeps "remove a member from an inactive team" allowed for cleanup.
  */
 export const restoreRepresentativeGoals = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -384,6 +397,14 @@ export const copyGoalsFromPreviousMonth = createServerFn({ method: "POST" })
     };
 
     if (data.dry_run) return { ok: true, applied: false, ...preview };
+
+    // Only the apply step is gated — a dry-run preview must still work for an
+    // inactive team so the confirmation dialog can show what WOULD copy, but
+    // actually writing new team_goals/representative_goals rows counts as new
+    // operational activity for a deactivated team.
+    const { data: team, error: teamErr } = await supabaseAdmin.from("teams").select("active").eq("id", data.team_id).maybeSingle();
+    if (teamErr) throw new Error(teamErr.message);
+    assertTeamIsActiveForOperationalWrite(team);
 
     if (willCopyTeam) {
       const { error } = await supabaseAdmin.from("team_goals").insert({
