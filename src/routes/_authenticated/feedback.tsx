@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, useIsManager, computeScore, teamsFromReps, visibleFeedback } from "@/lib/store";
 import type { Rep, Article } from "@/lib/seed";
 import { CRITERIA, type CriterionValue, type Feedback, scoreTone, SCORE_TEXT_CLASS, SCORE_BADGE_CLASS } from "@/lib/feedback-domain";
@@ -122,6 +122,13 @@ function avgScoreFor(feedback: Feedback[], repId?: string) {
 
 // -------------------- Route --------------------
 export const Route = createFileRoute("/_authenticated/feedback")({
+  // §P0-6 hardening: lets another page (Performance's "הוספת האזנה" row
+  // action) deep-link straight into the real "טופס האזנה חכם" dialog for a
+  // specific representative, instead of that button faking success with a
+  // toast and recording nothing.
+  validateSearch: (search: Record<string, unknown>): { repId?: string } => ({
+    repId: typeof search.repId === "string" ? search.repId : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "מרכז האזנות חכם · Pulse" },
@@ -171,6 +178,19 @@ function ListeningCenter() {
     setPrefScheduleId(scheduleId);
     setOpenForm(true);
   };
+
+  // §P0-6: a ?repId= deep link (from Performance's "הוספת האזנה" row action)
+  // opens the real listening form pre-filled for that representative, once —
+  // a ref (not state) so closing the dialog afterward never reopens it.
+  const search = Route.useSearch();
+  const openedFromSearchRef = useRef(false);
+  useEffect(() => {
+    if (search.repId && isManager && !openedFromSearchRef.current) {
+      openedFromSearchRef.current = true;
+      openNewFor(search.repId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.repId, isManager]);
   const openEditFor = (id: string) => {
     setEditingId(id);
     setPrefRepId(undefined);

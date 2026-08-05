@@ -218,30 +218,51 @@ export const createUser = createServerFn({ method: "POST" })
     if (created.error || !created.data.user) throw new Error(created.error?.message ?? "יצירת חשבון נכשלה");
     const newId = created.data.user.id;
 
-    // upsert profile (trigger may have already inserted it)
-    // representative_id is kept for the legacy business-identifier display path (see
-    // resolveBusinessIdentifier in team-admin.functions.ts) — it is NOT the authoritative
-    // link; representatives.user_id (set below via linkRepresentativeToUserCore) is.
-    const { error: pErr } = await supabaseAdmin.from("profiles").upsert({
-      id: newId,
-      email: data.email.trim(),
-      full_name: data.full_name,
-      team_id: data.team_id,
-      manager_id: data.manager_id,
-      representative_id: data.representative_id,
-      active: true,
-      must_change_password: data.must_change_password,
-    });
-    if (pErr) throw new Error(pErr.message);
-
-    const { error: rErr } = await supabaseAdmin.from("user_roles").insert({ user_id: newId, role: data.role });
-    if (rErr) throw new Error(rErr.message);
-
-    if (data.role === "representative" && data.representative_id) {
-      const link = await linkRepresentativeToUserCore(supabaseAdmin, data.representative_id, newId);
-      await logAudit(supabaseAdmin, context.userId, (context.claims as any).email ?? null, "rep.user_linked", newId, data.email, {
-        rep_id: data.representative_id, representative_name: link.rep_name,
+    // §P1-1 hardening: profile/role/link used to be three unguarded writes
+    // after the auth account already existed — a failure partway (e.g. the
+    // role insert) left a real, working login with no role and possibly no
+    // representative link: an orphan an admin would only discover later via
+    // computeUserHealth's degraded-state badge, not at creation time. Every
+    // write below is now caught as one unit; on any failure the auth account
+    // itself is deleted as a compensating action (never left as an orphaned
+    // login), exactly like inviteLoginForRep's identical pattern. profiles
+    // and user_roles both cascade-delete from auth.users, and
+    // representatives.user_id is ON DELETE SET NULL, so deleting the auth
+    // user alone is a complete, clean rollback of everything below.
+    try {
+      // upsert profile (trigger may have already inserted it)
+      // representative_id is kept for the legacy business-identifier display path (see
+      // resolveBusinessIdentifier in team-admin.functions.ts) — it is NOT the authoritative
+      // link; representatives.user_id (set below via linkRepresentativeToUserCore) is.
+      const { error: pErr } = await supabaseAdmin.from("profiles").upsert({
+        id: newId,
+        email: data.email.trim(),
+        full_name: data.full_name,
+        team_id: data.team_id,
+        manager_id: data.manager_id,
+        representative_id: data.representative_id,
+        active: true,
+        must_change_password: data.must_change_password,
       });
+      if (pErr) throw new Error(pErr.message);
+
+      const { error: rErr } = await supabaseAdmin.from("user_roles").insert({ user_id: newId, role: data.role });
+      if (rErr) throw new Error(rErr.message);
+
+      if (data.role === "representative" && data.representative_id) {
+        const link = await linkRepresentativeToUserCore(supabaseAdmin, data.representative_id, newId, {
+          expectedCurrentUserId: null,
+          checkExpected: true,
+        });
+        await logAudit(supabaseAdmin, context.userId, (context.claims as any).email ?? null, "rep.user_linked", newId, data.email, {
+          rep_id: data.representative_id, representative_name: link.rep_name,
+        });
+      }
+    } catch (e) {
+      await supabaseAdmin.auth.admin.deleteUser(newId).catch((cleanupErr: unknown) => {
+        console.error("[createUser] compensating cleanup failed", newId, cleanupErr);
+      });
+      throw new Error(`יצירת החשבון נכשלה ובוטלה — לא נוצר חשבון יתום: ${(e as Error).message}. ניתן לנסות שוב.`);
     }
 
     await logAudit(supabaseAdmin, context.userId, (context.claims as any).email ?? null, "user.create", newId, data.email, { role: data.role });

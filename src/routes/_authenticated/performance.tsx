@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useApp, useIsManager, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
-import { useCloudTeams, useVisibleTeams } from "@/lib/teams-hooks";
+import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import { downloadCsv } from "@/lib/csv-export";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
@@ -741,10 +741,17 @@ function RowQuickActions({ rep, onOpen }: { rep: Rep; onOpen: () => void }) {
           <Button variant="ghost" size="icon" aria-label="עריכה" title="עריכה"><Pencil className="h-4 w-4" /></Button>
         } />
       </ManagerOnly>
-      <Button variant="ghost" size="icon" aria-label="האזנה" title="הוסף האזנה" onClick={() => toast.success(`נפתח טופס האזנה עבור ${rep.name}`)}>
-        <Headphones className="h-4 w-4" />
+      {/* §P0-6 hardening: these used to fire a fake-success toast and record
+          nothing. Both now open the real, already-functional workflow for
+          the action instead — a deep link into the actual "טופס האזנה חכם"
+          dialog (feedback.tsx), and the real representative workspace sheet
+          (RepWorkspace) with genuine note-adding, respectively. */}
+      <Button variant="ghost" size="icon" aria-label="האזנה" title="הוסף האזנה" asChild>
+        <Link to="/feedback" search={{ repId: rep.id }}>
+          <Headphones className="h-4 w-4" />
+        </Link>
       </Button>
-      <Button variant="ghost" size="icon" aria-label="הערות" title="הערות מנהל" onClick={() => toast.success(`הערות מנהל עבור ${rep.name}`)}>
+      <Button variant="ghost" size="icon" aria-label="הערות" title="הערות מנהל" onClick={onOpen}>
         <StickyNote className="h-4 w-4" />
       </Button>
       <Button variant="ghost" size="icon" aria-label="פרופיל" title="פתח פרופיל" onClick={onOpen}>
@@ -822,11 +829,17 @@ function buildInsights(items: TargetedRep[]) {
 function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }) {
   const { isDemo } = useAppMode();
   const { state, addRep, updateRep } = useApp();
-  // Active-only — this picker creates/edits a representative's team
-  // assignment, and an inactive team must never be offered for a new one.
-  const { teams: cloudTeams } = useCloudTeams();
+  // §P2 hardening: this used to be active-only (useCloudTeams()), so editing
+  // a representative already on a deactivated team showed a blank team field
+  // — the id in state.teamId matched no option in the active-only list. Now
+  // visible (active + inactive) teams are fetched for correct display, but
+  // only active ones (plus the rep's own current team, so an unrelated
+  // resubmit still works) are selectable — an inactive team must never
+  // become available as a NEW assignment target, matching
+  // assertTeamIsActiveForNewAssignment's server-side rule.
+  const { teams: visibleTeams } = useVisibleTeams();
   const demoTeams = useMemo(() => teamsFromReps(state.reps), [state.reps]);
-  const teamOptions = isDemo ? demoTeams.map((t) => ({ id: t.teamId, name: t.teamName })) : cloudTeams;
+  const teamOptions = isDemo ? demoTeams.map((t) => ({ id: t.teamId, name: t.teamName, active: true })) : visibleTeams;
   const createFn = useServerFn(createRepresentative);
   const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
   const qc = useQueryClient();
@@ -884,7 +897,11 @@ function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">ללא צוות</SelectItem>
-                {teamOptions.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                {teamOptions.map((t) => (
+                  <SelectItem key={t.id} value={t.id} disabled={!t.active && t.id !== rep?.teamId}>
+                    {t.name}{!t.active ? " (לא פעיל)" : ""}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
