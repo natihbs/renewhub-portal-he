@@ -146,7 +146,7 @@ function ActiveCompetitionCard({ comp, onClose, isManager }: { comp: Competition
         <div>
           <h3 className="font-bold mb-3">טבלת מובילים</h3>
           {leaderboard.length === 0 ? (
-            <div className="text-sm text-muted-foreground text-center py-6">אין ניקוד עדיין.</div>
+            <EmptyState icon={Medal} title="אין ניקוד עדיין" compact />
           ) : (
             <div className="space-y-2">
               {leaderboard.map((row, i) => (

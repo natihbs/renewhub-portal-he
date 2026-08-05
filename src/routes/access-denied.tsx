@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PulseLogo } from "@/components/PulseLogo";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/access-denied")({
   ssr: false,
@@ -20,11 +21,11 @@ function AccessDenied() {
       <div className="max-w-md text-center">
         <PulseLogo variant="symbol" className="h-10 mx-auto mb-4" />
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-destructive/10 text-destructive text-2xl">✕</div>
-        <h1 className="mt-4 text-2xl font-bold">אין הרשאה</h1>
+        <h1 className="mt-4 text-2xl font-extrabold tracking-tight">אין הרשאה</h1>
         <p className="mt-2 text-muted-foreground">אין לך הרשאה לצפות בעמוד זה.</p>
-        <Link to="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-          חזרה לדף הבית
-        </Link>
+        <Button asChild className="mt-6">
+          <Link to="/">חזרה לדף הבית</Link>
+        </Button>
       </div>
     </div>
   );

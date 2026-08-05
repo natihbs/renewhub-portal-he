@@ -309,7 +309,7 @@ function TeamsPage() {
               {/* Mobile cards */}
               <div className="space-y-3 md:hidden">
                 {filtered.map((t) => (
-                  <div key={t.id} className="rounded-xl border p-3" onClick={() => setOpenTeamId(t.id)}>
+                  <div key={t.id} className="card-interactive cursor-pointer rounded-xl border p-3" onClick={() => setOpenTeamId(t.id)}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-semibold truncate">{t.name}</div>

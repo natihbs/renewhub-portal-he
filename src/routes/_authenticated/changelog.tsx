@@ -3,6 +3,7 @@ import { CHANGELOG, APP_NAME, APP_VERSION } from "@/lib/app-meta";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/changelog")({
@@ -20,21 +21,22 @@ export const Route = createFileRoute("/_authenticated/changelog")({
 function ChangelogPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6" dir="rtl">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">יומן שינויים</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            כל התכולות והעדכונים ב-{APP_NAME}. גרסה נוכחית:{" "}
-            <span className="font-mono">{APP_VERSION}</span>
-          </p>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link to="/">
-            <ArrowRight className="h-4 w-4" />
-            חזרה לדף הבית
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="יומן שינויים"
+        description={
+          <>
+            כל התכולות והעדכונים ב-{APP_NAME}. גרסה נוכחית: <span className="font-mono">{APP_VERSION}</span>
+          </>
+        }
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to="/">
+              <ArrowRight className="h-4 w-4" />
+              חזרה לדף הבית
+            </Link>
+          </Button>
+        }
+      />
 
       <div className="space-y-4">
         {CHANGELOG.map((entry, idx) => (

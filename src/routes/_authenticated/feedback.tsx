@@ -403,7 +403,7 @@ function DashboardTab({ openNewFor, onOpenSchedule, onView }: {
           </CardHeader>
           <CardContent className="space-y-2">
             {criticalAlerts.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">אין התראות פעילות</p>
+              <EmptyState icon={ShieldCheck} title="אין התראות פעילות" compact />
             ) : criticalAlerts.map(({ r, last, avg, days }) => (
               <button
                 key={r.id}
@@ -693,7 +693,7 @@ function AnalysisTab() {
           <Card>
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[color:var(--success)]" />נושאים במגמת שיפור</CardTitle></CardHeader>
             <CardContent className="space-y-1.5">
-              {improving.length === 0 ? <p className="text-sm text-muted-foreground">אין שיפור מובהק</p> :
+              {improving.length === 0 ? <EmptyState title="אין שיפור מובהק" compact className="py-4" /> :
                 improving.map((t) => (
                   <div key={t.label} className="flex items-center justify-between text-sm rounded-md border p-2">
                     <span>{t.label}</span>
@@ -706,7 +706,7 @@ function AnalysisTab() {
           <Card>
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingDown className="h-4 w-4 text-primary" />נושאים במגמת ירידה</CardTitle></CardHeader>
             <CardContent className="space-y-1.5">
-              {declining.length === 0 ? <p className="text-sm text-muted-foreground">אין ירידה מובהקת</p> :
+              {declining.length === 0 ? <EmptyState title="אין ירידה מובהקת" compact className="py-4" /> :
                 declining.map((t) => (
                   <div key={t.label} className="flex items-center justify-between text-sm rounded-md border p-2">
                     <span>{t.label}</span>
@@ -746,37 +746,35 @@ function HeatMapTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              <tr>
-                <th className="text-start p-2 sticky end-0 bg-card">נציג</th>
-                {SECTIONS.map((s) => (
-                  <th key={s.key} className="p-2 text-center font-medium text-muted-foreground whitespace-nowrap">{s.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {state.reps.map((r) => (
-                <tr key={r.id} className="border-t">
-                  <td className="p-2 font-medium whitespace-nowrap">
-                    <button onClick={() => openNewFor(r.id)} className="hover:underline text-start">{r.name}</button>
-                  </td>
-                  {SECTIONS.map((s) => {
-                    const v = cell(r.id, s.key);
-                    return (
-                      <td key={s.key} className="p-1">
-                        <div className={cn("rounded-md text-center py-2 font-semibold", bgFor(v))}>
-                          {v ?? "—"}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
+        <Table className="text-xs">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="sticky end-0 bg-card">נציג</TableHead>
+              {SECTIONS.map((s) => (
+                <TableHead key={s.key} className="text-center whitespace-nowrap">{s.label}</TableHead>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {state.reps.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="font-medium whitespace-nowrap">
+                  <button onClick={() => openNewFor(r.id)} className="hover:underline text-start">{r.name}</button>
+                </TableCell>
+                {SECTIONS.map((s) => {
+                  const v = cell(r.id, s.key);
+                  return (
+                    <TableCell key={s.key} className="p-1">
+                      <div className={cn("rounded-md text-center py-2 font-semibold", bgFor(v))}>
+                        {v ?? "—"}
+                      </div>
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
         <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[color:var(--success)]/40" />80+</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[color:var(--warning)]/40" />60-79</span>
@@ -865,7 +863,7 @@ function CoachingTab({ openNewFor }: { openNewFor: (repId?: string) => void }) {
               </CardHeader>
               <CardContent className="space-y-2">
                 {weakest.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">אין נתונים מספיקים לגיבוש יעדים.</p>
+                  <EmptyState title="אין נתונים מספיקים לגיבוש יעדים" compact className="py-4" />
                 ) : weakest.map((w, i) => {
                   const article = recommendedArticleFor(w.section.key, state.articles);
                   return (
@@ -1153,7 +1151,7 @@ function MyTasksAndNotes() {
         <CardHeader><CardTitle className="text-base">המשימות שלי</CardTitle></CardHeader>
         <CardContent>
           {tasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">אין לך משימות פתוחות כרגע.</p>
+            <EmptyState icon={CheckCircle2} title="אין לך משימות פתוחות כרגע" compact />
           ) : (
             <div className="space-y-3">
               {openTasks.length > 0 && (
@@ -1187,7 +1185,7 @@ function MyTasksAndNotes() {
         <CardHeader><CardTitle className="text-base">הערות עבורי</CardTitle></CardHeader>
         <CardContent>
           {notes.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">אין הערות שהמנהל שלך שיתף איתך.</p>
+            <EmptyState icon={BookOpen} title="אין הערות שהמנהל שלך שיתף איתך" compact />
           ) : (
             <ul className="space-y-2">
               {notes.map((n) => (
@@ -1269,7 +1267,7 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: 
                       : <Badge variant="outline">טיוטה</Badge>}
                   </TableCell>
                   <TableCell>
-                    <Button size="icon" variant="ghost" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" aria-label="צפייה בהאזנה" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
               ))}

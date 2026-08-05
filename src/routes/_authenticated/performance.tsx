@@ -424,7 +424,7 @@ function PerformancePage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {coaching.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">כל הנציגים בקצב או מעליו 🎉</p>
+              <EmptyState icon={CheckCircle2} title="כל הנציגים בקצב או מעליו" description="אין כרגע נציגים הזקוקים לליווי מיוחד." compact />
             ) : (
               coaching.map((e, i) => {
                 const priority = i < 2 ? "high" : i < 4 ? "medium" : "low";
