@@ -28,6 +28,8 @@ export type Competition = {
   rules: string;
   prize: string;
   active: boolean;
+  /** Frozen historical record, only reachable via an explicit archive action on a completed (active: false) competition. Never true while active. */
+  archived: boolean;
   categories: CompetitionCategory[];
   scores: CompetitionScoreEntry[];
 };
@@ -132,6 +134,7 @@ export const SEED: AppState = {
         "כל נציג צובר נקודות לפי הקטגוריות למטה. הנקודות נצברות מדי יום ומתעדכנות ידנית ע\"י ההנהלה. שלושת המקומות הראשונים יזכו בפרסים.",
       prize: "מקום 1: סופ\"ש זוגי במלון | מקום 2: שובר 1,000 ₪ | מקום 3: שובר 500 ₪",
       active: true,
+      archived: false,
       categories: [
         { id: "cat1", label: "חידוש ללא שדרוג", points: 3 },
         { id: "cat2", label: "חידוש עם שדרוג עד 250 ₪", points: 6 },
