@@ -1187,7 +1187,41 @@ export type Database = {
           representative_id: string
         }[]
       }
+      toggle_rep_task_done: {
+        Args: { _task_id: string }
+        Returns: {
+          done: boolean
+          previous_done: boolean
+          representative_id: string
+          task_id: string
+          title: string
+        }[]
+      }
       touch_last_login: { Args: never; Returns: undefined }
+      update_representative_metrics_with_team_sync: {
+        Args: {
+          _apply_current_result: boolean
+          _apply_monthly_target: boolean
+          _apply_name: boolean
+          _apply_team: boolean
+          _current_result: number | null
+          _monthly_target: number | null
+          _name: string | null
+          _rep_id: string
+          _team_id: string | null
+        }
+        Returns: {
+          linked_user_id: string | null
+          new_current_result: number
+          new_team_id: string | null
+          previous_current_result: number
+          previous_team_id: string | null
+          profile_synced: boolean
+          rep_id: string
+          rep_name: string
+          team_changed: boolean
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "manager" | "representative"

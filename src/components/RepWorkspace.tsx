@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "@/lib/store";
 import type { Rep } from "@/lib/seed";
 import { type Feedback, scoreTone, SCORE_TEXT_CLASS } from "@/lib/feedback-domain";
@@ -15,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
-import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
+import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useRepresentativeGoal, currentGoalMonth } from "@/lib/goals-hooks";
 import { renewalTotalsForMonth } from "@/lib/kpi-values";
@@ -113,15 +114,49 @@ function CircularProgress({ pct, status }: { pct: number | null; status: Status 
 export function RepWorkspace() {
   const { openRepId, close } = useRepWorkspace();
   const { state } = useApp();
+  const qc = useQueryClient();
   const rep = state.reps.find((r) => r.id === openRepId) ?? null;
 
+  // §P3: the sheet stays OPEN while a representative is open, so the previous
+  // `{rep ? <WorkspaceBody/> : <div/>}` rendered a completely blank panel with
+  // no message whenever the rep disappeared from scope mid-session — they were
+  // deactivated in another tab, deleted, or transferred out of this manager's
+  // team. Blank is the one thing the UI must never say. Now it says what
+  // happened and offers the two actions that can resolve it.
+  const vanished = !!openRepId && !rep;
+
   return (
-    <Sheet open={!!rep} onOpenChange={(v) => !v && close()}>
+    <Sheet open={!!openRepId} onOpenChange={(v) => !v && close()}>
       <SheetContent side="left" className="w-full sm:max-w-2xl p-0 overflow-hidden flex flex-col" dir="rtl">
-        {rep ? <WorkspaceBody rep={rep} onClose={close} /> : <div />}
+        {rep ? (
+          <WorkspaceBody rep={rep} onClose={close} />
+        ) : vanished ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+            <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted text-muted-foreground">
+              <User className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <SheetTitle className="text-base">הנציג אינו זמין עוד בתצוגה הנוכחית</SheetTitle>
+              <SheetDescription className="text-sm">
+                ייתכן שהנציג הושבת, הועבר לצוות אחר או הוסר מההרשאות שלך. הנתונים ההיסטוריים שלו נשמרים.
+              </SheetDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onCloseSafe(close)}>סגירה</Button>
+              <Button onClick={() => void qc.refetchQueries({ queryKey: ["representatives"] })}>רענון הרשימה</Button>
+            </div>
+          </div>
+        ) : (
+          <div />
+        )}
       </SheetContent>
     </Sheet>
   );
+}
+
+/** Small indirection so the close handler stays referentially stable in JSX. */
+function onCloseSafe(close: () => void) {
+  return () => close();
 }
 
 function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
@@ -167,6 +202,35 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   const [noteText, setNoteText] = useState("");
   const [noteVisibleToRep, setNoteVisibleToRep] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+
+  /**
+   * §P1: the toggle is now a server round trip whose result is the DB's own
+   * committed value. A failure — most commonly the task having been deleted by
+   * someone else, or the representative having been deactivated — is surfaced
+   * truthfully instead of the previous silent zero-row write.
+   */
+  const onToggleTask = async (taskId: string) => {
+    try {
+      await toggleTask(rep.id, taskId);
+    } catch (e) {
+      toast.error((e as Error).message || "עדכון המשימה נכשל");
+    }
+  };
+
+  // §P3: task deletion is recoverable — the undo restores the task's real
+  // title, due date and priority rather than just announcing the deletion.
+  const onDeleteTask = (t: { id: string; title: string; due: string; priority: "low" | "medium" | "high" }) => {
+    deleteTask(rep.id, t.id);
+    toast.success("המשימה נמחקה", {
+      action: {
+        label: "ביטול",
+        onClick: () => {
+          addTask(rep.id, { title: t.title, due: t.due, priority: t.priority });
+          toast.success("המשימה שוחזרה");
+        },
+      },
+    });
+  };
 
   const summary = useMemo(() => {
     const parts: string[] = [];
@@ -219,7 +283,16 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
               <div className="min-w-0 flex-1 grid grid-cols-2 gap-3">
                 <SummaryRow label="יעד אישי" value={target === null ? "לא הוגדר" : formatNum(target)} />
                 <SummaryRow label="ביצוע נוכחי" value={formatNum(rep.currentResult)} />
-                <SummaryRow label="קצב יומי נדרש" value={perDay === null ? "—" : `${formatNum(perDay)}/יום`} />
+                {/* §P3: null perDay means either no target or no working days
+                    left — the latter gets an explicit message, never "0/יום". */}
+                <SummaryRow
+                  label="קצב יומי נדרש"
+                  value={
+                    perDay !== null ? `${formatNum(perDay)}/יום`
+                      : pace?.periodState === "no_time_remaining" ? NO_TIME_REMAINING_LABEL
+                      : "—"
+                  }
+                />
                 <SummaryRow
                   label="תחזית סוף חודש"
                   value={forecast === null ? "—" : formatNum(forecast)}
@@ -351,7 +424,25 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                           ? <Badge variant="outline" className="text-[10px]">פרטי</Badge>
                           : <Badge className="text-[10px] bg-primary/10 text-primary border-transparent hover:bg-primary/10">גלוי לנציג/ה</Badge>}
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setEditingNote(n); setNoteText(n.text); }}><Pencil className="h-3 w-3" /></Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { deleteNote(rep.id, n.id); toast.success("ההערה נמחקה"); }}><Trash2 className="h-3 w-3" /></Button>
+                        {/* §P3: deleting a manager note used to be a single
+                            unconfirmed click with no recovery. It now restores
+                            the exact note (text + visibility) from the undo
+                            toast — a real restore, not a "deleted" message. */}
+                        <Button
+                          variant="ghost" size="icon" className="h-6 w-6"
+                          onClick={() => {
+                            deleteNote(rep.id, n.id);
+                            toast.success("ההערה נמחקה", {
+                              action: {
+                                label: "ביטול",
+                                onClick: () => {
+                                  addNote(rep.id, n.text, { author: n.author, isPrivate: n.isPrivate });
+                                  toast.success("ההערה שוחזרה");
+                                },
+                              },
+                            });
+                          }}
+                        ><Trash2 className="h-3 w-3" /></Button>
                       </div>
                     </div>
                     <p className="text-sm leading-relaxed">{n.text}</p>
@@ -373,14 +464,14 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                 {openTasks.length === 0
                   ? <p className="text-xs text-muted-foreground text-center py-3 rounded-lg border border-dashed">אין משימות פתוחות</p>
                   : <ul className="space-y-1.5">{openTasks.map((t) => (
-                      <TaskRow key={t.id} task={t} onToggle={() => toggleTask(rep.id, t.id)} onDelete={() => { deleteTask(rep.id, t.id); toast.success("המשימה נמחקה"); }} />
+                      <TaskRow key={t.id} task={t} onToggle={() => onToggleTask(t.id)} onDelete={() => onDeleteTask(t)} />
                     ))}</ul>}
               </div>
               {doneTasks.length > 0 && (
                 <div>
                   <div className="text-xs font-semibold text-muted-foreground mb-1.5">הושלמו ({doneTasks.length})</div>
                   <ul className="space-y-1.5">{doneTasks.map((t) => (
-                    <TaskRow key={t.id} task={t} onToggle={() => toggleTask(rep.id, t.id)} onDelete={() => deleteTask(rep.id, t.id)} />
+                    <TaskRow key={t.id} task={t} onToggle={() => onToggleTask(t.id)} onDelete={() => onDeleteTask(t)} />
                   ))}</ul>
                 </div>
               )}

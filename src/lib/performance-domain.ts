@@ -78,18 +78,45 @@ export function paceStatus(actual: number, target: number, workdaysTotal: number
   return "attention";
 }
 
+/**
+ * Whether the measured period still has working days left to act in.
+ * "no_time_remaining" is a genuinely different operational situation from
+ * "behind pace": there is no daily rate that can close the gap, so the UI must
+ * stop offering one.
+ */
+export type PacePeriodState = "active" | "no_time_remaining";
+
 export type PaceInfo = {
   expected: number;
   forecast: number;
-  perDay: number;
+  /**
+   * Units per remaining working day needed to still hit target, or null when
+   * the period has no working days left — never a number computed against a
+   * synthetic minimum of one day. Callers must render null as an honest
+   * end-of-period message, not as "0/day".
+   */
+  perDay: number | null;
   paceDelta: number;
   remaining: number;
+  periodState: PacePeriodState;
 };
+
+/** Honest label for a period that has no working days left to act in. */
+export const NO_TIME_REMAINING_LABEL = "לא נותרו ימי עבודה בתקופה זו";
 
 /**
  * Pace math shared by Performance and RepWorkspace (previously two separate,
  * near-identical inline implementations): expected progress so far, projected
  * end-of-month forecast, and the daily pace needed to still hit target.
+ *
+ * §P3 correction: perDay used to be computed as
+ *     Math.ceil((target - actual) / Math.max(1, workdaysRemaining))
+ * so on the last working day of the month — when workdaysRemaining is already
+ * 0 — it divided by a synthetic 1 and confidently displayed something like
+ * "142/יום כדי לעמוד ביעד" on a day when that is arithmetically impossible.
+ * The floor is gone: with no working days left, perDay is null and
+ * periodState is "no_time_remaining", and the UI says so instead of inventing
+ * an actionable rate.
  */
 export function paceInfo(
   target: number,
@@ -101,9 +128,12 @@ export function paceInfo(
   const passed = Math.max(1, workdaysPassed);
   const expected = workdaysTotal > 0 ? (target / workdaysTotal) * passed : 0;
   const forecast = Math.round((actual / passed) * workdaysTotal);
-  const perDay = Math.max(0, Math.ceil((target - actual) / Math.max(1, workdaysRemaining)));
+  const periodState: PacePeriodState = workdaysRemaining > 0 ? "active" : "no_time_remaining";
+  const perDay = periodState === "active"
+    ? Math.max(0, Math.ceil((target - actual) / workdaysRemaining))
+    : null;
   const paceDelta = actual - expected;
-  return { expected, forecast, perDay, paceDelta, remaining: workdaysRemaining };
+  return { expected, forecast, perDay, paceDelta, remaining: workdaysRemaining, periodState };
 }
 
 export type RiskLevel = "low" | "medium" | "high";

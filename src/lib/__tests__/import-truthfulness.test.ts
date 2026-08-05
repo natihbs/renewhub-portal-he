@@ -1,25 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { autoMap, PERSISTED_FIELDS, RENEWAL_FIELDS, UNSUPPORTED_FIELDS, REQUIRED_FIELDS, FIELD_LABEL, type ImportFieldKey } from "@/lib/import-store";
+import { autoMap, PERSISTED_FIELDS, RENEWAL_FIELDS, UNSUPPORTED_FIELDS, MATCH_ONLY_FIELDS, REQUIRED_FIELDS, FIELD_LABEL, type ImportFieldKey } from "@/lib/import-store";
 
 // Regression coverage: the import mapping UI used to offer fields that were
 // accepted, validated, and then silently dropped before the cloud write. Every
 // real field must now fall into exactly one of three explicit categories:
 // unconditionally persisted (PERSISTED_FIELDS), conditionally persisted only for a
-// renewals-profile team (RENEWAL_FIELDS), or clearly marked unsupported
-// (UNSUPPORTED_FIELDS) — never a silent fourth case.
+// renewals-profile team (RENEWAL_FIELDS), consumed for matching but never
+// written (MATCH_ONLY_FIELDS), or clearly marked unsupported
+// (UNSUPPORTED_FIELDS) — never a silent uncategorized case.
 
 describe("import field truthfulness", () => {
   it("PERSISTED_FIELDS, RENEWAL_FIELDS and UNSUPPORTED_FIELDS are disjoint and together cover every real field", () => {
     for (const f of PERSISTED_FIELDS) {
       expect(UNSUPPORTED_FIELDS).not.toContain(f);
       expect(RENEWAL_FIELDS).not.toContain(f);
+      expect(MATCH_ONLY_FIELDS).not.toContain(f);
     }
     for (const f of RENEWAL_FIELDS) {
+      expect(UNSUPPORTED_FIELDS).not.toContain(f);
+      expect(MATCH_ONLY_FIELDS).not.toContain(f);
+    }
+    for (const f of MATCH_ONLY_FIELDS) {
       expect(UNSUPPORTED_FIELDS).not.toContain(f);
     }
     const allRealFields = (Object.keys(FIELD_LABEL) as ImportFieldKey[]).filter((f) => f !== "__skip__");
     for (const f of allRealFields) {
-      expect(PERSISTED_FIELDS.includes(f) || RENEWAL_FIELDS.includes(f) || UNSUPPORTED_FIELDS.includes(f)).toBe(true);
+      expect(
+        PERSISTED_FIELDS.includes(f) || RENEWAL_FIELDS.includes(f)
+        || MATCH_ONLY_FIELDS.includes(f) || UNSUPPORTED_FIELDS.includes(f),
+      ).toBe(true);
     }
   });
 
