@@ -13,7 +13,7 @@ import { useUx } from "@/lib/ux-store";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth } from "@/lib/format";
 import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
-import { renewalTotalsForTeam } from "@/lib/kpi-values";
+import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useTeamGoal, useTeamGoals, useRepresentativeGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
@@ -126,7 +126,9 @@ function AdminHome() {
                 renewal={
                   (profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals"
                     ? (() => {
-                        const totals = renewalTotalsForTeam(reps.filter((r) => r.teamId === t.teamId).map((r) => r.id), state.kpiValues);
+                        // Historical attribution — the team's own produced
+                        // numbers, not today's roster's lifetime numbers.
+                        const totals = renewalTotalsForTeamHistorical(t.teamId, state.kpiValues);
                         return { totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
                       })()
                     : null
@@ -174,7 +176,7 @@ function ManagerHome() {
 
   const renewal = workspaceTeamId && (profileByTeamId.get(workspaceTeamId) ?? DEFAULT_KPI_PROFILE) === "renewals"
     ? (() => {
-        const totals = renewalTotalsForTeam(scopedReps.map((r) => r.id), state.kpiValues);
+        const totals = renewalTotalsForTeamHistorical(workspaceTeamId, state.kpiValues);
         return { totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
       })()
     : null;

@@ -10,7 +10,7 @@ import { useApp, useIsManager, teamsFromReps, competitionLeaderboard } from "@/l
 import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useTeamGoals, useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
-import { renewalTotalsForTeam } from "@/lib/kpi-values";
+import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
 import { calculateRenewalRate } from "@/lib/renewal-rate";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
 import { useComms, KIND_LABEL, isCommsKind, type CommsKind, type CommsMessage, type CommsTemplate } from "@/lib/comms-store";
@@ -141,8 +141,9 @@ function useGenerationInputs() {
     const renewalTeams = teams
       .filter((t) => (profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals")
       .map((t) => {
-        const repIds = reps.filter((r) => r.teamId === t.teamId).map((r) => r.id);
-        const totals = renewalTotalsForTeam(repIds, state.kpiValues);
+        // Historical attribution (kpi_values.team_id) — the team's own
+        // produced numbers, unaffected by later representative transfers.
+        const totals = renewalTotalsForTeamHistorical(t.teamId, state.kpiValues);
         return { teamId: t.teamId, teamName: t.teamName, totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
       });
 

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { renewalTotalsForRep, renewalTotalsForMonth, renewalTotalsForDay, renewalTotalsForTeam, type KpiValueRow } from "@/lib/kpi-values";
+import {
+  renewalTotalsForRep, renewalTotalsForMonth, renewalTotalsForDay,
+  renewalTotalsForTeamHistorical, renewalTotalsForCurrentRoster, type KpiValueRow,
+} from "@/lib/kpi-values";
 import { calculateRenewalRate } from "@/lib/renewal-rate";
 
 function row(over: Partial<KpiValueRow>): KpiValueRow {
@@ -51,19 +54,58 @@ describe("renewalTotalsForMonth / renewalTotalsForDay — real dated snapshots, 
   });
 });
 
-describe("renewalTotalsForTeam", () => {
+describe("renewalTotalsForCurrentRoster — follows people, for explicitly-labeled current-roster views", () => {
   it("aggregates across every representative id given", () => {
     const rows = [
       row({ id: "k1", representative_id: "r1", metric_date: "2026-08-01", renewal_opportunities: 10, completed_renewals: 8 }),
       row({ id: "k2", representative_id: "r2", metric_date: "2026-08-01", renewal_opportunities: 6, completed_renewals: 2 }),
     ];
-    const totals = renewalTotalsForTeam(["r1", "r2"], rows, { from: "2026-08-01", to: "2026-08-31" });
+    const totals = renewalTotalsForCurrentRoster(["r1", "r2"], rows, { from: "2026-08-01", to: "2026-08-31" });
     expect(totals).toEqual({ opportunities: 16, completed: 10 });
   });
 
-  it("never fabricates a rate when the team has no dated values yet", () => {
-    const totals = renewalTotalsForTeam(["r1", "r2"], []);
+  it("never fabricates a rate when there are no dated values yet", () => {
+    const totals = renewalTotalsForCurrentRoster(["r1", "r2"], []);
     const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
     expect(rate).toEqual({ available: false, reason: "no_opportunities" });
+  });
+});
+
+// §P1 — the defect this whole attribution split exists to fix. kpi_values.team_id
+// is a DB-derived, immutable snapshot of the rep's team when the row was
+// written (see the kpi_values_team_attribution trigger), so a team's produced
+// numbers must be summed by THAT column. The previous implementation summed by
+// today's roster instead, which meant transferring a representative moved their
+// entire renewal history to the new team on every screen at once.
+describe("renewalTotalsForTeamHistorical — attribution does not follow transfers", () => {
+  it("sums only rows attributed to the team, regardless of where the rep sits now", () => {
+    const rows = [
+      row({ id: "k1", representative_id: "r1", team_id: "teamA", metric_date: "2026-08-01", renewal_opportunities: 10, completed_renewals: 8 }),
+      row({ id: "k2", representative_id: "r2", team_id: "teamA", metric_date: "2026-08-01", renewal_opportunities: 6, completed_renewals: 2 }),
+      row({ id: "k3", representative_id: "r3", team_id: "teamB", metric_date: "2026-08-01", renewal_opportunities: 99, completed_renewals: 99 }),
+    ];
+    expect(renewalTotalsForTeamHistorical("teamA", rows, { from: "2026-08-01", to: "2026-08-31" }))
+      .toEqual({ opportunities: 16, completed: 10 });
+  });
+
+  it("a transferred rep's past rows STAY with the team that recorded them", () => {
+    // r1 produced 10/8 while on teamA, then moved to teamB and produced 5/4 there.
+    const rows = [
+      row({ id: "k1", representative_id: "r1", team_id: "teamA", metric_date: "2026-08-01", renewal_opportunities: 10, completed_renewals: 8 }),
+      row({ id: "k2", representative_id: "r1", team_id: "teamB", metric_date: "2026-09-01", renewal_opportunities: 5, completed_renewals: 4 }),
+    ];
+    const range = { from: "2026-08-01", to: "2026-09-30" };
+    expect(renewalTotalsForTeamHistorical("teamA", rows, range)).toEqual({ opportunities: 10, completed: 8 });
+    expect(renewalTotalsForTeamHistorical("teamB", rows, range)).toEqual({ opportunities: 5, completed: 4 });
+
+    // The current-roster helper deliberately behaves differently: it follows
+    // the person, so it attributes ALL of r1's history wherever r1 is today.
+    // That is exactly why it must only ever back an explicitly-labeled view.
+    expect(renewalTotalsForCurrentRoster(["r1"], rows, range)).toEqual({ opportunities: 15, completed: 12 });
+  });
+
+  it("returns null fields (not 0) for a team with no attributed rows", () => {
+    expect(renewalTotalsForTeamHistorical("teamZ", [], { from: "2026-08-01" }))
+      .toEqual({ opportunities: null, completed: null });
   });
 });

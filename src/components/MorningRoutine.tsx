@@ -21,7 +21,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/store";
 import { calculateAchievement } from "@/lib/performance-domain";
-import { useMorning, type UnderwritingIssue, type UnderwritingPriority, type UnderwritingStatus, type ManagerCall } from "@/lib/morning-store";
+import {
+  useMorning, FRESHNESS_SOURCE_LABEL,
+  type UnderwritingIssue, type UnderwritingPriority, type UnderwritingStatus, type ManagerCall, type FreshnessSourceKey,
+} from "@/lib/morning-store";
 import { formatDateIL, formatNum, formatPct, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import type { Rep } from "@/lib/seed";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -157,17 +160,58 @@ export function MorningRoutine() {
 }
 
 /* ============ Data Status ============ */
+/**
+ * §P0. This card used to claim "נתונים רועננו בהצלחה" after calling
+ * simulateRefresh(), which refetched nothing, validated nothing, could not
+ * fail, and stamped a fabricated "עדכני עד" date derived from `now - 24h`.
+ *
+ * It now runs a real freshness check and reports two genuinely different
+ * facts separately, because conflating them was the core dishonesty:
+ *   - "רענון מסד הנתונים" — when Pulse last re-read its OWN cloud database.
+ *     That is what the button does.
+ *   - "ייבוא אחרון מקובץ מקור" — when new source data last actually arrived.
+ *     Only a Data Import does that. There is no automatic external sync, and
+ *     the UI no longer implies one exists.
+ */
 function DataStatusCard({ completeness, withCount, missingCount }: { completeness: number; withCount: number; missingCount: number }) {
   const m = useMorning();
+  const [checking, setChecking] = useState(false);
+  const [failed, setFailed] = useState<FreshnessSourceKey[]>([]);
+
   const tone = m.refreshStatus === "complete" ? "success" : m.refreshStatus === "partial" ? "warning" : "danger";
   const toneClass =
     tone === "success" ? "bg-[color:var(--success)]/10 text-success-foreground border-[color:var(--success)]/30" :
     tone === "warning" ? "bg-[color:var(--warning)]/10 text-warning-foreground border-[color:var(--warning)]/30" :
     "bg-primary/10 text-primary border-primary/30";
-  const label = m.refreshStatus === "complete" ? "הושלם" : m.refreshStatus === "partial" ? "חלקי" : "נכשל";
+  const label = m.refreshStatus === "complete" ? "עדכני" : m.refreshStatus === "partial" ? "חלקי" : "לא נבדק";
   const dotClass =
     tone === "success" ? "bg-[color:var(--success)]" :
     tone === "warning" ? "bg-[color:var(--warning)]" : "bg-primary";
+
+  const runCheck = async () => {
+    setChecking(true);
+    try {
+      // The toast fires only AFTER every refetch has settled and the real
+      // outcome is known — never before, and never unconditionally.
+      const result = await m.runFreshnessCheck();
+      setFailed(result.failed);
+      if (result.status === "complete") {
+        toast.success("כל המקורות נטענו מחדש בהצלחה");
+      } else if (result.status === "partial") {
+        toast.warning(
+          `רענון חלקי — ${result.failed.length} מקורות נכשלו`,
+          { description: result.failed.map((k) => FRESHNESS_SOURCE_LABEL[k]).join(", ") },
+        );
+      } else {
+        toast.error("רענון הנתונים נכשל — הנתונים המוצגים עשויים להיות לא עדכניים");
+      }
+    } catch (e) {
+      setFailed([]);
+      toast.error((e as Error).message || "רענון הנתונים נכשל");
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <div className="rounded-xl border p-4 bg-card">
@@ -182,8 +226,15 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
         </Badge>
       </div>
       <div className="grid grid-cols-2 gap-3 text-sm">
-        <Stat label="רענון אחרון" value={m.lastRefreshAt ? new Date(m.lastRefreshAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—"} />
-        <Stat label="עדכני עד" value={formatDateIL(m.dataAsOf)} />
+        <Stat
+          label="רענון מסד הנתונים"
+          value={m.lastRefreshAt ? new Date(m.lastRefreshAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "טרם בוצע"}
+        />
+        <Stat
+          label="ייבוא אחרון מקובץ מקור"
+          value={m.lastImportAt ? new Date(m.lastImportAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "אין ייבוא"}
+          tone={m.lastImportAt ? undefined : "warning"}
+        />
         <Stat label="נציגים עם נתונים" value={`${withCount}`} tone="success" />
         <Stat label="חסרים נתונים" value={`${missingCount}`} tone={missingCount > 0 ? "danger" : undefined} />
       </div>
@@ -194,12 +245,18 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
         </div>
         <Progress value={completeness} className="h-2" />
       </div>
+      {failed.length > 0 && (
+        <p className="mt-2 rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2 text-xs text-warning-foreground">
+          מקורות שלא נטענו מחדש: {failed.map((k) => FRESHNESS_SOURCE_LABEL[k]).join(", ")}. הנתונים המוצגים עבורם עשויים להיות לא עדכניים.
+        </p>
+      )}
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        הבדיקה טוענת מחדש את הנתונים ממסד הנתונים של Pulse. נתונים חדשים נכנסים למערכת רק דרך ייבוא קובץ מקור.
+      </p>
       <div className="mt-3 flex gap-2">
-        <Button
-          size="sm"
-          onClick={() => { m.simulateRefresh("complete"); toast.success("נתונים רועננו בהצלחה"); }}
-        >
-          <RefreshCw className="ms-1 h-4 w-4" />רענון נתונים
+        <Button size="sm" onClick={runCheck} disabled={checking}>
+          <RefreshCw className={cn("ms-1 h-4 w-4", checking && "animate-spin")} />
+          {checking ? "בודק עדכניות..." : "בדיקת עדכניות נתונים"}
         </Button>
         <Button size="sm" variant="ghost" asChild>
           <Link to="/data-import">ייבוא ידני<ArrowLeft className="me-1 h-4 w-4" /></Link>

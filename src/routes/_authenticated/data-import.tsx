@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Upload, FileSpreadsheet, Download, ArrowRight, ArrowLeft, ShieldAlert,
@@ -24,10 +24,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { useIsManager, useApp, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
-import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useCloudTeams } from "@/lib/teams-hooks";
-import type { KpiValueRow } from "@/lib/kpi-values";
-import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
+import { createRepresentative, updateRepresentativeMetrics, setRepresentativeActive, listRepresentativeMatchCandidates } from "@/lib/rep-admin.functions";
+import { writeRepresentativeKpiValue } from "@/lib/kpi.functions";
 import { setRepresentativeGoals, restoreRepresentativeGoals } from "@/lib/goals.functions";
 import {
   useImport, autoMap, detectPii, PII_LABEL, type PiiHit,
@@ -159,10 +158,35 @@ function DataImportPage() {
   const demoTeams = useMemo(() => teamsFromReps(state.reps).map((t) => ({ id: t.teamId, name: t.teamName })), [state.reps]);
   const teamsForResolution = isDemo ? demoTeams : cloudTeams;
   const importStore = useImport();
-  const kpiValuesCloud = useCloudCollection<KpiValueRow>("kpi_values");
   const qc = useQueryClient();
   const createRepFn = useServerFn(createRepresentative);
   const updateMetricsFn = useServerFn(updateRepresentativeMetrics);
+  // §P1: KPI rows go through the audited domain function, never the generic
+  // cloud upsert — the generic path could not record who wrote the value, what
+  // it was before, or that it came from an import, and it accepted a
+  // caller-supplied team attribution. cloud.functions.ts now refuses generic
+  // writes to kpi_values outright.
+  const writeKpiFn = useServerFn(writeRepresentativeKpiValue);
+  const setRepActiveFn = useServerFn(setRepresentativeActive);
+  // §P1: authoritative match set including INACTIVE representatives, so a row
+  // for a deactivated person is recognised instead of silently duplicated.
+  const loadCandidates = useServerFn(listRepresentativeMatchCandidates);
+  const candidatesQuery = useQuery({
+    queryKey: ["import", "match-candidates"],
+    queryFn: () => loadCandidates(),
+    enabled: !isDemo,
+    staleTime: 30_000,
+  });
+  const matchNamesById = useMemo(
+    () => new Map((candidatesQuery.data?.candidates ?? []).map((c) => [c.id, c.name] as const)),
+    [candidatesQuery.data],
+  );
+  const matchCandidates = useMemo(
+    () => (candidatesQuery.data?.candidates ?? []).map((c) => ({
+      id: c.id, name: c.name, externalRef: c.external_ref, active: c.active, teamId: c.team_id,
+    })),
+    [candidatesQuery.data],
+  );
   const setGoalsFn = useServerFn(setRepresentativeGoals);
   const restoreGoalsFn = useServerFn(restoreRepresentativeGoals);
   const importedByName = profile?.full_name || user?.email || "לא ידוע";
@@ -228,7 +252,7 @@ function DataImportPage() {
       toast.error("חסרות עמודות חובה", { description: missing.map((m) => FIELD_LABEL[m]).join(", ") });
       return;
     }
-    const rows2 = processRows(rows, mapping, state.reps, teamsForResolution);
+    const rows2 = processRows(rows, mapping, state.reps, teamsForResolution, isDemo ? undefined : matchCandidates);
     setProcessed(rows2);
     // A "reliable" default target month exists only when every importable
     // row's own reporting date (תאריך עדכון) agrees on the same calendar
@@ -246,7 +270,7 @@ function DataImportPage() {
     try {
       const snapshot = state.reps.map((r) => ({ ...r }));
       const errorReport: ImportHistoryEntry["errorReport"] = [];
-      let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0, cloudFailed = 0;
+      let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0, cloudFailed = 0, reactivated = 0;
       const now = new Date().toISOString().slice(0, 10);
       const byId = new Map(state.reps.map((r) => [r.id, r] as const));
       // Official-target write candidates, collected only for rows whose
@@ -270,7 +294,27 @@ function DataImportPage() {
         const updatedAt = r.updatedAt ?? now;
         let repIdForRenewal: string | null = null;
         try {
-          if (r.action === "update" && r.matchRepId) {
+          // §P1: an inactive match resolved to "reactivate" is an explicit
+          // human decision — reactivate the EXISTING record and update it,
+          // rather than creating a duplicate person. Reactivation happens
+          // first so the subsequent metric write is a normal write against an
+          // active representative rather than a policy-blocked one.
+          if (r.action === "reactivate" && r.matchRepId) {
+            if (isDemo) throw new Error("הפעלה מחדש אינה נתמכת במצב הדגמה");
+            await setRepActiveFn({ data: { rep_id: r.matchRepId, active: true } });
+            await updateMetricsFn({
+              data: {
+                rep_id: r.matchRepId,
+                current_result: r.currentResult ?? undefined,
+                team_id: r.teamId ?? undefined,
+                source: "import",
+                source_screen: "data-import",
+              },
+            });
+            repIdForRenewal = r.matchRepId;
+            reactivated++;
+            updated++;
+          } else if (r.action === "update" && r.matchRepId) {
             const existing = byId.get(r.matchRepId);
             if (!existing) throw new Error("הנציג המקורי לא נמצא — יתכן שהוסר");
             if (isDemo) {
@@ -289,6 +333,8 @@ function DataImportPage() {
                   rep_id: existing.id,
                   current_result: r.currentResult ?? undefined,
                   team_id: r.teamId ?? undefined,
+                  source: "import",
+                  source_screen: "data-import",
                 },
               });
             }
@@ -327,17 +373,20 @@ function DataImportPage() {
         // write that already succeeded above.
         if (!isDemo && repIdForRenewal && (r.renewalOpportunities != null || r.completedRenewals != null)) {
           try {
-            await kpiValuesCloud.upsert(
-              {
+            // team_id is deliberately NOT sent: the database derives the
+            // historical attribution from the representative's authoritative
+            // state. Row-level attribution and failure reporting are preserved
+            // — each row's outcome is recorded against its own line number.
+            await writeKpiFn({
+              data: {
                 representative_id: repIdForRenewal,
-                team_id: r.teamId,
                 metric_date: updatedAt,
                 renewal_opportunities: r.renewalOpportunities,
                 completed_renewals: r.completedRenewals,
-                source_import_id: null,
+                source: "import",
+                source_screen: "data-import",
               },
-              "representative_id,metric_date",
-            );
+            });
           } catch (e) {
             errs++;
             errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירת נתוני חידוש: ${(e as Error).message ?? e}`] });
@@ -492,6 +541,7 @@ function DataImportPage() {
           {step === 2 && (
             <PreviewStep
               processed={processed} reps={state.reps}
+              matchNames={matchNamesById}
               onChangeAction={(idx, action, matchId) =>
                 setProcessed((p) => p.map((r) => r.index === idx ? { ...r, action, matchRepId: matchId ?? r.matchRepId } : r))
               }
@@ -536,7 +586,14 @@ function DataImportPage() {
             for (const prevRep of entry.snapshot.reps) {
               try {
                 await updateMetricsFn({
-                  data: { rep_id: prevRep.id, current_result: prevRep.currentResult, team_id: prevRep.teamId },
+                  data: {
+                    rep_id: prevRep.id, current_result: prevRep.currentResult, team_id: prevRep.teamId,
+                    // Undo restores a prior state rather than recording new
+                    // operational activity, so it stays available even for a
+                    // representative deactivated since the import — same
+                    // reasoning as restoreRepresentativeGoals.
+                    source: "import_reconciliation", source_screen: "data-import-undo",
+                  },
                 });
               } catch {
                 repsFailed++;
@@ -853,19 +910,39 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
 // ---------- Step: Preview ----------
 
 function PreviewStep({
-  processed, reps, onChangeAction, onBack, onNext, criticalCount, warnCount,
+  processed, reps, matchNames, onChangeAction, onBack, onNext, criticalCount, warnCount,
 }: {
   processed: ProcessedRow[]; reps: Rep[];
+  /**
+   * id -> name across the AUTHORITATIVE candidate set (active + inactive), so a
+   * matched deactivated representative can be named in the row action. The
+   * active-only `reps` list cannot name them — that blind spot is what caused
+   * the duplicate-creation defect in the first place.
+   */
+  matchNames: Map<string, string>;
   onChangeAction: (idx: number, action: ResolvedAction, matchId?: string) => void;
   onBack: () => void; onNext: () => void;
   criticalCount: number; warnCount: number;
 }) {
+  const matchNameById = matchNames;
   const shown = processed.slice(0, 20);
+  const inactiveMatchCount = processed.filter((p) => p.matchedInactive).length;
   const showRenewalColumns = processed.some(
     (p) => p.renewalOpportunities != null || p.completedRenewals != null || p.renewalFieldsSkipped,
   );
   return (
     <div className="space-y-4">
+      {/* §P1: a matched-but-deactivated row is the exact situation that used to
+          silently create a duplicate person. It is surfaced up front, and each
+          such row waits on an explicit decision rather than defaulting. */}
+      {inactiveMatchCount > 0 && (
+        <div className="rounded-xl border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-3 text-sm text-warning-foreground">
+          {inactiveMatchCount === 1
+            ? "שורה אחת תואמת נציג מושבת."
+            : `${inactiveMatchCount} שורות תואמות נציגים מושבתים.`}{" "}
+          שורות אלו לא ייובאו כברירת מחדל. יש לבחור לכל שורה: הפעלה מחדש ועדכון, דילוג, או יצירת נציג נפרד — יצירה תייצר רשומה כפולה עם היסטוריה ריקה.
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatChip label="שורות" value={processed.length} tone="muted" />
         <StatChip label="לעדכון" value={processed.filter((p) => p.action === "update").length} tone="success" />
@@ -936,15 +1013,31 @@ function PreviewStep({
                       onValueChange={(v) => onChangeAction(r.index, v as ResolvedAction)}
                       disabled={hasErr}
                     >
-                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="update" disabled={!r.matchRepId}>
-                          עדכון {r.matchRepId ? `(${reps.find((x) => x.id === r.matchRepId)?.name})` : ""}
+                        {/* §P1: for a row matching a DEACTIVATED representative
+                            the only update route is an explicit reactivation —
+                            plain "update" stays disabled so new operational
+                            numbers can never land on an inactive record, and
+                            "create" is still offered but clearly warned about,
+                            since it genuinely does produce a second person. */}
+                        <SelectItem value="update" disabled={!r.matchRepId || r.matchedInactive}>
+                          עדכון {r.matchRepId && !r.matchedInactive ? `(${matchNameById.get(r.matchRepId) ?? ""})` : ""}
                         </SelectItem>
-                        <SelectItem value="create">יצירת נציג חדש</SelectItem>
+                        {r.matchedInactive && (
+                          <SelectItem value="reactivate">
+                            הפעלה מחדש ועדכון {r.matchRepId ? `(${matchNameById.get(r.matchRepId) ?? ""})` : ""}
+                          </SelectItem>
+                        )}
+                        <SelectItem value="create">{r.matchedInactive ? "יצירת נציג נפרד (כפילות!)" : "יצירת נציג חדש"}</SelectItem>
                         <SelectItem value="skip">דילוג</SelectItem>
                       </SelectContent>
                     </Select>
+                    {r.matchedInactive && !hasErr && (
+                      <div className="mt-1 text-[11px] text-warning-foreground">
+                        {r.matchedBy === "external_ref" ? "זוהה לפי מזהה נציג" : "זוהה לפי שם"} · נציג מושבת
+                      </div>
+                    )}
                     {!r.matchRepId && !hasErr && (
                       <ManualMatchDialog reps={reps} onPick={(id) => onChangeAction(r.index, "update", id)} />
                     )}
@@ -1331,7 +1424,9 @@ function ManualEntryDialog() {
         if (mode === "create") {
           await createRepFn({ data: { name: name.trim(), team_id: teamId || null, current_result: c, external_ref: null, user_id: null, active: true } });
         } else {
-          const payload: { rep_id: string; current_result?: number } = { rep_id: repId };
+          const payload: { rep_id: string; current_result?: number; source: "manual"; source_screen: string } = {
+            rep_id: repId, source: "manual", source_screen: "data-import-quick-edit",
+          };
           if (current !== "" && isFinite(c) && c >= 0) payload.current_result = c;
           await updateMetricsFn({ data: payload });
         }

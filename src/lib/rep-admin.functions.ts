@@ -974,6 +974,66 @@ export type RepMetricsInput = {
   team_id?: string | null;
   monthly_target?: number;
   current_result?: number;
+  /** See RepMetricsEditSource / isMetricEditAllowedForInactiveRep. Defaults to "manual". */
+  source?: RepMetricsEditSource;
+  /** Which screen issued the edit — recorded in the audit entry. */
+  source_screen?: string;
+};
+
+/**
+ * Why a metric edit is being made. This is an explicit product policy input,
+ * not telemetry: it decides whether the edit is permitted at all for an
+ * INACTIVE representative (see isMetricEditAllowedForInactiveRep).
+ *
+ *  - "manual"                 a manager/admin typing into an edit dialog as
+ *                             part of normal day-to-day operation.
+ *  - "import"                 a row applied by the Data Import wizard.
+ *  - "historical_correction"  a deliberate fix to already-recorded history.
+ *  - "import_reconciliation"  reconciling previously imported data.
+ */
+export type RepMetricsEditSource = "manual" | "import" | "historical_correction" | "import_reconciliation";
+
+const METRIC_EDIT_SOURCES: RepMetricsEditSource[] = ["manual", "import", "historical_correction", "import_reconciliation"];
+
+/**
+ * PRODUCT POLICY — editing an inactive representative's metrics (§sprint).
+ *
+ * Deactivation is not deletion: an inactive representative's history stays
+ * readable and stays CORRECTABLE, because refusing corrections would strand
+ * known-bad numbers in permanent reports. What deactivation must prevent is
+ * new day-to-day operational activity being recorded against someone who is
+ * no longer working — that is what reactivation is for.
+ *
+ * So the rule is source-aware rather than a blanket allow or a blanket block:
+ *   - historical_correction / import_reconciliation -> allowed, and audited
+ *     with the source recorded, because these are explicitly retrospective.
+ *   - manual                                        -> blocked; a manager
+ *     editing current_result on an inactive rep in the normal edit dialog is
+ *     recording current-period activity and must reactivate first.
+ *   - import                                        -> blocked by the same
+ *     reasoning; the import wizard must route a deactivated match through the
+ *     explicit reactivate-or-skip choice (§import matching) rather than
+ *     silently writing new numbers to an inactive record.
+ *
+ * Pure and exported so the exact rule is unit-tested independently of the DB.
+ */
+export function isMetricEditAllowedForInactiveRep(source: RepMetricsEditSource): boolean {
+  return source === "historical_correction" || source === "import_reconciliation";
+}
+
+export const INACTIVE_REP_METRIC_EDIT_BLOCKED_MESSAGE =
+  "הנציג מושבת — לא ניתן לעדכן נתוני ביצוע שוטפים. יש להפעיל מחדש את הנציג, או לבצע תיקון היסטורי מפורש.";
+
+type UpdateRepMetricsResult = {
+  rep_id: string;
+  rep_name: string;
+  previous_team_id: string | null;
+  new_team_id: string | null;
+  team_changed: boolean;
+  linked_user_id: string | null;
+  profile_synced: boolean;
+  previous_current_result: number;
+  new_current_result: number;
 };
 
 export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
@@ -998,6 +1058,11 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
       if (!Number.isFinite(c) || c < 0) throw new Error("תוצאה נוכחית לא חוקית");
       out.current_result = Math.round(c);
     }
+    if (data.source !== undefined) {
+      if (!METRIC_EDIT_SOURCES.includes(data.source)) throw new Error("מקור עדכון לא חוקי");
+      out.source = data.source;
+    }
+    if (data.source_screen !== undefined) out.source_screen = String(data.source_screen).slice(0, 60);
     return out;
   })
   .handler(async ({ data, context }) => {
@@ -1006,10 +1071,18 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: before } = await supabaseAdmin
       .from("representatives")
-      .select("name, team_id, monthly_target, current_result, user_id")
+      .select("name, team_id, monthly_target, current_result, user_id, active")
       .eq("id", data.rep_id)
       .maybeSingle();
     if (!before) throw new Error("הנציג לא נמצא");
+
+    const source: RepMetricsEditSource = data.source ?? "manual";
+    // Source-aware inactive-representative policy — see
+    // isMetricEditAllowedForInactiveRep for the full rationale.
+    if (!before.active && !isMetricEditAllowedForInactiveRep(source)) {
+      throw new Error(INACTIVE_REP_METRIC_EDIT_BLOCKED_MESSAGE);
+    }
+
     // Team reassignment stays admin-only this sprint (§23) — this narrow patch
     // path is also reachable from Data Import, which a manager may open.
     if (!isAdmin && data.team_id !== undefined && data.team_id !== before.team_id) {
@@ -1021,22 +1094,202 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
       assertTeamIsActiveForNewAssignment(destTeam);
     }
 
-    const update: { name?: string; team_id?: string | null; monthly_target?: number; current_result?: number } = {};
-    if (data.name !== undefined) update.name = data.name;
-    if (data.team_id !== undefined) update.team_id = data.team_id;
-    if (data.monthly_target !== undefined) update.monthly_target = data.monthly_target;
-    if (data.current_result !== undefined) update.current_result = data.current_result;
-    if (Object.keys(update).length === 0) return { ok: true };
+    const applyName = data.name !== undefined;
+    const applyResult = data.current_result !== undefined;
+    const applyTarget = data.monthly_target !== undefined;
+    const applyTeam = data.team_id !== undefined;
+    if (!applyName && !applyResult && !applyTarget && !applyTeam) return { ok: true, team_changed: false };
 
-    const { error } = await supabaseAdmin.from("representatives").update(update).eq("id", data.rep_id);
+    // §P1 atomic transfer: representatives.team_id and the linked profile's
+    // team_id/manager_id used to be two independent writes, so a failure of
+    // the second left the rep on the new team with their login account still
+    // on the old one — while the client was told the save had FAILED. Both,
+    // plus the metric fields submitted alongside them, are now one RPC =
+    // one transaction: all of it commits, or none of it does.
+    const { data: result, error } = await supabaseAdmin
+      .rpc("update_representative_metrics_with_team_sync", {
+        _rep_id: data.rep_id,
+        _name: applyName ? (data.name as string) : null,
+        _apply_name: applyName,
+        _current_result: applyResult ? (data.current_result as number) : null,
+        _apply_current_result: applyResult,
+        _monthly_target: applyTarget ? (data.monthly_target as number) : null,
+        _apply_monthly_target: applyTarget,
+        _team_id: applyTeam ? (data.team_id as string | null) : null,
+        _apply_team: applyTeam,
+      })
+      .single();
+    if (error) {
+      if (error.code === "P0002") throw new Error("הנציג לא נמצא");
+      if (error.code === "P0005") throw new Error("לא ניתן לשייך נציג לצוות מושבת");
+      if (error.code === "P0006") throw new Error("צוות היעד לא נמצא");
+      throw new Error(error.message);
+    }
+    const r = result as UpdateRepMetricsResult;
+
+    await logAudit(supabaseAdmin, ctx, "rep.metrics_update", {
+      rep_id: data.rep_id,
+      source,
+      source_screen: data.source_screen ?? null,
+      representative_was_active: before.active,
+      before: {
+        name: before.name, team_id: before.team_id,
+        monthly_target: before.monthly_target, current_result: before.current_result,
+      },
+      after: {
+        ...(applyName ? { name: data.name } : {}),
+        ...(applyTeam ? { team_id: data.team_id } : {}),
+        ...(applyTarget ? { monthly_target: data.monthly_target } : {}),
+        ...(applyResult ? { current_result: data.current_result } : {}),
+      },
+    }, r.linked_user_id);
+    if (r.team_changed) {
+      await logAudit(supabaseAdmin, ctx, "rep.transfer", {
+        rep_id: data.rep_id,
+        name: r.rep_name,
+        from_team: r.previous_team_id,
+        to_team: r.new_team_id,
+        linked_user_id: r.linked_user_id,
+        linked_profile_synced: r.profile_synced,
+        source,
+        source_screen: data.source_screen ?? null,
+      }, r.linked_user_id);
+    }
+    return { ok: true, team_changed: r.team_changed, profile_synced: r.profile_synced };
+  });
+
+/**
+ * Authorization for toggling a representative task. Deliberately NOT
+ * assertCanEdit: a representative may complete their OWN tasks, which is what
+ * the "rep tasks self update" RLS policy has always allowed and what the
+ * RepWorkspace sheet exposes to a rep viewing their own record.
+ *
+ * The three permitted actors, and the rule for each, mirror the RLS policies
+ * exactly so this server path can never be looser than direct table access:
+ *   - admin                       -> always
+ *   - manager of the rep's team   -> private.can_manage_rep
+ *   - the representative itself   -> private.rep_is_self_active, i.e. ONLY
+ *     while their representative record is still active. A deactivated rep
+ *     keeps reading their history but stops being able to write to it (see
+ *     20260806100000_disabled_representative_write_lifecycle.sql).
+ */
+async function assertCanToggleTask(
+  ctx: Ctx,
+  admin: any,
+  repId: string,
+): Promise<void> {
+  const roles = await getRoles(ctx);
+  if (roles.includes("admin")) return;
+
+  const { data: rep, error } = await admin
+    .from("representatives").select("id, active, user_id").eq("id", repId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!rep) throw new Error("הנציג לא נמצא");
+
+  if (roles.includes("manager")) {
+    // RLS-scoped read: resolves only for a rep on a team this manager manages.
+    const { data: scoped, error: scopedErr } = await ctx.supabase
+      .from("representatives").select("id").eq("id", repId).maybeSingle();
+    if (scopedErr) throw new Error(scopedErr.message);
+    if (scoped) return;
+  }
+
+  if (rep.user_id && rep.user_id === ctx.userId) {
+    if (!rep.active) throw new Error("הנציג מושבת — לא ניתן לעדכן משימות");
+    return;
+  }
+
+  throw new Error("אין לך הרשאה לעדכן משימה זו");
+}
+
+export type ToggleTaskResult = {
+  task_id: string;
+  representative_id: string;
+  title: string;
+  previous_done: boolean;
+  done: boolean;
+};
+
+/**
+ * §P1 concurrency-safe task completion.
+ *
+ * The client no longer computes the new value. It used to:
+ *     void tasks.update(taskId, { done: !current?.done })
+ * reading `current` out of a 15s-stale React Query cache — so two managers
+ * toggling the same task both wrote the same value (one toggle silently
+ * lost), and a task missing from the cache was coerced to done=true.
+ *
+ * Now the caller sends only the task id; toggle_rep_task_done flips the value
+ * the DATABASE holds, under a row lock, and returns the committed state so
+ * the UI renders what actually happened.
+ */
+export const toggleRepresentativeTask = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { task_id: string }) => {
+    if (!data?.task_id) throw new Error("חסר מזהה משימה");
+    return { task_id: data.task_id };
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Resolve the task's representative first so authorization is evaluated
+    // against the real relationship, before any write is attempted.
+    const { data: task, error: taskErr } = await supabaseAdmin
+      .from("rep_tasks").select("id, representative_id").eq("id", data.task_id).maybeSingle();
+    if (taskErr) throw new Error(taskErr.message);
+    if (!task) throw new Error("המשימה לא נמצאה — ייתכן שנמחקה");
+
+    await assertCanToggleTask(ctx, supabaseAdmin, task.representative_id);
+
+    const { data: result, error } = await supabaseAdmin
+      .rpc("toggle_rep_task_done", { _task_id: data.task_id })
+      .single();
+    if (error) {
+      if (error.code === "P0002") throw new Error("המשימה לא נמצאה — ייתכן שנמחקה");
+      throw new Error(error.message);
+    }
+    return result as ToggleTaskResult;
+  });
+
+export type ImportMatchCandidateRow = {
+  id: string;
+  name: string;
+  external_ref: string | null;
+  active: boolean;
+  team_id: string | null;
+};
+
+/**
+ * §P1 duplicate prevention: the authoritative match set for the import wizard,
+ * INCLUDING deactivated representatives.
+ *
+ * The wizard used to match against state.reps — the active-only mirror — so a
+ * file row naming a deactivated representative matched nothing, fell through
+ * to "create", and produced a duplicate active record with zeroed history
+ * while the original's feedback/KPI/goal history stayed orphaned under the
+ * old id.
+ *
+ * Scope is RLS-derived, not re-implemented: the read runs on the caller's own
+ * client, so an admin sees every representative and a manager sees exactly
+ * the representatives on the teams they manage — which is also what makes the
+ * "a manager may only reactivate reps in their scope" requirement hold, since
+ * a rep outside their scope never appears as a candidate in the first place
+ * and updateRepresentativeMetrics/setRepresentativeActive re-check server-side
+ * regardless.
+ */
+export const listRepresentativeMatchCandidates = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const ctx = context as unknown as Ctx;
+    const roles = await getRoles(ctx);
+    if (!roles.includes("admin") && !roles.includes("manager")) {
+      throw new Error("אין הרשאה לייבוא נתונים");
+    }
+    const { data, error } = await ctx.supabase
+      .from("representatives")
+      .select("id, name, external_ref, active, team_id")
+      .order("name");
     if (error) throw new Error(error.message);
-    if (before.user_id && update.team_id !== undefined && update.team_id !== before.team_id) {
-      await syncLinkedProfileTeam(supabaseAdmin, before.user_id, update.team_id);
-    }
-
-    await logAudit(supabaseAdmin, ctx, "rep.metrics_update", { rep_id: data.rep_id, before, after: update });
-    if (update.team_id !== undefined && before.team_id !== update.team_id) {
-      await logAudit(supabaseAdmin, ctx, "rep.transfer", { rep_id: data.rep_id, from_team: before.team_id, to_team: update.team_id });
-    }
-    return { ok: true };
+    return { candidates: (data ?? []) as ImportMatchCandidateRow[] };
   });

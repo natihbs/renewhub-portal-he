@@ -9,7 +9,14 @@ import type { Rep } from "@/lib/seed";
 export type RawRow = Record<string, unknown>;
 export type Severity = "error" | "warning";
 export type RowIssue = { severity: Severity; message: string };
-export type ResolvedAction = "update" | "create" | "skip";
+/**
+ * "reactivate" (§P1) is the explicit resolution for a row matching a
+ * DEACTIVATED representative: reactivate that existing record and update it,
+ * instead of creating a duplicate person or silently writing to an inactive
+ * one. It is only ever set by a human choosing it in the wizard — the
+ * processor never assigns it automatically.
+ */
+export type ResolvedAction = "update" | "create" | "skip" | "reactivate";
 
 export type ProcessedRow = {
   index: number;
@@ -30,8 +37,79 @@ export type ProcessedRow = {
   renewalFieldsSkipped: boolean;
   issues: RowIssue[];
   matchRepId: string | null;
+  /**
+   * True when the best match is a DEACTIVATED representative. Such a row is
+   * never auto-resolved to "create" — that is precisely how the previous
+   * implementation produced duplicate active representatives — and never
+   * auto-resolved to "update" either, since silently writing new operational
+   * numbers to an inactive record is the thing the inactive-rep policy
+   * forbids. It is parked on "skip" until a human chooses explicitly.
+   */
+  matchedInactive: boolean;
+  /** How the match was found, so the UI can explain itself honestly. */
+  matchedBy: "external_ref" | "name" | null;
   action: ResolvedAction;
 };
+
+/**
+ * The authoritative match candidate set for an import (§P1).
+ *
+ * The old matcher matched against `state.reps`, which is the ACTIVE-only
+ * mirror maintained by CloudRepsSync. A file row naming a deactivated
+ * representative therefore found no candidate at all, fell through to
+ * "create", and produced a second, active representative with the same name,
+ * a fresh id, zeroed history, and no relationship to the original — silently
+ * fragmenting that person's identity across two records.
+ *
+ * This set deliberately includes inactive representatives, and carries
+ * external_ref so a stable business identifier can win over name matching.
+ */
+export type ImportMatchCandidate = {
+  id: string;
+  name: string;
+  externalRef: string | null;
+  active: boolean;
+  teamId: string | null;
+};
+
+export type ImportMatch = {
+  candidate: ImportMatchCandidate;
+  matchedBy: "external_ref" | "name";
+} | null;
+
+/**
+ * Match one file row to a representative, in the order the sprint spec
+ * requires: a stable external_ref beats everything, then an exact normalized
+ * name, then nothing. Exported and pure so the precedence is directly tested.
+ *
+ * external_ref wins first because it is the only identifier that survives a
+ * rename, and because it is UNIQUE where non-null at the database level (see
+ * 20260806093000_representatives_external_ref_unique.sql) — so an
+ * external_ref match is unambiguous by construction, whereas two people can
+ * genuinely share a name.
+ */
+export function matchImportRow(
+  rowName: string,
+  rowExternalRef: string | null,
+  candidates: ImportMatchCandidate[],
+): ImportMatch {
+  const ref = rowExternalRef?.trim();
+  if (ref) {
+    const byRef = candidates.find((c) => c.externalRef && c.externalRef.trim() === ref);
+    if (byRef) return { candidate: byRef, matchedBy: "external_ref" };
+  }
+  const name = rowName?.trim();
+  if (name) {
+    const norm = normalizeName(name);
+    const byName = candidates.find((c) => normalizeName(c.name) === norm);
+    if (byName) return { candidate: byName, matchedBy: "name" };
+  }
+  return null;
+}
+
+/** Explains an inactive match in the row list, and in the confirmation UI. */
+export const INACTIVE_MATCH_MESSAGE =
+  "השורה תואמת נציג מושבת. יש לבחור במפורש: הפעלה מחדש ועדכון, דילוג, או יצירת נציג נפרד.";
 
 /** Unifies CloudTeam (Live Mode, carries kpiProfile) and the plain {id,name} demo team shape. */
 export type ResolvableTeam = { id: string; name: string; kpiProfile?: KpiProfile };
@@ -59,6 +137,12 @@ export function processRows(
   mapping: Record<string, ImportFieldKey>,
   reps: Rep[],
   teams: ResolvableTeam[],
+  /**
+   * Authoritative match set including INACTIVE representatives (§P1). When
+   * omitted the matcher falls back to the active-only `reps` list, which is
+   * the legacy behavior that could silently duplicate a deactivated person.
+   */
+  candidates?: ImportMatchCandidate[],
 ): ProcessedRow[] {
   // reverse mapping: field -> column
   const fieldToCol: Partial<Record<ImportFieldKey, string>> = {};
@@ -129,14 +213,36 @@ export function processRows(
       } else seenNames.set(key, i);
     }
 
-    const match = rawName ? repByNorm.get(normalizeName(rawName)) : undefined;
+    // §P1: match against the authoritative candidate set (active AND inactive)
+    // when one was supplied, falling back to the legacy active-only list only
+    // when a caller hasn't been migrated yet.
+    const rowExternalRef = fieldToCol.externalRef ? String(raw[fieldToCol.externalRef] ?? "").trim() || null : null;
+    const matched = candidates
+      ? matchImportRow(rawName, rowExternalRef, candidates)
+      : (() => {
+          const legacy = rawName ? repByNorm.get(normalizeName(rawName)) : undefined;
+          return legacy
+            ? { candidate: { id: legacy.id, name: legacy.name, externalRef: null, active: true, teamId: legacy.teamId }, matchedBy: "name" as const }
+            : null;
+        })();
+
+    const matchedInactive = !!matched && !matched.candidate.active;
+    if (matchedInactive) {
+      issues.push({ severity: "warning", message: INACTIVE_MATCH_MESSAGE });
+    }
+
     const hasErrors = issues.some((x) => x.severity === "error");
     out.push({
       index: i, raw, name: rawName, teamId, teamName, teamRaw, monthlyTarget: target, currentResult: current, updatedAt: upd,
       renewalOpportunities, completedRenewals, renewalFieldsSkipped,
       issues,
-      matchRepId: match?.id ?? null,
-      action: hasErrors ? "skip" : match ? "update" : "create",
+      matchRepId: matched?.candidate.id ?? null,
+      matchedInactive,
+      matchedBy: matched?.matchedBy ?? null,
+      // An inactive match parks on "skip": never "create" (that duplicated the
+      // person) and never "update" (that would write new operational numbers
+      // to a deactivated record). A human resolves it explicitly.
+      action: hasErrors ? "skip" : matchedInactive ? "skip" : matched ? "update" : "create",
     });
   });
   return out;

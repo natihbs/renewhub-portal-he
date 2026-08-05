@@ -35,6 +35,24 @@ export const CLOUD_TABLES = [
   "representative_goals",
 ] as const;
 
+/**
+ * Tables that stay readable through this generic, RLS-scoped reader but whose
+ * WRITES must go through a domain-specific server function instead (§P1
+ * auditability).
+ *
+ * kpi_values is here because a KPI figure is a reportable business fact: it
+ * needs before/after audit attribution, a recorded write source (manual vs
+ * import vs undo), and server-derived team attribution. This generic proxy
+ * can provide none of those — it forwards whatever object it is handed. Use
+ * writeRepresentativeKpiValue / deleteRepresentativeKpiValue
+ * (src/lib/kpi.functions.ts) instead.
+ *
+ * Reads are deliberately still allowed here: store.tsx's RLS-scoped
+ * kpi_values subscription is the single read path every KPI consumer shares,
+ * and RLS is a complete authorization answer for a read.
+ */
+export const CLOUD_WRITE_PROTECTED_TABLES = ["kpi_values"] as const;
+
 export type CloudTable = (typeof CLOUD_TABLES)[number];
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type Row = Record<string, Json>;
@@ -46,6 +64,15 @@ function table(name: string) {
     throw new Error("טבלה לא מורשית");
   }
   return name;
+}
+
+/** Table gate for the mutating helpers — see CLOUD_WRITE_PROTECTED_TABLES. */
+function writableTable(name: string) {
+  const t = table(name);
+  if ((CLOUD_WRITE_PROTECTED_TABLES as readonly string[]).includes(t)) {
+    throw new Error("כתיבה לטבלה זו מתבצעת דרך פעולת שרת ייעודית בלבד");
+  }
+  return t;
 }
 
 function db(client: unknown) {
@@ -100,7 +127,7 @@ export const cloudInsert = createServerFn({ method: "POST" })
     const values = { ...data.values };
     if (data.stampUser) values[data.stampUser] = context.userId;
     const { data: row, error } = await db(context.supabase)
-      .from(table(data.table))
+      .from(writableTable(data.table))
       .insert(values)
       .select()
       .single();
@@ -113,7 +140,7 @@ export const cloudUpdate = createServerFn({ method: "POST" })
   .inputValidator((d: { table: string; id: string; values: Row; idColumn?: string }) => d)
   .handler(async ({ data, context }) => {
     const { data: row, error } = await db(context.supabase)
-      .from(table(data.table))
+      .from(writableTable(data.table))
       .update(data.values)
       .eq(data.idColumn ?? "id", data.id)
       .select()
@@ -129,7 +156,7 @@ export const cloudUpsert = createServerFn({ method: "POST" })
     const values = { ...data.values };
     if (data.stampUser) values[data.stampUser] = context.userId;
     const { data: row, error } = await db(context.supabase)
-      .from(table(data.table))
+      .from(writableTable(data.table))
       .upsert(values, data.onConflict ? { onConflict: data.onConflict } : undefined)
       .select()
       .single();
@@ -142,7 +169,7 @@ export const cloudDelete = createServerFn({ method: "POST" })
   .inputValidator((d: { table: string; id: string; idColumn?: string }) => d)
   .handler(async ({ data, context }) => {
     const { error } = await db(context.supabase)
-      .from(table(data.table))
+      .from(writableTable(data.table))
       .delete()
       .eq(data.idColumn ?? "id", data.id);
     fail(error);
@@ -153,7 +180,7 @@ export const cloudDeleteWhere = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { table: string; eq: Filters }) => d)
   .handler(async ({ data, context }) => {
-    let q = db(context.supabase).from(table(data.table)).delete();
+    let q = db(context.supabase).from(writableTable(data.table)).delete();
     for (const [k, v] of Object.entries(data.eq)) {
       q = v === null ? q.is(k, null) : q.eq(k, v);
     }

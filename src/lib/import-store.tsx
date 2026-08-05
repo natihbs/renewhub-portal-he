@@ -5,6 +5,11 @@ import type { Rep } from "./seed";
 
 export type ImportFieldKey =
   | "name"
+  // Stable per-representative business identifier. Optional, but when the
+  // file carries one it takes precedence over name matching (§P1) — it is the
+  // only identifier that survives a rename, and it is UNIQUE where non-null
+  // at the database level.
+  | "externalRef"
   | "team"
   | "monthlyTarget"
   | "currentResult"
@@ -44,6 +49,22 @@ export const REQUIRED_FIELDS: ImportFieldKey[] = ["name", "team", "currentResult
 export const PERSISTED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarget", "currentResult", "updatedAt"];
 
 /**
+ * Fields that are genuinely CONSUMED but never written (§P1). externalRef
+ * drives representative matching (matchImportRow) — including matching a
+ * DEACTIVATED representative, which is what stops the wizard silently
+ * creating a duplicate person — but the import never writes external_ref
+ * itself; that stays owned by the Representatives screen.
+ *
+ * This is a real fourth category, named explicitly rather than folded into
+ * "persisted" (untrue) or "unsupported" (also untrue — an unsupported field's
+ * values are dropped, these are used). The truthfulness test treats it as a
+ * first-class category so no field can ever go silently uncategorized.
+ */
+export const MATCH_ONLY_FIELDS: ImportFieldKey[] = ["externalRef"];
+export const MATCH_ONLY_FIELD_REASON =
+  "העמודה משמשת להתאמה מדויקת מול נציג קיים בלבד — הערך עצמו אינו נשמר על רשומת הנציג.";
+
+/**
  * Persisted, but only to kpi_values, and only for a row whose resolved team has
  * kpi_profile "renewals" — never to representatives, never for a generic team. See
  * processRows()/applyImport() in data-import.tsx for the profile gate.
@@ -62,6 +83,7 @@ export const UNSUPPORTED_FIELD_REASON = "השדה מוצג להתאמה עתיד
 
 export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   name: "שם הנציג",
+  externalRef: "מזהה נציג (התאמה מדויקת, אופציונלי)",
   team: "צוות",
   monthlyTarget: "יעד חודשי (אופציונלי — עדכון יעדים רשמיים דורש אישור נפרד)",
   currentResult: "ביצוע נוכחי",
@@ -282,6 +304,7 @@ export function normalizeName(name: string): string {
 // see it's unsupported and, if they still map it, be told nothing will be saved.
 const AUTO_MAP: { field: ImportFieldKey; keywords: string[] }[] = [
   { field: "name", keywords: ["שם הנציג", "שם נציג", "שם עובד", "שם", "נציג", "name", "employee"] },
+  { field: "externalRef", keywords: ["מזהה נציג", "מזהה", "external_ref", "externalref", "employee id", "id"] },
   { field: "team", keywords: ["צוות", "team", "מחלקה"] },
   { field: "monthlyTarget", keywords: ["יעד חודשי", "יעד", "target"] },
   { field: "currentResult", keywords: ["ביצוע נוכחי", "ביצוע", "תוצאה", "result", "actual"] },

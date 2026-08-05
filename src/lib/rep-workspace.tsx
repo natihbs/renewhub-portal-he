@@ -1,7 +1,9 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAuth } from "@/lib/auth";
 import { useApp } from "@/lib/store";
+import { toggleRepresentativeTask } from "@/lib/rep-admin.functions";
 
 export type WorkspaceNote = { id: string; author: string; date: string; text: string; isPrivate: boolean };
 export type WorkspaceTask = {
@@ -41,7 +43,12 @@ type Ctx = {
   deleteNote: (repId: string, noteId: string) => void;
   getTasks: (repId: string) => WorkspaceTask[];
   addTask: (repId: string, t: Omit<WorkspaceTask, "id" | "done">) => void;
-  toggleTask: (repId: string, taskId: string) => void;
+  /**
+   * §P1: resolves to the state the DATABASE committed, so the caller can
+   * report what actually happened instead of what it predicted. Rejects on a
+   * missing/deleted task rather than silently succeeding.
+   */
+  toggleTask: (repId: string, taskId: string) => Promise<{ done: boolean }>;
   deleteTask: (repId: string, taskId: string) => void;
   isLoading: boolean;
   isError: boolean;
@@ -57,6 +64,7 @@ export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
   const [demo, setDemo] = useState<DemoStore>({ notes: {}, tasks: {} });
   const { profile, isAdmin, isManager } = useAuth();
   const { state } = useApp();
+  const toggleTaskFn = useServerFn(toggleRepresentativeTask);
 
   // Same scoping rationale as feedback/listening_schedules: a rep only needs their own
   // notes/tasks, a manager/admin needs every rep they can manage (= state.reps).
@@ -112,14 +120,17 @@ export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
             ...s,
             tasks: { ...s.tasks, [repId]: [...(s.tasks[repId] ?? []), { ...t, id: uid(), done: false }] },
           })),
-        toggleTask: (repId, taskId) =>
-          setDemo((s) => ({
-            ...s,
-            tasks: {
-              ...s.tasks,
-              [repId]: (s.tasks[repId] ?? []).map((t) => (t.id === taskId ? { ...t, done: !t.done } : t)),
-            },
-          })),
+        toggleTask: async (repId, taskId) => {
+          let next = false;
+          setDemo((s) => {
+            const list = s.tasks[repId] ?? [];
+            const current = list.find((t) => t.id === taskId);
+            if (!current) return s;
+            next = !current.done;
+            return { ...s, tasks: { ...s.tasks, [repId]: list.map((t) => (t.id === taskId ? { ...t, done: next } : t)) } };
+          });
+          return { done: next };
+        },
         deleteTask: (repId, taskId) =>
           setDemo((s) => ({
             ...s,
@@ -175,13 +186,20 @@ export function RepWorkspaceProvider({ children }: { children: ReactNode }) {
           },
           "created_by",
         ),
-      toggleTask: (_repId, taskId) => {
-        const current = tasks.rows.find((t) => t.id === taskId);
-        void tasks.update(taskId, { done: !current?.done });
+      // §P1 concurrency: the new value is decided by the database, not by
+      // this cache. The old implementation sent `!current?.done` computed from
+      // a possibly-stale row — losing one of two concurrent toggles, and
+      // forcing done=true whenever the row was missing from the cache.
+      // The refetch is awaited before resolving so callers only report success
+      // once the list actually reflects the committed state.
+      toggleTask: async (_repId, taskId) => {
+        const result = await toggleTaskFn({ data: { task_id: taskId } });
+        await tasks.refetch();
+        return { done: result.done };
       },
       deleteTask: (_repId, taskId) => void tasks.remove(taskId),
     };
-  }, [openRepId, demo, notes, tasks, profile]);
+  }, [openRepId, demo, notes, tasks, profile, toggleTaskFn]);
 
   return <RepWorkspaceCtx.Provider value={value}>{children}</RepWorkspaceCtx.Provider>;
 }

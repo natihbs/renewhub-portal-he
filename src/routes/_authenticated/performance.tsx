@@ -24,15 +24,16 @@ import { Separator } from "@/components/ui/separator";
 import {
   Pencil, Plus, Search,
   Users, CheckCircle2, AlertTriangle, Target, Gauge, LineChart as LineChartIcon,
-  FileSpreadsheet, FileText, Printer, Headphones, StickyNote, Lightbulb,
+  FileSpreadsheet, Printer, Headphones, StickyNote, Lightbulb,
   Sparkles,
 } from "lucide-react";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import {
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
-  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, type KpiProfile, type Tone, type PaceInfo,
+  PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL,
+  type KpiProfile, type Tone, type PaceInfo,
 } from "@/lib/performance-domain";
-import { renewalTotalsForTeam, type RenewalTotals } from "@/lib/kpi-values";
+import { renewalTotalsForTeamHistorical, type RenewalTotals } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone, type RenewalRateResult } from "@/lib/renewal-rate";
 import { useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
 import { toast } from "sonner";
@@ -240,23 +241,26 @@ function PerformancePage() {
 
   // Renewal-specific KPIs, only ever computed for a team whose profile actually
   // supports them — never derived from monthlyTarget/currentResult.
+  // §P1 attribution: team renewal figures aggregate by the immutable
+  // kpi_values.team_id (what THIS TEAM produced), never by today's roster —
+  // so transferring a representative no longer moves their past renewal
+  // contribution onto their new team's card. See the semantics block in
+  // kpi-values.ts.
   const selectedRenewal = useMemo(() => {
-    if (selectedTeamProfile !== "renewals") return null;
-    const repIds = filtered.map((e) => e.rep.id);
-    const totals = renewalTotalsForTeam(repIds, state.kpiValues);
+    if (selectedTeamProfile !== "renewals" || teamFilter === "all") return null;
+    const totals = renewalTotalsForTeamHistorical(teamFilter, state.kpiValues);
     const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
     return { totals, rate };
-  }, [selectedTeamProfile, filtered, state.kpiValues]);
+  }, [selectedTeamProfile, teamFilter, state.kpiValues]);
 
   const renewalsByTeam = useMemo(() => {
     if (teamFilter !== "all") return [];
     return renewalTeams.map((t) => {
-      const repIds = state.reps.filter((r) => r.teamId === t.teamId).map((r) => r.id);
-      const totals = renewalTotalsForTeam(repIds, state.kpiValues);
+      const totals = renewalTotalsForTeamHistorical(t.teamId, state.kpiValues);
       const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
       return { teamId: t.teamId, teamName: t.teamName, totals, rate };
     });
-  }, [teamFilter, renewalTeams, state.reps, state.kpiValues]);
+  }, [teamFilter, renewalTeams, state.kpiValues]);
 
 
 
@@ -304,11 +308,13 @@ function PerformancePage() {
             <Button variant="outline" size="sm" onClick={exportCsv}>
               <FileSpreadsheet className="ms-1 h-4 w-4" />ייצוא ל-Excel
             </Button>
+            {/* §P3: "ייצוא ל-PDF" and "הדפסה" were two separate buttons both
+                calling window.print() — presenting one capability as two.
+                There is no dedicated PDF renderer here, so this is the single
+                honest action, named for what the browser dialog actually
+                offers. */}
             <Button variant="outline" size="sm" onClick={() => window.print()}>
-              <FileText className="ms-1 h-4 w-4" />ייצוא ל-PDF
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
-              <Printer className="ms-1 h-4 w-4" />הדפסה
+              <Printer className="ms-1 h-4 w-4" />הדפסה / שמירה כ-PDF
             </Button>
             <ManagerOnly>
               <RepFormDialog trigger={<Button size="sm"><Plus className="ms-1 h-4 w-4" />הוספת נציג</Button>} />
@@ -566,7 +572,11 @@ function PerformancePage() {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="text-end tabular-nums text-sm">{e.pace ? formatNum(e.pace.perDay) : "—"}</TableCell>
+                        {/* §P3: perDay is null once no working days remain —
+                            never a rate computed against a synthetic 1 day. */}
+                        <TableCell className="text-end tabular-nums text-sm">
+                          {e.pace?.perDay != null ? formatNum(e.pace.perDay) : "—"}
+                        </TableCell>
                         <TableCell className="text-end">
                           {e.gap === null || e.remaining === null ? (
                             <span className="text-xs text-muted-foreground">—</span>
@@ -636,9 +646,16 @@ function PerformancePage() {
                     <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
                       <RiskBadge level={e.risk.level} />
                     </div>
+                    {/* §P3: three genuinely distinct end states — target met,
+                        no working days left to act (no rate can be offered),
+                        or a real achievable daily rate. */}
                     {e.pace && e.remaining !== null && (
                       <div className="mt-2 text-xs text-muted-foreground">
-                        {e.remaining > 0 ? `${formatNum(e.pace.perDay)}/יום כדי לעמוד ביעד` : "היעד הושלם"}
+                        {e.remaining <= 0
+                          ? "היעד הושלם"
+                          : e.pace.periodState === "no_time_remaining"
+                          ? NO_TIME_REMAINING_LABEL
+                          : `${formatNum(e.pace.perDay as number)}/יום כדי לעמוד ביעד`}
                       </div>
                     )}
                   </button>
@@ -860,7 +877,17 @@ function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }
         return;
       }
       if (rep) {
-        await updateMetricsFn({ data: { rep_id: rep.id, name: name.trim(), team_id: teamId || null, current_result: result } });
+        // source: "manual" is the honest classification for a manager typing
+        // into this dialog, and it is what the server uses to BLOCK the edit
+        // if the representative has since been deactivated (see
+        // isMetricEditAllowedForInactiveRep) — such a rep must be reactivated
+        // rather than silently accumulating new operational numbers.
+        await updateMetricsFn({
+          data: {
+            rep_id: rep.id, name: name.trim(), team_id: teamId || null, current_result: result,
+            source: "manual", source_screen: "performance",
+          },
+        });
       } else {
         await createFn({ data: { name: name.trim(), team_id: teamId || null, current_result: result, external_ref: null, user_id: null, active: true } });
       }
@@ -899,7 +926,7 @@ function RepFormDialog({ trigger, rep }: { trigger: React.ReactNode; rep?: Rep }
                 <SelectItem value="__none__">ללא צוות</SelectItem>
                 {teamOptions.map((t) => (
                   <SelectItem key={t.id} value={t.id} disabled={!t.active && t.id !== rep?.teamId}>
-                    {t.name}{!t.active ? " (לא פעיל)" : ""}
+                    {t.name}{!t.active ? " · מושבת" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

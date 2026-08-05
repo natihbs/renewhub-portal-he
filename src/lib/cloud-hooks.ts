@@ -56,6 +56,17 @@ export function useCloudCollection<T>(table: string, opts: ListOpts = {}) {
     void qc.invalidateQueries({ queryKey: ["cloud", table] });
   }, [qc, table]);
 
+  /**
+   * Awaitable refetch of exactly this collection. `invalidate` above is
+   * deliberately fire-and-forget for the common optimistic case; this is for
+   * callers that must not report success until the refreshed rows have
+   * actually landed (task toggle, data-freshness check).
+   */
+  const refetch = useCallback(
+    () => qc.refetchQueries({ queryKey: ["cloud", table] }),
+    [qc, table],
+  );
+
   const insert = useCallback(
     async (values: Row, stampUser?: string) => {
       const row = (await insertFn({ data: { table, values, stampUser } })) as T;
@@ -111,5 +122,6 @@ export function useCloudCollection<T>(table: string, opts: ListOpts = {}) {
     remove,
     removeWhere,
     refresh: invalidate,
+    refetch,
   };
 }
