@@ -79,6 +79,7 @@ function RepresentativesPage() {
   const reps = data?.reps ?? [];
   const teams = data?.teams ?? [];
   const people = data?.people ?? [];
+  const eligibleLinkAccounts = data?.eligibleLinkAccounts ?? [];
   const isAdmin = !!data?.isAdmin;
   const isManager = !!data?.isManager;
   const canCreate = isAdmin || isManager;
@@ -244,6 +245,7 @@ function RepresentativesPage() {
           rep={editing}
           teams={teams}
           people={people}
+          eligibleLinkAccounts={eligibleLinkAccounts}
           isAdmin={isAdmin}
           isManager={isManager}
           onClose={() => { setCreating(false); setEditing(null); }}
@@ -301,10 +303,11 @@ function RowActions({ rep, isAdmin, isManager, onEdit, onToggle, onTransfer, onL
   );
 }
 
-function RepDialog({ rep, teams, people, isAdmin, isManager, onClose, onDone }: {
+function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManager, onClose, onDone }: {
   rep: RepRow | null;
   teams: { id: string; name: string }[];
   people: any[];
+  eligibleLinkAccounts: { id: string; full_name: string | null; email: string | null }[];
   isAdmin: boolean;
   isManager: boolean;
   onClose: () => void;
@@ -313,6 +316,7 @@ function RepDialog({ rep, teams, people, isAdmin, isManager, onClose, onDone }: 
   const create = useServerFn(createRepresentative);
   const update = useServerFn(updateRepresentative);
   const createWithInvite = useServerFn(createRepresentativeWithInvite);
+  const retryInvite = useServerFn(inviteRepresentativeLogin);
   const [name, setName] = useState(rep?.name ?? "");
   const [teamId, setTeamId] = useState(rep?.team_id ?? NONE);
   const [result, setResult] = useState(String(rep?.current_result ?? 0));
@@ -326,6 +330,14 @@ function RepDialog({ rep, teams, people, isAdmin, isManager, onClose, onDone }: 
   const [inviteMode, setInviteMode] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteFullName, setInviteFullName] = useState("");
+  // §P0-4 hardening: createRepresentativeWithInvite can partially succeed —
+  // the representative row commits even if the invite email fails to send.
+  // Naively letting the user resubmit the same form would create a SECOND
+  // representative with the same name (the first insert already happened).
+  // When that happens the dialog switches into this recovery view instead:
+  // the representative already exists, so only the invite step is retried,
+  // via the same server function the row-level "הזמן להתחברות" action uses.
+  const [inviteFailure, setInviteFailure] = useState<{ rep_id: string; name: string; email: string; full_name: string; reason: string } | null>(null);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -352,15 +364,74 @@ function RepDialog({ rep, teams, people, isAdmin, isManager, onClose, onDone }: 
       if (rep) return update({ data: { ...payload, rep_id: rep.id } });
       return create({ data: payload });
     },
-    onSuccess: () => {
+    onSuccess: (res: any) => {
+      if (res?.status === "created_invite_failed") {
+        onDone(); // the representative row exists now — refresh the list behind this dialog
+        setInviteFailure({ rep_id: res.rep_id, name: res.name, email: res.email, full_name: res.full_name, reason: res.reason });
+        return;
+      }
       toast.success(rep ? "פרטי הנציג עודכנו" : inviteMode ? "הנציג נוצר וההזמנה להתחברות נשלחה" : "הנציג נוסף בהצלחה");
       onDone(); onClose();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const retryMutation = useMutation({
+    mutationFn: () => {
+      if (!inviteFailure) throw new Error("אין הזמנה לניסיון חוזר");
+      return retryInvite({
+        data: {
+          rep_id: inviteFailure.rep_id,
+          email: inviteFailure.email,
+          full_name: inviteFailure.full_name,
+          redirect_to: `${window.location.origin}/reset-password`,
+        },
+      });
+    },
+    onSuccess: () => { toast.success("ההזמנה נשלחה בהצלחה"); onDone(); onClose(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const teamLocked = !!rep && !isAdmin; // team reassignment is admin-only (§23)
   const canSubmit = name.trim().length > 0 && (rep || isAdmin || teamId !== NONE) && (!inviteMode || inviteEmail.trim().length > 0);
+
+  // §P0-2 hardening: only accounts the server reports as eligible (role
+  // "representative", not admin/manager, not linked to a different rep) are
+  // selectable here — never the raw org-wide people list. The rep's own
+  // currently-linked account is added back in even though the server
+  // excludes "already linked" accounts, so an existing link still displays
+  // and can be kept as-is or explicitly cleared.
+  const linkableAccounts = useMemo(() => {
+    const list = [...eligibleLinkAccounts];
+    if (rep?.user_id && !list.some((p) => p.id === rep.user_id)) {
+      const current = people.find((p: any) => p.id === rep.user_id);
+      if (current) list.unshift({ id: current.id, full_name: current.full_name, email: current.email });
+    }
+    return list;
+  }, [eligibleLinkAccounts, people, rep]);
+
+  if (inviteFailure) {
+    return (
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>הנציג נוצר — שליחת ההזמנה נכשלה</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm">
+              הנציג <b>{inviteFailure.name}</b> נוצר בהצלחה ונשמר ברשימת הנציגים. שליחת הזמנת ההתחברות בלבד נכשלה:
+            </p>
+            <p className="text-sm rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-destructive">{inviteFailure.reason}</p>
+            <p className="text-xs text-muted-foreground">
+              ניתן לנסות לשלוח את ההזמנה שוב לכתובת <b>{inviteFailure.email}</b>, או לסגור ולהזמין/לקשר חשבון בהמשך מרשימת הנציגים — הנציג לא ייווצר שוב.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { onDone(); onClose(); }}>סגירה</Button>
+            <Button onClick={() => retryMutation.mutate()} disabled={retryMutation.isPending}>ניסיון חוזר לשליחת הזמנה</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -396,9 +467,14 @@ function RepDialog({ rep, teams, people, isAdmin, isManager, onClose, onDone }: 
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>ללא חשבון</SelectItem>
-                  {people.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.full_name || p.email}</SelectItem>)}
+                  {linkableAccounts.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name || p.email}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {linkableAccounts.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  אין חשבונות זמינים לקישור כרגע — ניתן להזמין חשבון חדש או לקשר חשבון קיים מרשימת הנציגים.
+                </p>
+              )}
             </div>
           )}
           {!rep && (isAdmin || isManager) && userId === NONE && (
@@ -518,6 +594,13 @@ function LinkUserDialog({ rep, onClose, onDone }: { rep: RepRow; onClose: () => 
   const find = useServerFn(findEligibleLinkAccount);
   const [email, setEmail] = useState("");
   const [found, setFound] = useState<{ id: string; full_name: string | null; email: string | null } | null>(null);
+  // §P1-3 hardening: unlinking used to fire on a single click straight from
+  // this dialog, with no explicit confirmation step — unlike every other
+  // destructive-ish action on this page (deactivate, delete, transfer all
+  // ask first). A misclick here silently dropped a rep's login access with
+  // no undo. Clicking "ניתוק חשבון" now opens an explicit confirmation
+  // instead of unlinking immediately.
+  const [confirmingUnlink, setConfirmingUnlink] = useState(false);
 
   const searchM = useMutation({
     mutationFn: () => find({ data: { email } }),
@@ -535,44 +618,62 @@ function LinkUserDialog({ rep, onClose, onDone }: { rep: RepRow; onClose: () => 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader><DialogTitle>חשבון משתמש — {rep.name}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          {rep.linked_user ? (
-            <>
+        {rep.linked_user && confirmingUnlink ? (
+          <>
+            <div className="space-y-3">
               <p className="text-sm">
-                מקושר כעת ל־<b>{rep.linked_user.email ?? rep.linked_user.full_name}</b>.
+                הנציג יאבד גישה מיידית למערכת עד לקישור מחדש. חשבון ההזדהות עצמו (
+                <b>{rep.linked_user.email ?? rep.linked_user.full_name}</b>) לא יימחק ולא יושבת — הוא רק יוסר
+                מרשומת הנציג, וניתן יהיה לקשר אותו מחדש בכל עת.
               </p>
-              <p className="text-xs text-muted-foreground">ניתוק מסיר את השיוך בלבד — חשבון ההזדהות עצמו לעולם אינו נמחק.</p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground">
-                חיפוש חשבון קיים לפי כתובת מייל מדויקת. לא מוצגת רשימת משתמשים כללית — כל חשבון נבדק לזכאות בנפרד
-                (תפקיד נציג בלבד, ללא שיוך קיים לנציג אחר).
-              </p>
-              <div className="flex gap-2">
-                <Input
-                  type="email" placeholder="כתובת מייל" value={email}
-                  onChange={(e) => { setEmail(e.target.value); setFound(null); }}
-                />
-                <Button variant="outline" onClick={() => searchM.mutate()} disabled={!email.trim() || searchM.isPending}>חיפוש</Button>
-              </div>
-              {found && (
-                <div className="rounded-lg border p-3 text-sm">
-                  <div className="font-medium">{found.full_name || found.email}</div>
-                  {found.full_name && <div className="text-xs text-muted-foreground">{found.email}</div>}
-                </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmingUnlink(false)} disabled={linkM.isPending}>ביטול</Button>
+              <Button variant="destructive" onClick={() => linkM.mutate(null)} disabled={linkM.isPending}>אישור ניתוק</Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <div className="space-y-3">
+              {rep.linked_user ? (
+                <>
+                  <p className="text-sm">
+                    מקושר כעת ל־<b>{rep.linked_user.email ?? rep.linked_user.full_name}</b>.
+                  </p>
+                  <p className="text-xs text-muted-foreground">ניתוק מסיר את השיוך בלבד — חשבון ההזדהות עצמו לעולם אינו נמחק.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    חיפוש חשבון קיים לפי כתובת מייל מדויקת. לא מוצגת רשימת משתמשים כללית — כל חשבון נבדק לזכאות בנפרד
+                    (תפקיד נציג בלבד, ללא שיוך קיים לנציג אחר).
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      type="email" placeholder="כתובת מייל" value={email}
+                      onChange={(e) => { setEmail(e.target.value); setFound(null); }}
+                    />
+                    <Button variant="outline" onClick={() => searchM.mutate()} disabled={!email.trim() || searchM.isPending}>חיפוש</Button>
+                  </div>
+                  {found && (
+                    <div className="rounded-lg border p-3 text-sm">
+                      <div className="font-medium">{found.full_name || found.email}</div>
+                      {found.full_name && <div className="text-xs text-muted-foreground">{found.email}</div>}
+                    </div>
+                  )}
+                </>
               )}
-            </>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
-          {rep.linked_user ? (
-            <Button variant="destructive" onClick={() => linkM.mutate(null)} disabled={linkM.isPending}>ניתוק חשבון</Button>
-          ) : (
-            <Button onClick={() => linkM.mutate(found!.id)} disabled={!found || linkM.isPending}>קישור חשבון</Button>
-          )}
-        </DialogFooter>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>ביטול</Button>
+              {rep.linked_user ? (
+                <Button variant="destructive" onClick={() => setConfirmingUnlink(true)} disabled={linkM.isPending}>ניתוק חשבון</Button>
+              ) : (
+                <Button onClick={() => linkM.mutate(found!.id)} disabled={!found || linkM.isPending}>קישור חשבון</Button>
+              )}
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

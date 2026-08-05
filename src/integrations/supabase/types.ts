@@ -1151,6 +1151,34 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      link_representative_to_user: {
+        Args: {
+          _check_expected: boolean
+          _expected_current_user_id: string | null
+          _rep_id: string
+          _user_id: string | null
+        }
+        Returns: {
+          new_user_id: string | null
+          previous_user_id: string | null
+          rep_id: string
+          rep_name: string
+          rep_team_id: string | null
+        }[]
+      }
+      set_representative_active_with_profile_sync: {
+        Args: { _active: boolean; _rep_id: string; _sync_profile: boolean }
+        Returns: {
+          linked_user_id: string | null
+          previous_active: boolean
+          profile_active: boolean | null
+          profile_synced: boolean
+          rep_active: boolean
+          rep_deactivated_at: string | null
+          rep_id: string
+          rep_name: string
+        }[]
+      }
       set_user_team_with_representative_sync: {
         Args: { _team_id: string; _user_id: string }
         Returns: {

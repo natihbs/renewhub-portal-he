@@ -29,6 +29,16 @@ async function assertAdmin(ctx: Ctx) {
   if (!roles.includes("admin")) throw new Error("אין הרשאה לפעולה זו — פעולה זו מיועדת למנהלי מערכת בלבד");
 }
 
+/**
+ * Pure permission gate for setRepresentativeActive's "also deactivate the
+ * linked login" option: only an admin may request it. Extracted so the exact
+ * rule — checked before any write is attempted — gets direct unit coverage,
+ * independent of the RPC call it gates.
+ */
+export function canRequestLinkedAccountSync(isAdmin: boolean, deactivateUserRequested: boolean | undefined): boolean {
+  return !deactivateUserRequested || isAdmin;
+}
+
 async function assertCanEdit(ctx: Ctx, repId: string) {
   const roles = await getRoles(ctx);
   if (roles.includes("admin")) return { isAdmin: true };
@@ -59,14 +69,49 @@ async function assertCanCreateRep(ctx: Ctx, teamId: string | null): Promise<{ is
 }
 
 /**
- * Admin, or a manager linking/unlinking a login account for a rep in a team
- * they manage. Linking (not unlinking) additionally requires the target
- * account to not itself hold an admin/manager role — a manager must never be
- * able to attach a rep record to a privileged account. Enforced here, not
- * just left to the caller's dropdown, since assertUserFree alone only checks
- * "not already linked to a different rep", not "safe for a manager to link".
+ * The single authoritative eligibility rule for "may this account be linked
+ * to a representative": must hold the representative role and must not hold
+ * admin or manager. Pure and exported so it gets direct unit coverage,
+ * independent of the DB read (assertLinkTargetRoleEligible below) that
+ * gathers the account's roles.
  */
-async function assertCanLinkUser(ctx: Ctx, admin: any, repId: string, targetUserId: string | null): Promise<{ isAdmin: boolean }> {
+export function checkLinkTargetRoleEligibility(targetRoles: string[]): { eligible: boolean; reason: "privileged" | "wrong_role" | null } {
+  if (targetRoles.includes("admin") || targetRoles.includes("manager")) return { eligible: false, reason: "privileged" };
+  if (!targetRoles.includes("representative")) return { eligible: false, reason: "wrong_role" };
+  return { eligible: true, reason: null };
+}
+
+/**
+ * DB-backed wrapper around checkLinkTargetRoleEligibility. This is now
+ * enforced INSIDE linkRepresentativeToUserCore itself (§P0-2 hardening) —
+ * the one and only place representatives.user_id is written — so every
+ * caller gets this guarantee unconditionally, whether or not it also calls
+ * assertCanLinkUser first. Exported so the eligible-candidate listing
+ * (findEligibleLinkAccount) and any future caller can apply the identical
+ * rule instead of re-deriving it.
+ */
+export async function assertLinkTargetRoleEligible(admin: any, targetUserId: string): Promise<void> {
+  const { data: roleRows, error: roleErr } = await admin.from("user_roles").select("role").eq("user_id", targetUserId);
+  if (roleErr) throw new Error(roleErr.message);
+  const targetRoles = ((roleRows ?? []) as { role: string }[]).map((r) => r.role);
+  const result = checkLinkTargetRoleEligibility(targetRoles);
+  if (!result.eligible) {
+    throw new Error(
+      result.reason === "privileged"
+        ? "לא ניתן לקשר חשבון מנהל מערכת או מנהל צוות כנציג"
+        : "ניתן לקשר רק חשבון מסוג נציג",
+    );
+  }
+}
+
+/**
+ * Admin, or a manager linking/unlinking a login account for a rep in a team
+ * they manage. Target-account role eligibility is no longer checked here —
+ * it is enforced unconditionally inside linkRepresentativeToUserCore, so
+ * duplicating it here would just be two copies of the same rule to keep in
+ * sync. This function is purely the caller-side authorization scope check.
+ */
+async function assertCanLinkUser(ctx: Ctx, repId: string): Promise<{ isAdmin: boolean }> {
   const roles = await getRoles(ctx);
   const isAdmin = roles.includes("admin");
   if (!isAdmin) {
@@ -76,23 +121,6 @@ async function assertCanLinkUser(ctx: Ctx, admin: any, repId: string, targetUser
     if (error) throw new Error(error.message);
     if (!data) throw new Error("אין לך הרשאה לנציג זה — הוא אינו משויך לצוות שבניהולך");
   }
-  // Target-account eligibility applies uniformly regardless of caller role —
-  // a representative login must always be representative-role-only and not
-  // already linked elsewhere, whoever performs the link (§5 hardening).
-  // assertUserFree (called by linkRepresentativeToUserCore right after this)
-  // separately guarantees "not already linked to a different representative"
-  // — this only needs to guarantee the account's role shape is safe.
-  if (targetUserId) {
-    const { data: roleRows, error: roleErr } = await admin.from("user_roles").select("role").eq("user_id", targetUserId);
-    if (roleErr) throw new Error(roleErr.message);
-    const targetRoles = ((roleRows ?? []) as { role: string }[]).map((r) => r.role);
-    if (targetRoles.includes("admin") || targetRoles.includes("manager")) {
-      throw new Error("לא ניתן לקשר חשבון מנהל מערכת או מנהל צוות כנציג");
-    }
-    if (!targetRoles.includes("representative")) {
-      throw new Error("ניתן לקשר רק חשבון מסוג נציג");
-    }
-  }
   return { isAdmin };
 }
 
@@ -100,8 +128,8 @@ async function assertCanLinkUser(ctx: Ctx, admin: any, repId: string, targetUser
  * Server-side eligibility lookup for the "link existing account" workflow
  * (§5 hardening): resolves exactly one account by exact email and reports
  * whether it is eligible to be linked, applying the identical rule
- * assertCanLinkUser enforces at write time — never returns or exposes a
- * browsable list of organizational users, admin or manager alike. Any
+ * (assertLinkTargetRoleEligible) enforced at write time — never returns or
+ * exposes a browsable list of organizational users, admin or manager alike. Any
  * ineligibility reason (privileged role, wrong role, already linked) is
  * reported honestly rather than silently returning nothing.
  */
@@ -121,15 +149,7 @@ export const findEligibleLinkAccount = createServerFn({ method: "POST" })
     if (pErr) throw new Error(pErr.message);
     if (!profile) throw new Error("לא נמצא חשבון עם כתובת מייל זו");
 
-    const { data: roleRows, error: rErr } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", profile.id);
-    if (rErr) throw new Error(rErr.message);
-    const accountRoles = ((roleRows ?? []) as { role: string }[]).map((r) => r.role);
-    if (accountRoles.includes("admin") || accountRoles.includes("manager")) {
-      throw new Error("לא ניתן לקשר חשבון מנהל מערכת או מנהל צוות כנציג");
-    }
-    if (!accountRoles.includes("representative")) {
-      throw new Error("החשבון אינו מסוג נציג — לא ניתן לקשר אותו");
-    }
+    await assertLinkTargetRoleEligible(supabaseAdmin, profile.id);
 
     const { data: existingLink, error: linkErr } = await supabaseAdmin.from("representatives").select("id, name").eq("user_id", profile.id).maybeSingle();
     if (linkErr) throw new Error(linkErr.message);
@@ -205,6 +225,40 @@ export const listRepresentatives = createServerFn({ method: "GET" })
     for (const p of (profiles ?? []) as any[]) profileById.set(p.id, p);
     const teamById = new Map<string, any>();
     for (const t of (teams ?? []) as any[]) teamById.set(t.id, t);
+    const isAdmin = roles.includes("admin");
+
+    // §P0-2 hardening: the RepDialog "linked account" dropdown must only ever
+    // offer accounts that are actually eligible to be linked (representative
+    // role, not admin/manager, not already linked to a different rep) — not
+    // every profile in the organization. `people` above stays the full,
+    // unfiltered list (still needed to resolve team-manager display names
+    // elsewhere on this page); this is a separate, purpose-built list.
+    // user_roles is only readable in full by an admin under RLS, so this is
+    // computed via supabaseAdmin and only for an admin caller — the dropdown
+    // itself only ever renders for admins (managers link via the dedicated,
+    // already-eligibility-checked findEligibleLinkAccount workflow instead).
+    let eligibleLinkAccounts: { id: string; full_name: string | null; email: string | null }[] = [];
+    if (isAdmin) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: roleRows, error: roleErr } = await supabaseAdmin.from("user_roles").select("user_id, role");
+      if (roleErr) throw new Error(roleErr.message);
+      const rolesByUser = new Map<string, string[]>();
+      for (const rr of (roleRows ?? []) as { user_id: string; role: string }[]) {
+        const arr = rolesByUser.get(rr.user_id) ?? [];
+        arr.push(rr.role);
+        rolesByUser.set(rr.user_id, arr);
+      }
+      const linkedElsewhere = new Set(((reps ?? []) as CloudRep[]).map((r) => r.user_id).filter(Boolean) as string[]);
+      eligibleLinkAccounts = ((profiles ?? []) as any[])
+        .filter((p) => {
+          const r = rolesByUser.get(p.id) ?? [];
+          if (r.includes("admin") || r.includes("manager")) return false;
+          if (!r.includes("representative")) return false;
+          if (linkedElsewhere.has(p.id)) return false;
+          return true;
+        })
+        .map((p) => ({ id: p.id, full_name: p.full_name, email: p.email }));
+    }
 
     return {
       reps: ((reps ?? []) as CloudRep[]).map((r) => {
@@ -221,7 +275,8 @@ export const listRepresentatives = createServerFn({ method: "GET" })
       }),
       teams: (teams ?? []) as { id: string; name: string; manager_id: string | null; active: boolean; kpi_profile: string }[],
       people: (profiles ?? []) as any[],
-      isAdmin: roles.includes("admin"),
+      eligibleLinkAccounts,
+      isAdmin,
       isManager: roles.includes("manager"),
     };
   });
@@ -241,6 +296,16 @@ type RepInput = {
   user_id: string | null;
   active: boolean;
 };
+
+// external_ref has a UNIQUE (WHERE NOT NULL) constraint (§P0-4 follow-up,
+// see 20260806093000_representatives_external_ref_unique.sql) — surfaced
+// here as a clear Hebrew message instead of a raw Postgres constraint error.
+function throwRepWriteError(error: { code?: string; message: string }): never {
+  if (error.code === "23505" && error.message.includes("external_ref")) {
+    throw new Error("מזהה הנציג (לייבוא נתונים) כבר בשימוש עבור נציג אחר. יש לבחור מזהה ייחודי.");
+  }
+  throw new Error(error.message);
+}
 
 function validateRep(data: RepInput): RepInput {
   if (!data?.name?.trim()) throw new Error("יש להזין שם נציג");
@@ -277,7 +342,11 @@ export const createRepresentative = createServerFn({ method: "POST" })
       if (destErr) throw new Error(destErr.message);
       assertTeamIsActiveForNewAssignment(destTeam);
     }
-    if (data.user_id) await assertUserFree(supabaseAdmin, data.user_id, null);
+    // representatives.user_id is written exclusively through
+    // linkRepresentativeToUserCore (§P0-2) — never inline in this insert —
+    // so the eligibility guard and concurrency-safe RPC apply here too, not
+    // just on the dedicated link workflow. The row is created unlinked and
+    // then linked as a second step.
     const { data: created, error } = await supabaseAdmin
       .from("representatives")
       .insert({
@@ -286,13 +355,18 @@ export const createRepresentative = createServerFn({ method: "POST" })
         monthly_target: data.monthly_target ?? 0,
         current_result: data.current_result,
         external_ref: data.external_ref,
-        user_id: data.user_id,
+        user_id: null,
         active: data.active,
       })
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
-    if (data.user_id) await syncLinkedProfileTeam(supabaseAdmin, data.user_id, data.team_id);
+    if (error) throwRepWriteError(error);
+    if (data.user_id) {
+      await linkRepresentativeToUserCore(supabaseAdmin, created.id, data.user_id, {
+        expectedCurrentUserId: null,
+        checkExpected: true,
+      });
+    }
     await logAudit(supabaseAdmin, ctx, "rep.create", { rep_id: created.id, name: data.name, team_id: data.team_id }, data.user_id);
     return { rep_id: created.id as string };
   });
@@ -367,7 +441,7 @@ async function inviteLoginForRep(
     if (pErr) throw new Error(pErr.message);
     const { error: rErr } = await admin.from("user_roles").insert({ user_id: newUserId, role: "representative" });
     if (rErr) throw new Error(rErr.message);
-    await linkRepresentativeToUserCore(admin, repId, newUserId);
+    await linkRepresentativeToUserCore(admin, repId, newUserId, { expectedCurrentUserId: null, checkExpected: true });
   } catch {
     await admin.auth.admin.deleteUser(newUserId).catch((cleanupErr: unknown) => {
       console.error("[inviteLoginForRep] compensating cleanup failed", newUserId, cleanupErr);
@@ -412,17 +486,31 @@ export const createRepresentativeWithInvite = createServerFn({ method: "POST" })
       })
       .select("id")
       .single();
-    if (repErr) throw new Error(repErr.message);
+    if (repErr) throwRepWriteError(repErr);
 
+    // §P0-4 hardening: on invite failure this used to throw, which the
+    // client could only render as a generic error toast — indistinguishable
+    // from "nothing happened", even though the representative row above had
+    // already committed. A caller retrying naively would create a SECOND
+    // representative with the same name. Returning a discriminated result
+    // instead lets the client tell the two outcomes apart and, on partial
+    // failure, switch to a recovery view that retries only the invite step
+    // (via inviteRepresentativeLogin, using the rep_id already returned here)
+    // instead of resubmitting the whole form.
     try {
       const { user_id } = await inviteLoginForRep(supabaseAdmin, created.id, data.team_id, data.email, data.full_name, data.redirect_to);
       await logAudit(supabaseAdmin, ctx, "rep.create_with_invite", { rep_id: created.id, name: data.name, team_id: data.team_id }, user_id, data.email);
-      return { rep_id: created.id as string, user_id };
+      return { status: "created_with_invite" as const, rep_id: created.id as string, user_id };
     } catch (e) {
       await logAudit(supabaseAdmin, ctx, "rep.create", { rep_id: created.id, name: data.name, team_id: data.team_id, invite_failed: true });
-      throw new Error(
-        `הנציג "${data.name}" נוצר בהצלחה. ${(e as Error).message} ניתן להזמין או לקשר חשבון מרשימת הנציגים בכל עת.`,
-      );
+      return {
+        status: "created_invite_failed" as const,
+        rep_id: created.id as string,
+        name: data.name,
+        email: data.email,
+        full_name: data.full_name,
+        reason: (e as Error).message,
+      };
     }
   });
 
@@ -505,8 +593,10 @@ export const updateRepresentative = createServerFn({ method: "POST" })
       if (destErr) throw new Error(destErr.message);
       assertTeamIsActiveForNewAssignment(destTeam);
     }
-    if (data.user_id && data.user_id !== before.user_id) await assertUserFree(supabaseAdmin, data.user_id, data.rep_id);
-
+    // user_id is intentionally left out of this update — it is written
+    // exclusively through linkRepresentativeToUserCore below (§P0-2), never
+    // inline here, so the eligibility guard and concurrency-safe RPC apply
+    // uniformly regardless of entry point.
     const { error } = await supabaseAdmin
       .from("representatives")
       .update({
@@ -515,13 +605,23 @@ export const updateRepresentative = createServerFn({ method: "POST" })
         monthly_target: data.monthly_target ?? before.monthly_target,
         current_result: data.current_result,
         external_ref: data.external_ref,
-        user_id: data.user_id,
         active: data.active,
         deactivated_at: data.active ? null : (before.active ? new Date().toISOString() : undefined),
       })
       .eq("id", data.rep_id);
-    if (error) throw new Error(error.message);
-    if (data.user_id) await syncLinkedProfileTeam(supabaseAdmin, data.user_id, data.team_id);
+    if (error) throwRepWriteError(error);
+
+    if (data.user_id !== before.user_id) {
+      await linkRepresentativeToUserCore(supabaseAdmin, data.rep_id, data.user_id, {
+        expectedCurrentUserId: before.user_id,
+        checkExpected: true,
+      });
+    } else if (data.user_id && data.team_id !== before.team_id) {
+      // The link itself didn't change, but the team did — keep the linked
+      // profile's team in sync even though linkRepresentativeToUserCore
+      // wasn't invoked (it only fires on an actual link change).
+      await syncLinkedProfileTeam(supabaseAdmin, data.user_id, data.team_id);
+    }
 
     await logAudit(supabaseAdmin, ctx, "rep.update", { rep_id: data.rep_id, before, after: data });
     if (before.team_id !== data.team_id) {
@@ -538,6 +638,17 @@ export const updateRepresentative = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+type SetRepresentativeActiveResult = {
+  rep_id: string;
+  rep_name: string;
+  previous_active: boolean;
+  rep_active: boolean;
+  rep_deactivated_at: string | null;
+  linked_user_id: string | null;
+  profile_synced: boolean;
+  profile_active: boolean | null;
+};
+
 export const setRepresentativeActive = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { rep_id: string; active: boolean; deactivate_user?: boolean }) => {
@@ -547,27 +658,57 @@ export const setRepresentativeActive = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
     const { isAdmin } = await assertCanEdit(ctx, data.rep_id);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rep } = await supabaseAdmin.from("representatives").select("user_id, name, active").eq("id", data.rep_id).maybeSingle();
-    if (!rep) throw new Error("הנציג לא נמצא");
 
-    const { error } = await supabaseAdmin
-      .from("representatives")
-      .update({ active: data.active, deactivated_at: data.active ? null : new Date().toISOString() })
-      .eq("id", data.rep_id);
-    if (error) throw new Error(error.message);
-
-    if (data.deactivate_user && rep.user_id) {
-      if (!isAdmin) throw new Error("רק מנהל מערכת רשאי להשבית חשבון משתמש");
-      const { error: uErr } = await supabaseAdmin.from("profiles").update({ active: data.active }).eq("id", rep.user_id);
-      if (uErr) throw new Error(uErr.message);
-      await logAudit(supabaseAdmin, ctx, data.active ? "user.activate" : "user.deactivate", { via: "rep", rep_id: data.rep_id }, rep.user_id);
+    // Every permission/input check happens here, before any write is even
+    // attempted — a manager requesting deactivate_user is rejected outright,
+    // never partially honored. The actual writes (representatives.active,
+    // deactivated_at, and — only when explicitly requested and authorized —
+    // the linked profile's active flag) are then a single atomic RPC call:
+    // either both commit or neither does. No two-step REST calls, no window
+    // where a permission failure can leave the representative half-changed.
+    if (!canRequestLinkedAccountSync(isAdmin, data.deactivate_user)) {
+      throw new Error("רק מנהל מערכת רשאי להשבית חשבון משתמש");
     }
 
-    await logAudit(supabaseAdmin, ctx, data.active ? "rep.reactivate" : "rep.deactivate", {
-      rep_id: data.rep_id, name: rep.name, also_user: !!data.deactivate_user,
-    }, rep.user_id ?? null);
-    return { ok: true };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: result, error } = await supabaseAdmin
+      .rpc("set_representative_active_with_profile_sync", {
+        _rep_id: data.rep_id,
+        _active: data.active,
+        _sync_profile: !!data.deactivate_user,
+      })
+      .single();
+    if (error) {
+      if (error.code === "P0002") throw new Error("הנציג לא נמצא");
+      throw new Error(error.message);
+    }
+    const r = result as SetRepresentativeActiveResult;
+
+    // Audit only after the transaction actually committed — never before,
+    // and never for a request that failed partway.
+    if (r.profile_synced) {
+      await logAudit(supabaseAdmin, ctx, r.rep_active ? "user.activate" : "user.deactivate", {
+        via: "rep", rep_id: data.rep_id, rep_name: r.rep_name,
+      }, r.linked_user_id);
+    }
+    await logAudit(supabaseAdmin, ctx, r.rep_active ? "rep.reactivate" : "rep.deactivate", {
+      rep_id: data.rep_id,
+      name: r.rep_name,
+      previous_active: r.previous_active,
+      new_active: r.rep_active,
+      linked_account_changed: r.profile_synced,
+      linked_user_id: r.linked_user_id,
+    }, r.linked_user_id);
+
+    return {
+      ok: true,
+      rep_id: r.rep_id,
+      active: r.rep_active,
+      deactivated_at: r.rep_deactivated_at,
+      linked_user_id: r.linked_user_id,
+      profile_synced: r.profile_synced,
+      profile_active: r.profile_active,
+    };
   });
 
 export const setRepresentativeTeam = createServerFn({ method: "POST" })
@@ -607,23 +748,58 @@ export type LinkRepresentativeResult = { rep_name: string; from: string | null; 
  * the authoritative representatives.user_id link without duplicating this logic. This
  * is the ONLY place that should write representatives.user_id — callers must not
  * update that column directly.
+ *
+ * §P0-2/P0-3 hardening: the actual read-check-write is now the
+ * link_representative_to_user RPC (row-locked, SECURITY DEFINER), not a
+ * client-side select-then-update — closing the race where two concurrent
+ * callers could silently clobber each other's link with no error. A caller
+ * that knows what it last read representatives.user_id to be (e.g. a "before"
+ * snapshot already fetched for other reasons) should pass it as
+ * expectedCurrentUserId with checkExpected: true, so a stale belief is
+ * rejected outright instead of silently overwritten. Callers with no such
+ * snapshot (checkExpected omitted/false) still get the row-lock's
+ * serialization, just not the "reject if changed" guarantee.
+ *
+ * Target-account role eligibility (assertLinkTargetRoleEligible) and
+ * "not already linked to a different rep" (assertUserFree) are checked here
+ * unconditionally whenever userId is non-null — every write path, including
+ * ones that never call assertCanLinkUser, gets the same guarantee. The RPC
+ * itself re-checks "not linked elsewhere" one more time under the row lock
+ * as the final backstop against a race between this check and the write.
  */
 export async function linkRepresentativeToUserCore(
   admin: any,
   repId: string,
   userId: string | null,
+  options?: { expectedCurrentUserId?: string | null; checkExpected?: boolean },
 ): Promise<LinkRepresentativeResult> {
-  const { data: rep } = await admin.from("representatives").select("user_id, name, team_id").eq("id", repId).maybeSingle();
-  if (!rep) throw new Error("הנציג לא נמצא");
-  if (userId) await assertUserFree(admin, userId, repId);
+  if (userId) {
+    await assertLinkTargetRoleEligible(admin, userId);
+    await assertUserFree(admin, userId, repId);
+  }
 
-  const { error } = await admin.from("representatives").update({ user_id: userId }).eq("id", repId);
-  if (error) throw new Error(error.message);
+  const checkExpected = !!options?.checkExpected;
+  const { data: result, error } = await admin
+    .rpc("link_representative_to_user", {
+      _rep_id: repId,
+      _user_id: userId,
+      _expected_current_user_id: checkExpected ? (options?.expectedCurrentUserId ?? null) : null,
+      _check_expected: checkExpected,
+    })
+    .single();
+  if (error) {
+    if (error.code === "P0002") throw new Error("הנציג לא נמצא");
+    if (error.code === "P0003") throw new Error("שיוך הנציג השתנה בינתיים על ידי פעולה אחרת — יש לרענן ולנסות שוב");
+    if (error.code === "P0004") throw new Error("חשבון המשתמש כבר מקושר לנציג אחר. יש לנתק אותו קודם.");
+    throw new Error(error.message);
+  }
+  const r = result as { rep_id: string; rep_name: string; rep_team_id: string | null; previous_user_id: string | null; new_user_id: string | null };
+
   // Newly-linked user inherits the rep's current team. Unlinking must NOT touch the
   // previous user's profile — their team membership as a login account stands on its
   // own regardless of representative linkage.
-  if (userId) await syncLinkedProfileTeam(admin, userId, rep.team_id);
-  return { rep_name: rep.name, from: rep.user_id, to: userId };
+  if (userId) await syncLinkedProfileTeam(admin, userId, r.rep_team_id);
+  return { rep_name: r.rep_name, from: r.previous_user_id, to: r.new_user_id };
 }
 
 export const linkRepresentativeUser = createServerFn({ method: "POST" })
@@ -635,8 +811,14 @@ export const linkRepresentativeUser = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await assertCanLinkUser(ctx, supabaseAdmin, data.rep_id, data.user_id);
-    const result = await linkRepresentativeToUserCore(supabaseAdmin, data.rep_id, data.user_id);
+    await assertCanLinkUser(ctx, data.rep_id);
+    const { data: before, error: beforeErr } = await supabaseAdmin.from("representatives").select("user_id").eq("id", data.rep_id).maybeSingle();
+    if (beforeErr) throw new Error(beforeErr.message);
+    if (!before) throw new Error("הנציג לא נמצא");
+    const result = await linkRepresentativeToUserCore(supabaseAdmin, data.rep_id, data.user_id, {
+      expectedCurrentUserId: before.user_id,
+      checkExpected: true,
+    });
     await logAudit(supabaseAdmin, ctx, data.user_id ? "rep.user_linked" : "rep.user_unlinked", {
       rep_id: data.rep_id, name: result.rep_name, from: result.from, to: result.to,
     }, data.user_id ?? result.from ?? null);
@@ -660,31 +842,47 @@ export type DeleteBlocker = { label: string; count: number };
 async function collectBlockers(admin: any, repId: string): Promise<DeleteBlocker[]> {
   const { data: rep } = await admin
     .from("representatives")
-    .select("id, name, user_id, external_ref")
+    .select("id, name, user_id")
     .eq("id", repId)
     .maybeSingle();
   if (!rep) throw new Error("הנציג לא נמצא");
   const blockers: DeleteBlocker[] = [];
   if (rep.user_id) blockers.push({ label: "חשבון משתמש מקושר", count: 1 });
-  if (rep.external_ref) {
-    const { count } = await admin
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("representative_id", rep.external_ref);
-    if (count && count > 0) blockers.push({ label: "פרופילי משתמשים עם מזהה נציג זהה", count });
-  }
+  // The previous "profiles with a matching legacy representative_id" check
+  // here compared two independent free-text fields (external_ref and
+  // profiles.representative_id) with no real foreign key between them — it
+  // could neither prevent an actual constraint violation (there is none to
+  // violate) nor reliably catch a real relationship, and profiles.id is the
+  // authoritative link (via representatives.user_id / linkRepresentativeToUserCore),
+  // already covered by the check just above. Removed as dead weight.
 
   // feedback/listening_schedules/rep_notes/rep_tasks/competition_scores/
-  // kpi_values all cascade-delete with the representative — surface them as
-  // blockers so an admin can't silently wipe a rep's entire quality-review,
-  // competition, or renewal history with a single delete.
-  const [feedbackCount, scheduleCount, notesCount, tasksCount, scoresCount, kpiCount] = await Promise.all([
+  // kpi_values/representative_goals all cascade-or-restrict-delete with the
+  // representative (representative_goals is RESTRICT — see
+  // 20260806094500_representative_goals_restrict_delete.sql — the rest are
+  // CASCADE) — surface them all as blockers so an admin can't silently wipe
+  // a rep's entire quality-review, competition, target, or renewal history
+  // with a single delete, and never hit the RESTRICT constraint as a
+  // surprise raw DB error.
+  //
+  // manager_calls/underwriting_issues are ON DELETE SET NULL, not CASCADE —
+  // deleting the representative would not destroy these records, only
+  // silently drop their representative_id link. Surfaced as blockers too
+  // (not just a lighter "will be unlinked" warning) so that silent loss of
+  // linkage on audit/compliance-relevant records never happens without an
+  // admin explicitly seeing it first; the existing "disable instead of
+  // delete" guidance in deleteRepresentative's error message is the
+  // intended resolution path, exactly as for every other blocker here.
+  const [feedbackCount, scheduleCount, notesCount, tasksCount, scoresCount, kpiCount, goalsCount, callsCount, issuesCount] = await Promise.all([
     admin.from("feedback").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("listening_schedules").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("rep_notes").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("rep_tasks").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("competition_scores").select("id", { count: "exact", head: true }).eq("representative_id", repId),
     admin.from("kpi_values").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("representative_goals").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("manager_calls").select("id", { count: "exact", head: true }).eq("representative_id", repId),
+    admin.from("underwriting_issues").select("id", { count: "exact", head: true }).eq("representative_id", repId),
   ]);
   if (feedbackCount.count && feedbackCount.count > 0) blockers.push({ label: "רשומות משוב והאזנה", count: feedbackCount.count });
   if (scheduleCount.count && scheduleCount.count > 0) blockers.push({ label: "האזנות מתוזמנות", count: scheduleCount.count });
@@ -692,6 +890,9 @@ async function collectBlockers(admin: any, repId: string): Promise<DeleteBlocker
   if (tasksCount.count && tasksCount.count > 0) blockers.push({ label: "משימות פתוחות וסגורות", count: tasksCount.count });
   if (scoresCount.count && scoresCount.count > 0) blockers.push({ label: "ניקוד תחרויות (כולל תחרויות שהסתיימו)", count: scoresCount.count });
   if (kpiCount.count && kpiCount.count > 0) blockers.push({ label: "נתוני ביצועים/חידושים היסטוריים", count: kpiCount.count });
+  if (goalsCount.count && goalsCount.count > 0) blockers.push({ label: "יעדים אישיים", count: goalsCount.count });
+  if (callsCount.count && callsCount.count > 0) blockers.push({ label: "שיחות מנהל מתועדות", count: callsCount.count });
+  if (issuesCount.count && issuesCount.count > 0) blockers.push({ label: "סוגיות חיתום פתוחות וסגורות", count: issuesCount.count });
 
   return blockers;
 }
