@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { linkRepresentativeToUserCore } from "@/lib/rep-admin.functions";
 import { computeUserHealth, type UserHealth } from "@/lib/user-health";
+import { assertTeamIsActiveForNewAssignment, isNewTeamAssignment } from "@/lib/team-assignment-guards";
 
 type AppRole = "admin" | "manager" | "representative";
 
@@ -281,6 +282,26 @@ export const updateUser = createServerFn({ method: "POST" })
     if (data.representative_id !== undefined) profileUpdate.representative_id = data.representative_id;
     if (data.active !== undefined) profileUpdate.active = data.active;
     if (data.must_change_password !== undefined) profileUpdate.must_change_password = data.must_change_password;
+
+    // Correction (post-review, PR #19): a destination team must be active
+    // only when this edit is an actual NEW assignment — never when the form
+    // simply resubmits the user's own current (possibly inactive) team_id
+    // alongside an unrelated field change (rename, active toggle, etc.), and
+    // never for removal (team_id: null). Fetch the user's current team_id so
+    // "unchanged" and "changed" can actually be told apart — the previous
+    // check (`if (profileUpdate.team_id)`) fired on every non-null
+    // resubmission and could block an unrelated edit for a user already on a
+    // deactivated team.
+    if (profileUpdate.team_id !== undefined) {
+      const { data: currentProfile, error: cpErr } = await supabaseAdmin
+        .from("profiles").select("team_id").eq("id", data.user_id).maybeSingle();
+      if (cpErr) throw new Error(cpErr.message);
+      if (isNewTeamAssignment(currentProfile?.team_id ?? null, profileUpdate.team_id)) {
+        const { data: destTeam, error: destErr } = await supabaseAdmin.from("teams").select("active").eq("id", profileUpdate.team_id).maybeSingle();
+        if (destErr) throw new Error(destErr.message);
+        assertTeamIsActiveForNewAssignment(destTeam);
+      }
+    }
 
     if (Object.keys(profileUpdate).length > 0) {
       const { error } = await supabaseAdmin.from("profiles").update(profileUpdate).eq("id", data.user_id);
