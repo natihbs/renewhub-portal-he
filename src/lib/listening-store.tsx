@@ -29,26 +29,26 @@ type ScheduleRow = {
 
 type Ctx = {
   schedules: Schedule[];
+  /**
+   * Demo Mode implementations. In Live Mode these throw — every real write
+   * goes through useFeedbackActions() (src/lib/feedback-hooks.ts), which is
+   * awaited, authorized, audited, and able to report failure. See the comment
+   * on the live branch below.
+   */
   addSchedule: (s: Omit<Schedule, "id" | "status"> & { status?: Schedule["status"] }) => void;
   updateSchedule: (id: string, p: Partial<Schedule>) => void;
   removeSchedule: (id: string) => void;
   completeSchedule: (id: string) => void;
+  /** True in Live Mode: the caller must use the server-backed write path. */
+  live: boolean;
+  /** Re-read the collection after a server-backed write. */
+  refresh: () => void;
   isLoading: boolean;
   isError: boolean;
 };
 
 const C = createContext<Ctx | null>(null);
 const uid = () => Math.random().toString(36).slice(2, 10);
-
-function toRow(p: Partial<Schedule>) {
-  const row: Record<string, string> = {};
-  if (p.repId !== undefined) row.representative_id = p.repId;
-  if (p.date !== undefined) row.scheduled_on = p.date;
-  if (p.time !== undefined) row.scheduled_time = p.time;
-  if (p.topic !== undefined) row.topic = p.topic;
-  if (p.status !== undefined) row.status = p.status;
-  return row;
-}
 
 export function ListeningProvider({ children }: { children: ReactNode }) {
   const { state } = useApp();
@@ -76,6 +76,8 @@ export function ListeningProvider({ children }: { children: ReactNode }) {
         removeSchedule: (id) => setDemo((st) => st.filter((s) => s.id !== id)),
         completeSchedule: (id) =>
           setDemo((st) => st.map((s) => (s.id === id ? { ...s, status: "completed" } : s))),
+        live: false,
+        refresh: () => {},
         isLoading: false,
         isError: false,
       };
@@ -88,13 +90,27 @@ export function ListeningProvider({ children }: { children: ReactNode }) {
       topic: r.topic,
       status: (r.status as Schedule["status"]) ?? "planned",
     }));
+    // §Feedback hardening: these were `void cloud.insert/update/remove(...)` —
+    // fire-and-forget writes through the generic proxy. A rejection was
+    // recorded by error-capture.ts and never shown, so cancelling or deleting
+    // a session reported success whether or not anything happened, and
+    // deleting a session that had produced an evaluation silently detached
+    // that evaluation from the listening it came from.
+    //
+    // Every write now goes through useFeedbackActions() (feedback-hooks.ts),
+    // which awaits the result, surfaces failures and enforces the blockers.
+    // These throw so a missed call site fails loudly instead of silently.
+    const liveWriteError = () => {
+      throw new Error("שינוי האזנה במצב מחובר מתבצע דרך useFeedbackActions()");
+    };
     return {
       schedules,
-      addSchedule: (s) =>
-        void cloud.insert({ ...toRow({ status: "planned", ...s }) }, "created_by"),
-      updateSchedule: (id, p) => void cloud.update(id, toRow(p)),
-      removeSchedule: (id) => void cloud.remove(id),
-      completeSchedule: (id) => void cloud.update(id, { status: "completed" }),
+      addSchedule: liveWriteError,
+      updateSchedule: liveWriteError,
+      removeSchedule: liveWriteError,
+      completeSchedule: liveWriteError,
+      live: true,
+      refresh: cloud.refresh,
       isLoading: cloud.isLoading,
       isError: cloud.isError,
     };

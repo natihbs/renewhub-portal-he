@@ -56,12 +56,12 @@ const FEEDBACK: Feedback[] = [
   {
     id: "f1", repId: REP.id, date: "2026-08-10", callId: "c1", callType: "שירות",
     listener: "מנהל", criteria: {}, score: 90, keep: "", improve: "",
-    managerSummary: "", nextTask: "", published: true, scheduleId: null,
+    managerSummary: "", nextTask: "", published: true, publishedAt: null, updatedAt: "2026-08-20T00:00:00.000Z", scheduleId: null,
   },
   {
     id: "f2", repId: REP.id, date: "2026-08-18", callId: "c2", callType: "שירות",
     listener: "מנהל", criteria: {}, score: 70, keep: "", improve: "",
-    managerSummary: "", nextTask: "", published: true, scheduleId: null,
+    managerSummary: "", nextTask: "", published: true, publishedAt: null, updatedAt: "2026-08-20T00:00:00.000Z", scheduleId: null,
   },
 ];
 

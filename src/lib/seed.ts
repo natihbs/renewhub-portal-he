@@ -247,6 +247,8 @@ export const SEED: AppState = {
       managerSummary: "שיחה טובה, יש פוטנציאל לשיפור בסגירה.",
       nextTask: "לצפות בהדרכת שדרוג ולבצע 5 שיחות עם דגש על סגירה.",
       published: true,
+      publishedAt: daysAgo(1),
+      updatedAt: daysAgo(1),
       scheduleId: null,
     },
     {
@@ -267,6 +269,8 @@ export const SEED: AppState = {
       managerSummary: "שיחה מצטיינת, לשמש כדוגמה בהדרכה הבאה.",
       nextTask: "להקליט שיחה נוספת לשיתוף בצוות.",
       published: true,
+      publishedAt: daysAgo(1),
+      updatedAt: daysAgo(1),
       scheduleId: null,
     },
     {
@@ -287,6 +291,8 @@ export const SEED: AppState = {
       managerSummary: "יש לחזק את שלב הבירור והתמודדות עם התנגדויות.",
       nextTask: "לתרגל 3 תרחישי התנגדות בסדנה השבוע.",
       published: true,
+      publishedAt: daysAgo(1),
+      updatedAt: daysAgo(1),
       scheduleId: null,
     },
     {
@@ -307,6 +313,8 @@ export const SEED: AppState = {
       managerSummary: "נדרש ליווי צמוד השבוע.",
       nextTask: "פגישת 1:1 עם ראש צוות + צפייה ב-2 הדרכות.",
       published: true,
+      publishedAt: daysAgo(1),
+      updatedAt: daysAgo(1),
       scheduleId: null,
     },
     {
@@ -327,6 +335,8 @@ export const SEED: AppState = {
       managerSummary: "ביצועים מעולים, המשך כך.",
       nextTask: "לשתף טיפ מהשיחה במפגש הצוות.",
       published: true,
+      publishedAt: daysAgo(1),
+      updatedAt: daysAgo(1),
       scheduleId: null,
     },
   ],

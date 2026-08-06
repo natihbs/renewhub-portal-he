@@ -33,6 +33,8 @@ export const CLOUD_TABLES = [
   "kpi_values",
   "team_goals",
   "representative_goals",
+  "coaching_plans",
+  "feedback_revisions",
 ] as const;
 
 /**
@@ -47,11 +49,31 @@ export const CLOUD_TABLES = [
  * writeRepresentativeKpiValue / deleteRepresentativeKpiValue
  * (src/lib/kpi.functions.ts) instead.
  *
+ * feedback and listening_schedules are here for the same class of reason
+ * (§Feedback hardening). An evaluation needs a SERVER-derived score, a
+ * future-date rule, optimistic concurrency, a revision row written in the same
+ * transaction, and a published-state change that is a separate audited act —
+ * and completing a listening session must commit atomically with the
+ * evaluation that closed it. This proxy provides none of that; it would
+ * happily forward a browser-asserted score straight onto a published record.
+ * Use src/lib/feedback.functions.ts.
+ *
+ * coaching_plans and feedback_revisions are readable-only for the same
+ * reason in reverse: a revision must never be forgeable independently of the
+ * change it records, and a coaching plan carries created_by/updated_by
+ * attribution that a generic forwarder cannot establish.
+ *
  * Reads are deliberately still allowed here: store.tsx's RLS-scoped
- * kpi_values subscription is the single read path every KPI consumer shares,
- * and RLS is a complete authorization answer for a read.
+ * subscriptions are the single read path every consumer shares, and RLS is a
+ * complete authorization answer for a read.
  */
-export const CLOUD_WRITE_PROTECTED_TABLES = ["kpi_values"] as const;
+export const CLOUD_WRITE_PROTECTED_TABLES = [
+  "kpi_values",
+  "feedback",
+  "listening_schedules",
+  "coaching_plans",
+  "feedback_revisions",
+] as const;
 
 export type CloudTable = (typeof CLOUD_TABLES)[number];
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };

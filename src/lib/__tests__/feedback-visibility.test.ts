@@ -12,7 +12,7 @@ function mkFeedback(overrides: Partial<Feedback>): Feedback {
   return {
     id: "f1", repId: "rep-1", date: "2026-01-01", callId: "C-1", callType: "חידוש",
     listener: "מנהל", criteria: {}, score: 80, keep: "", improve: "",
-    managerSummary: "", nextTask: "", published: true, scheduleId: null,
+    managerSummary: "", nextTask: "", published: true, publishedAt: null, updatedAt: "2026-01-01T00:00:00.000Z", scheduleId: null,
     ...overrides,
   };
 }

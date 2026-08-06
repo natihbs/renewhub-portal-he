@@ -140,6 +140,63 @@ export type Database = {
         }
         Relationships: []
       }
+      coaching_plans: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          focus_sections: string
+          id: string
+          notes: string
+          representative_id: string
+          review_on: string
+          review_schedule_id: string | null
+          target_score: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          focus_sections?: string
+          id?: string
+          notes?: string
+          representative_id: string
+          review_on: string
+          review_schedule_id?: string | null
+          target_score: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          focus_sections?: string
+          id?: string
+          notes?: string
+          representative_id?: string
+          review_on?: string
+          review_schedule_id?: string | null
+          target_score?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "coaching_plans_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: true
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "coaching_plans_review_schedule_id_fkey"
+            columns: ["review_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "listening_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       comms_messages: {
         Row: {
           body: string
@@ -341,6 +398,7 @@ export type Database = {
           manager_summary: string
           next_task: string
           published: boolean
+          published_at: string | null
           representative_id: string
           schedule_id: string | null
           score: number
@@ -361,6 +419,7 @@ export type Database = {
           manager_summary?: string
           next_task?: string
           published?: boolean
+          published_at?: string | null
           representative_id: string
           schedule_id?: string | null
           score?: number
@@ -381,6 +440,7 @@ export type Database = {
           manager_summary?: string
           next_task?: string
           published?: boolean
+          published_at?: string | null
           representative_id?: string
           schedule_id?: string | null
           score?: number
@@ -400,6 +460,74 @@ export type Database = {
             columns: ["schedule_id"]
             isOneToOne: false
             referencedRelation: "listening_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      feedback_revisions: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          feedback_id: string
+          id: string
+          previous_call_id: string
+          previous_call_type: string
+          previous_criteria: Json
+          previous_feedback_date: string | null
+          previous_improve: string
+          previous_keep_doing: string
+          previous_listener: string
+          previous_manager_summary: string
+          previous_next_task: string
+          previous_published: boolean
+          previous_score: number
+          reason: string
+          was_published_at_change: boolean
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          feedback_id: string
+          id?: string
+          previous_call_id?: string
+          previous_call_type?: string
+          previous_criteria?: Json
+          previous_feedback_date?: string | null
+          previous_improve?: string
+          previous_keep_doing?: string
+          previous_listener?: string
+          previous_manager_summary?: string
+          previous_next_task?: string
+          previous_published?: boolean
+          previous_score?: number
+          reason?: string
+          was_published_at_change?: boolean
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          feedback_id?: string
+          id?: string
+          previous_call_id?: string
+          previous_call_type?: string
+          previous_criteria?: Json
+          previous_feedback_date?: string | null
+          previous_improve?: string
+          previous_keep_doing?: string
+          previous_listener?: string
+          previous_manager_summary?: string
+          previous_next_task?: string
+          previous_published?: boolean
+          previous_score?: number
+          reason?: string
+          was_published_at_change?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_revisions_feedback_id_fkey"
+            columns: ["feedback_id"]
+            isOneToOne: false
+            referencedRelation: "feedback"
             referencedColumns: ["id"]
           },
         ]
@@ -862,6 +990,7 @@ export type Database = {
       }
       rep_tasks: {
         Row: {
+          article_id: string | null
           created_at: string
           created_by: string | null
           done: boolean
@@ -873,6 +1002,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          article_id?: string | null
           created_at?: string
           created_by?: string | null
           done?: boolean
@@ -884,6 +1014,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          article_id?: string | null
           created_at?: string
           created_by?: string | null
           done?: boolean
@@ -895,6 +1026,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "rep_tasks_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rep_tasks_representative_id_fkey"
             columns: ["representative_id"]
@@ -1151,6 +1289,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_feedback_with_schedule_completion: {
+        Args: {
+          _call_id: string
+          _call_type: string
+          _created_by: string | null
+          _criteria: Json
+          _feedback_date: string
+          _improve: string
+          _keep_doing: string
+          _listener: string
+          _manager_summary: string
+          _next_task: string
+          _representative_id: string
+          _schedule_id: string | null
+          _score: number
+        }
+        Returns: {
+          feedback_id: string
+          schedule_completed: boolean
+        }[]
+      }
       link_representative_to_user: {
         Args: {
           _check_expected: boolean
@@ -1164,6 +1323,21 @@ export type Database = {
           rep_id: string
           rep_name: string
           rep_team_id: string | null
+        }[]
+      }
+      set_feedback_published: {
+        Args: {
+          _changed_by: string | null
+          _feedback_id: string
+          _published: boolean
+          _reason: string
+        }
+        Returns: {
+          out_feedback_id: string
+          out_now_published: boolean
+          out_previous_published: boolean
+          out_published_at: string | null
+          out_representative_id: string
         }[]
       }
       set_representative_active_with_profile_sync: {
@@ -1198,6 +1372,30 @@ export type Database = {
         }[]
       }
       touch_last_login: { Args: never; Returns: undefined }
+      update_feedback_with_revision: {
+        Args: {
+          _call_id: string
+          _call_type: string
+          _changed_by: string | null
+          _criteria: Json
+          _expected_updated_at: string | null
+          _feedback_date: string
+          _feedback_id: string
+          _improve: string
+          _keep_doing: string
+          _listener: string
+          _manager_summary: string
+          _next_task: string
+          _reason: string
+          _score: number
+        }
+        Returns: {
+          out_feedback_id: string
+          out_new_updated_at: string
+          out_representative_id: string
+          out_was_published: boolean
+        }[]
+      }
       update_representative_metrics_with_team_sync: {
         Args: {
           _apply_current_result: boolean
