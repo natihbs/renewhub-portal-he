@@ -14,6 +14,393 @@ export type Database = {
   }
   public: {
     Tables: {
+      assignment_capabilities: {
+        Row: {
+          assignment_id: string
+          capability_key: string
+          created_at: string
+        }
+        Insert: {
+          assignment_id: string
+          capability_key: string
+          created_at?: string
+        }
+        Update: {
+          assignment_id?: string
+          capability_key?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      assignments: {
+        Row: {
+          accountable: boolean
+          cadence: string
+          created_at: string
+          created_by: string | null
+          granted_by_assignment_id: string | null
+          id: string
+          label: string | null
+          person_id: string
+          revoked_at: string | null
+          revoked_reason: string | null
+          scope_id: string
+          updated_at: string
+          valid_from: string
+          valid_to: string | null
+        }
+        Insert: {
+          accountable?: boolean
+          cadence?: string
+          created_at?: string
+          created_by?: string | null
+          granted_by_assignment_id?: string | null
+          id?: string
+          label?: string | null
+          person_id: string
+          revoked_at?: string | null
+          revoked_reason?: string | null
+          scope_id: string
+          updated_at?: string
+          valid_from?: string
+          valid_to?: string | null
+        }
+        Update: {
+          accountable?: boolean
+          cadence?: string
+          created_at?: string
+          created_by?: string | null
+          granted_by_assignment_id?: string | null
+          id?: string
+          label?: string | null
+          person_id?: string
+          revoked_at?: string | null
+          revoked_reason?: string | null
+          scope_id?: string
+          updated_at?: string
+          valid_from?: string
+          valid_to?: string | null
+        }
+        Relationships: []
+      }
+      capabilities: {
+        Row: {
+          axis: string
+          created_at: string
+          description: string
+          family: string
+          key: string
+          subject_type: string
+        }
+        Insert: {
+          axis: string
+          created_at?: string
+          description?: string
+          family: string
+          key: string
+          subject_type: string
+        }
+        Update: {
+          axis?: string
+          created_at?: string
+          description?: string
+          family?: string
+          key?: string
+          subject_type?: string
+        }
+        Relationships: []
+      }
+      commitments: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string
+          due_on: string
+          id: string
+          owner_id: string
+          resolution: string | null
+          resolution_note: string | null
+          resolved_at: string | null
+          subject_kind: string
+          subject_representative_id: string | null
+          subject_scope_id: string | null
+          subject_team_id: string | null
+          subject_work_item_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          created_by: string
+          due_on: string
+          id?: string
+          owner_id: string
+          resolution?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          subject_kind: string
+          subject_representative_id?: string | null
+          subject_scope_id?: string | null
+          subject_team_id?: string | null
+          subject_work_item_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string
+          due_on?: string
+          id?: string
+          owner_id?: string
+          resolution?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          subject_kind?: string
+          subject_representative_id?: string | null
+          subject_scope_id?: string | null
+          subject_team_id?: string | null
+          subject_work_item_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      durability_checks: {
+        Row: {
+          checked_at: string
+          created_at: string
+          held: boolean
+          id: string
+          outcome_id: string
+          reversal_reason: string | null
+        }
+        Insert: {
+          checked_at?: string
+          created_at?: string
+          held: boolean
+          id?: string
+          outcome_id: string
+          reversal_reason?: string | null
+        }
+        Update: {
+          checked_at?: string
+          created_at?: string
+          held?: boolean
+          id?: string
+          outcome_id?: string
+          reversal_reason?: string | null
+        }
+        Relationships: []
+      }
+      outcomes: {
+        Row: {
+          actor_id: string | null
+          actor_representative_id: string | null
+          canonical_state: string
+          correction_reason: string | null
+          created_at: string
+          id: string
+          occurred_at: string
+          reason_code: string | null
+          supersedes_id: string | null
+          value_realized: number | null
+          work_item_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_representative_id?: string | null
+          canonical_state: string
+          correction_reason?: string | null
+          created_at?: string
+          id?: string
+          occurred_at?: string
+          reason_code?: string | null
+          supersedes_id?: string | null
+          value_realized?: number | null
+          work_item_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          actor_representative_id?: string | null
+          canonical_state?: string
+          correction_reason?: string | null
+          created_at?: string
+          id?: string
+          occurred_at?: string
+          reason_code?: string | null
+          supersedes_id?: string | null
+          value_realized?: number | null
+          work_item_id?: string
+        }
+        Relationships: []
+      }
+      scope_members: {
+        Row: {
+          created_at: string
+          id: string
+          representative_id: string
+          scope_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          representative_id: string
+          scope_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          representative_id?: string
+          scope_id?: string
+        }
+        Relationships: []
+      }
+      scopes: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          display_name: string
+          id: string
+          key: string | null
+          kind: string
+          rule: Json | null
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          display_name: string
+          id?: string
+          key?: string | null
+          kind: string
+          rule?: Json | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          display_name?: string
+          id?: string
+          key?: string | null
+          kind?: string
+          rule?: Json | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      work_items: {
+        Row: {
+          business_value: number
+          created_at: string
+          due_at: string | null
+          eligible_from: string | null
+          external_ref: string
+          id: string
+          ingested_at: string
+          ingestion_batch_id: string | null
+          owner_representative_id: string | null
+          state: string
+          subject_label: string | null
+          subject_ref: string | null
+          team_id: string | null
+          updated_at: string
+          voided_reason: string | null
+          work_type_id: string
+        }
+        Insert: {
+          business_value?: number
+          created_at?: string
+          due_at?: string | null
+          eligible_from?: string | null
+          external_ref: string
+          id?: string
+          ingested_at?: string
+          ingestion_batch_id?: string | null
+          owner_representative_id?: string | null
+          state?: string
+          subject_label?: string | null
+          subject_ref?: string | null
+          team_id?: string | null
+          updated_at?: string
+          voided_reason?: string | null
+          work_type_id: string
+        }
+        Update: {
+          business_value?: number
+          created_at?: string
+          due_at?: string | null
+          eligible_from?: string | null
+          external_ref?: string
+          id?: string
+          ingested_at?: string
+          ingestion_batch_id?: string | null
+          owner_representative_id?: string | null
+          state?: string
+          subject_label?: string | null
+          subject_ref?: string | null
+          team_id?: string | null
+          updated_at?: string
+          voided_reason?: string | null
+          work_type_id?: string
+        }
+        Relationships: []
+      }
+      work_types: {
+        Row: {
+          active: boolean
+          arrival: string
+          created_at: string
+          decay: string
+          discretion: string
+          display_name: string
+          durability_horizon_days: number
+          id: string
+          key: string
+          outcome_shape: string
+          selection: string
+          synchrony: string
+          updated_at: string
+          value_model: string
+        }
+        Insert: {
+          active?: boolean
+          arrival: string
+          created_at?: string
+          decay: string
+          discretion: string
+          display_name: string
+          durability_horizon_days: number
+          id?: string
+          key: string
+          outcome_shape: string
+          selection: string
+          synchrony: string
+          updated_at?: string
+          value_model: string
+        }
+        Update: {
+          active?: boolean
+          arrival?: string
+          created_at?: string
+          decay?: string
+          discretion?: string
+          display_name?: string
+          durability_horizon_days?: number
+          id?: string
+          key?: string
+          outcome_shape?: string
+          selection?: string
+          synchrony?: string
+          updated_at?: string
+          value_model?: string
+        }
+        Relationships: []
+      }
       activity_events: {
         Row: {
           actor_id: string | null
@@ -1339,6 +1726,101 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accountability_gaps: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          representative_id: string
+          representative_name: string
+          team_id: string | null
+        }[]
+      }
+      actor_authorization_context: {
+        Args: {
+          _person_id: string
+        }
+        Returns: {
+          out_accountable: boolean
+          out_assignment_id: string
+          out_cadence: string
+          out_capabilities: string[]
+          out_label: string | null
+          out_scope_display_name: string
+          out_scope_id: string
+          out_scope_kind: string
+          out_valid_from: string
+          out_valid_to: string | null
+        }[]
+      }
+      actor_capabilities_over_rep: {
+        Args: {
+          _person_id: string
+          _rep: string
+        }
+        Returns: {
+          out_accountable: boolean
+          out_assignment_id: string
+          out_capability_key: string
+        }[]
+      }
+      actor_scope_representatives: {
+        Args: {
+          _person_id: string
+        }
+        Returns: {
+          out_accountable: boolean
+          out_assignment_id: string
+          out_representative_id: string
+        }[]
+      }
+      create_assignment: {
+        Args: {
+          _accountable: boolean
+          _capabilities: string[]
+          _cadence: string
+          _created_by: string | null
+          _granted_by_assignment_id: string | null
+          _label: string | null
+          _person_id: string
+          _scope_id: string
+          _valid_from: string
+          _valid_to: string | null
+        }
+        Returns: {
+          out_assignment_id: string
+          out_capability_count: number
+        }[]
+      }
+      end_assignment: {
+        Args: {
+          _allow_gap: boolean
+          _assignment_id: string
+          _gap_reason: string | null
+          _valid_to: string
+        }
+        Returns: {
+          out_assignment_id: string
+          out_orphaned_count: number
+          out_valid_to: string
+        }[]
+      }
+      lapse_stale_commitments: {
+        Args: {
+          _stale_after_days: number
+        }
+        Returns: {
+          out_lapsed: number
+        }[]
+      }
+      revoke_assignment: {
+        Args: {
+          _assignment_id: string
+          _reason: string
+        }
+        Returns: {
+          out_assignment_id: string
+          out_revoked_children: number
+        }[]
+      }
       create_feedback_with_schedule_completion: {
         Args: {
           _call_id: string
