@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,26 @@ import type { Rep } from "@/lib/seed";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useTeamGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
+import { useServerFn } from "@tanstack/react-start";
+import { useCloudCollection } from "@/lib/cloud-hooks";
+import { useListening } from "@/lib/listening-store";
+import { useAppMode } from "@/lib/app-mode";
+import { renewalTotalsForRep, currentMonthStart } from "@/lib/kpi-values";
+import {
+  computeCompleteness, computeListeningPlan, computeAchievementTrend, computeFreshness,
+  TREND_UNAVAILABLE_LABEL, repsNeedingSupport,
+  type CompletenessInput, type SupportInput, type AchievementSnapshot, type AchievementTrend,
+  type ListeningPlan, type FreshnessModel,
+} from "@/lib/dashboard-domain";
+import {
+  recordTeamAchievementSnapshot, evaluateManagerNotifications, getPerformanceDataFreshness,
+  type OperationalNotification,
+} from "@/lib/dashboard.functions";
+
+/** A team below this share of its monthly target gets one pace notification per day. */
+export const PACE_NOTIFICATION_THRESHOLD_PCT = 80;
+/** This many representatives unheard for a week triggers one coverage notification per day. */
+export const LISTENING_NOTIFICATION_THRESHOLD = 3;
 
 const CHECKLIST = [
   "בדיקת רענון נתונים",
@@ -55,6 +75,7 @@ export function MorningRoutine() {
   );
   const feedback = state.feedback;
   const morning = useMorning();
+  const { isDemo } = useAppMode();
 
   const wdPassed = Math.max(1, workdaysPassed());
   const wdTotal = workdaysInMonth();
@@ -68,9 +89,63 @@ export function MorningRoutine() {
   const totalResult = reps.reduce((a, r) => a + r.currentResult, 0);
   const achievementPct = hasTeamTarget ? calculateAchievement(totalResult, teamGoal.targetValue as number) : null;
 
-  const repsWithData = reps.filter((r) => r.currentResult > 0 || r.lastUpdatedAt);
-  const repsMissingData = reps.filter((r) => !(r.currentResult > 0 || r.lastUpdatedAt));
-  const completeness = reps.length > 0 ? (repsWithData.length / reps.length) * 100 : 0;
+  /**
+   * §P0 REAL data completeness.
+   *
+   * This was `r.currentResult > 0 || r.lastUpdatedAt`, where lastUpdatedAt is
+   * representatives.updated_at — NOT NULL DEFAULT now(), therefore always
+   * truthy. The right-hand side was always true, the left-hand side was dead
+   * code, repsMissingData was always empty and completeness was a constant
+   * 100%. The morning data-integrity check could not report a problem, and
+   * "נציג ללא ביצוע" could never fire.
+   *
+   * Completeness is now derived from the same authoritative sources the
+   * displayed figures come from: dated kpi_values rows for the period, plus
+   * the audited current_result scalar. See classifyRepData for why a zero
+   * with no dated row is "no_data" rather than a "real zero".
+   */
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = currentMonthStart();
+  const completenessInputs = useMemo<CompletenessInput[]>(
+    () => reps.map((r) => {
+      const rows = state.kpiValues.filter(
+        (k) => k.representative_id === r.id && k.metric_date >= monthStart,
+      );
+      const dated = renewalTotalsForRep(r.id, state.kpiValues, { from: monthStart });
+      const latestMetricDate = rows.length > 0
+        ? rows.map((k) => k.metric_date).sort().slice(-1)[0]
+        : null;
+      return {
+        repId: r.id,
+        repName: r.name,
+        hasTarget: repGoals.goalsByRepId.has(r.id),
+        evidence: {
+          latestMetricDate,
+          hasDatedValue: dated.completed !== null || dated.opportunities !== null,
+          datedTotal: (dated.completed ?? 0) + (dated.opportunities ?? 0),
+          currentResult: r.currentResult,
+        },
+      };
+    }),
+    [reps, state.kpiValues, monthStart, repGoals.goalsByRepId],
+  );
+  const completenessResult = useMemo(
+    () => computeCompleteness(completenessInputs, today),
+    [completenessInputs, today],
+  );
+  const repsMissingData = useMemo(
+    () => reps.filter((r) => completenessResult.byRepId.get(r.id) === "no_data"),
+    [reps, completenessResult],
+  );
+  const repsWithData = useMemo(
+    () => reps.filter((r) => completenessResult.byRepId.get(r.id) !== "no_data"),
+    [reps, completenessResult],
+  );
+  const staleReps = useMemo(
+    () => reps.filter((r) => completenessResult.byRepId.get(r.id) === "stale"),
+    [reps, completenessResult],
+  );
+  const completeness = completenessResult.completenessPct;
 
   const underPace = useMemo(() => reps.filter((r) => {
     const target = repGoals.goalsByRepId.get(r.id);
@@ -79,14 +154,67 @@ export function MorningRoutine() {
     return r.currentResult < expected * 0.9;
   }), [reps, repGoals.goalsByRepId, wdPassed, wdTotal]);
 
-  const feedbackRepIds = new Set(feedback.map((f) => f.repId));
+  /**
+   * §P0 REAL listening plan. ListeningCard used `const planned = 5` — a
+   * literal that ignored listening_schedules entirely, so the badge read
+   * "X/5" for every manager, every team, every day, whether twelve sessions
+   * were booked or none. The schedules come from the same provider and obey
+   * the same lifecycle rules as the Feedback & Listening calendar.
+   */
+  const { schedules: allSchedules, isLoading: schedulesLoading, isError: schedulesError } = useListening();
+  const repIdSet = useMemo(() => new Set(reps.map((r) => r.id)), [reps]);
+  const scopedSchedules = useMemo(
+    () => allSchedules.filter((s) => repIdSet.has(s.repId)),
+    [allSchedules, repIdSet],
+  );
+  const scopedFeedback = useMemo(
+    () => feedback.filter((f) => repIdSet.has(f.repId)),
+    [feedback, repIdSet],
+  );
+  const listeningPlan = useMemo(
+    () => computeListeningPlan(
+      scopedSchedules.map((s) => ({ id: s.id, repId: s.repId, date: s.date, status: s.status })),
+      scopedFeedback.map((f) => f.date),
+      today,
+    ),
+    [scopedSchedules, scopedFeedback, today],
+  );
+
+  const feedbackRepIds = new Set(scopedFeedback.map((f) => f.repId));
   const noRecentListening = reps.filter((r) => {
-    const last = feedback.filter((f) => f.repId === r.id).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    const last = scopedFeedback.filter((f) => f.repId === r.id).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
     if (!last) return true;
     const days = (Date.now() - new Date(last.date).getTime()) / 86400000;
     return days > 7;
   });
   const noFeedback = reps.filter((r) => !feedbackRepIds.has(r.id));
+
+  /**
+   * §P1 REAL freshness. representatives.updated_at moved when a name was
+   * corrected and stayed still when a renewals-only import landed, so it was
+   * uncorrelated with performance freshness in both directions. The
+   * authoritative answer is the newest dated measurement plus the last real
+   * import — two different facts, reported separately.
+   */
+  const loadFreshness = useServerFn(getPerformanceDataFreshness);
+  const [freshnessRaw, setFreshnessRaw] = useState<{ sourceDataDate: string | null; lastImportAt: string | null } | null>(null);
+  useEffect(() => {
+    if (isDemo) return;
+    let cancelled = false;
+    loadFreshness({ data: { team_id: workspaceTeamId } })
+      .then((r) => { if (!cancelled) setFreshnessRaw({ sourceDataDate: r.sourceDataDate, lastImportAt: r.lastImportAt }); })
+      .catch(() => { if (!cancelled) setFreshnessRaw(null); });
+    return () => { cancelled = true; };
+  }, [isDemo, workspaceTeamId, loadFreshness]);
+  const freshness = useMemo(
+    () => computeFreshness({
+      sourceDataDate: freshnessRaw?.sourceDataDate ?? null,
+      lastImportAt: freshnessRaw?.lastImportAt ?? morning.lastImportAt,
+      lastRefreshAt: morning.lastRefreshAt,
+      today,
+    }),
+    [freshnessRaw, morning.lastImportAt, morning.lastRefreshAt, today],
+  );
 
   const openCalls = morning.managerCalls.filter((c) => c.status !== "completed");
   const openUnderwriting = morning.underwriting.filter((u) => u.status !== "הושלם");
@@ -95,7 +223,136 @@ export function MorningRoutine() {
     return c.active && days >= 0 && days <= 7;
   });
 
-  const change = achievementPct !== null ? achievementPct - morning.yesterdayAchievementPct : null;
+  /**
+   * §P2 manager notifications — a small, fixed set of operational events,
+   * evaluated from the SAME figures this card renders so a notification can
+   * never disagree with the screen that produced it.
+   *
+   * The bell was permanently empty for managers and admins: notifications
+   * exists and is scoped user_id = auth.uid(), but every writer targeted the
+   * REPRESENTATIVE's account. No event told a manager that an import had
+   * failed, that their team was behind, or that a rep had gone unheard.
+   *
+   * Storm control is structural, not conventional: each event carries a
+   * dedupe key of "<event>:<subject>:<date>" and the database enforces
+   * uniqueness on (user_id, dedupe_key), so running this on every dashboard
+   * open is idempotent inside Postgres rather than by remembering to be.
+   */
+  const notifyFn = useServerFn(evaluateManagerNotifications);
+  const notifiedRef = useRef(false);
+  useEffect(() => {
+    if (isDemo || !workspaceTeamId || notifiedRef.current) return;
+    if (reps.length === 0) return;
+    notifiedRef.current = true;
+    const events: OperationalNotification[] = [];
+    const teamName = workspace.type === "team" ? workspace.teamName : "";
+
+    if (achievementPct !== null && achievementPct < PACE_NOTIFICATION_THRESHOLD_PCT) {
+      events.push({
+        userId: "", kind: "pace",
+        title: "הצוות מתחת לקצב היעד",
+        body: `${teamName}: עמידה של ${Math.round(achievementPct)}% מהיעד החודשי.`,
+        href: "/performance",
+        dedupeKey: `pace:${workspaceTeamId}:${today}`,
+      });
+    }
+    if (completenessResult.missing > 0) {
+      events.push({
+        userId: "", kind: "import",
+        title: "חסרים נתוני ביצוע",
+        body: `${completenessResult.missing} נציגים ב${teamName} ללא נתוני ביצוע לחודש זה.`,
+        href: "/data-import",
+        dedupeKey: `missing_data:${workspaceTeamId}:${today}`,
+      });
+    }
+    if (noRecentListening.length >= LISTENING_NOTIFICATION_THRESHOLD) {
+      events.push({
+        userId: "", kind: "listening",
+        title: "נציגים ללא האזנה",
+        body: `${noRecentListening.length} נציגים ב${teamName} ללא האזנה בשבוע האחרון.`,
+        href: "/feedback",
+        dedupeKey: `listening:${workspaceTeamId}:${today}`,
+      });
+    }
+    const urgentUw = morning.underwriting.filter((u) => u.status !== "הושלם" && u.priority === "high");
+    if (urgentUw.length > 0) {
+      events.push({
+        userId: "", kind: "underwriting",
+        title: "נושאי חיתום דחופים",
+        body: `${urgentUw.length} נושאי חיתום בעדיפות גבוהה ממתינים לטיפול.`,
+        href: "/",
+        dedupeKey: `underwriting:${workspaceTeamId}:${today}`,
+      });
+    }
+    for (const c of competitionsEndingSoon) {
+      events.push({
+        userId: "", kind: "competition",
+        title: "תחרות מסתיימת בקרוב",
+        body: `התחרות "${c.name}" מסתיימת ב-${formatDateIL(c.endDate)}.`,
+        href: "/competitions",
+        dedupeKey: `competition_end:${c.id}:${today}`,
+      });
+    }
+
+    if (events.length === 0) return;
+    void notifyFn({ data: { events } }).catch((e: Error) =>
+      console.error("[morning] notification evaluation failed", e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, workspaceTeamId, reps.length, achievementPct, completenessResult.missing, noRecentListening.length, today]);
+
+  /**
+   * §P0 REAL day-over-day trend.
+   *
+   * This was `achievementPct - morning.yesterdayAchievementPct`, reading
+   * morning_settings.yesterday_achievement_pct — a column NOTHING IN THE
+   * CODEBASE EVER WROTE. It was NOT NULL DEFAULT 0, the read had a `?? 0`,
+   * and so the badge rendered "+<the entire achievement>", in green, every
+   * single morning, regardless of what the team had actually done.
+   *
+   * The comparison now comes from team_achievement_snapshots — real dated
+   * rows, written once per team per day by recordTeamAchievementSnapshot.
+   * Until a prior day exists the trend reports UNAVAILABLE rather than
+   * inventing a baseline.
+   */
+  const snapshotRows = useCloudCollection<{ id: string; team_id: string; snapshot_date: string; achievement_pct: number | null }>(
+    "team_achievement_snapshots",
+    {
+      eq: workspaceTeamId ? { team_id: workspaceTeamId } : undefined,
+      order: { column: "snapshot_date" },
+      limit: 60,
+      enabled: !!workspaceTeamId,
+    },
+  );
+  const snapshots = useMemo<AchievementSnapshot[]>(
+    () => snapshotRows.rows.map((r) => ({ snapshotDate: r.snapshot_date, achievementPct: r.achievement_pct })),
+    [snapshotRows.rows],
+  );
+  const trend: AchievementTrend = useMemo(
+    () => computeAchievementTrend(achievementPct, snapshots, today),
+    [achievementPct, snapshots, today],
+  );
+
+  // Record today's figures so tomorrow has something real to compare with.
+  // Idempotent per team per day at the database level, so re-opening the
+  // dashboard is harmless. Never blocks or fails the render.
+  const recordSnapshot = useServerFn(recordTeamAchievementSnapshot);
+  useEffect(() => {
+    if (isDemo || !workspaceTeamId || reps.length === 0) return;
+    let cancelled = false;
+    void recordSnapshot({
+      data: {
+        team_id: workspaceTeamId,
+        result_value: totalResult,
+        target_value: teamGoal.targetValue,
+        achievement_pct: achievementPct,
+        representative_count: reps.length,
+      },
+    })
+      .then(() => { if (!cancelled) void snapshotRows.refetch(); })
+      .catch((e: Error) => console.error("[morning] snapshot failed", e.message));
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, workspaceTeamId, totalResult, teamGoal.targetValue, achievementPct, reps.length]);
 
   return (
     <Card className="overflow-hidden border-primary/20">
@@ -112,27 +369,43 @@ export function MorningRoutine() {
       <CardContent className="space-y-6">
         {/* Row 1: Data status + Target achievement */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <DataStatusCard completeness={completeness} withCount={repsWithData.length} missingCount={repsMissingData.length} />
-          <AchievementCard achievementPct={achievementPct} change={change} hasTarget={hasTeamTarget} totalResult={totalResult} />
+          <DataStatusCard
+            completeness={completeness}
+            withCount={repsWithData.length}
+            missingCount={repsMissingData.length}
+            staleCount={completenessResult.stale}
+            realZeroCount={completenessResult.realZero}
+            freshness={freshness}
+          />
+          <AchievementCard achievementPct={achievementPct} trend={trend} hasTarget={hasTeamTarget} totalResult={totalResult} />
         </div>
 
         {/* Row 2: Quality check + Priorities */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <QualityCheckCard reps={reps} repsMissingData={repsMissingData} goalsByRepId={repGoals.goalsByRepId} />
+          <QualityCheckCard reps={reps} repsMissingData={repsMissingData} staleReps={staleReps} goalsByRepId={repGoals.goalsByRepId} />
           <PrioritiesCard
             underPace={underPace.length}
             noListening={noRecentListening.length}
             noFeedback={noFeedback.length}
             openCalls={openCalls.length}
             openUnderwriting={openUnderwriting.length}
-            staleData={morning.refreshStatus !== "complete" ? 1 : 0}
+            missingData={completenessResult.missing}
+            staleSourceData={freshness.state === "stale" ? 1 : 0}
+            overdueListening={listeningPlan.overdue}
             competitionsEndingSoon={competitionsEndingSoon.length}
           />
         </div>
 
         {/* Row 3: Listening + Manager calls */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ListeningCard reps={reps} feedback={feedback} noRecentListening={noRecentListening} />
+          <ListeningCard
+            reps={reps}
+            plan={listeningPlan}
+            todaysEvaluations={scopedFeedback.filter((f) => f.date.slice(0, 10) === today)}
+            noRecentListening={noRecentListening}
+            isLoading={schedulesLoading}
+            isError={schedulesError}
+          />
           <ManagerCallsCard reps={reps} />
         </div>
 
@@ -173,7 +446,11 @@ export function MorningRoutine() {
  *     Only a Data Import does that. There is no automatic external sync, and
  *     the UI no longer implies one exists.
  */
-function DataStatusCard({ completeness, withCount, missingCount }: { completeness: number; withCount: number; missingCount: number }) {
+function DataStatusCard({ completeness, withCount, missingCount, staleCount, realZeroCount, freshness }: {
+  completeness: number; withCount: number; missingCount: number;
+  staleCount: number; realZeroCount: number;
+  freshness: { sourceDataDate: string | null; lastImportAt: string | null; lastRefreshAt: string | null; ageInDays: number | null; state: "current" | "aging" | "stale" | "unknown" };
+}) {
   const m = useMorning();
   const [checking, setChecking] = useState(false);
   const [failed, setFailed] = useState<FreshnessSourceKey[]>([]);
@@ -226,17 +503,25 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
         </Badge>
       </div>
       <div className="grid grid-cols-2 gap-3 text-sm">
+        {/* §P1: three genuinely different facts, previously conflated into
+            one "is the data fresh" claim. A manager acts differently on each. */}
         <Stat
-          label="רענון מסד הנתונים"
-          value={m.lastRefreshAt ? new Date(m.lastRefreshAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "טרם בוצע"}
+          label="תאריך נתוני המקור"
+          value={freshness.sourceDataDate ? formatDateIL(freshness.sourceDataDate) : "אין נתונים מתוארכים"}
+          tone={freshness.state === "stale" ? "danger" : freshness.state === "aging" ? "warning" : freshness.state === "unknown" ? "warning" : "success"}
         />
         <Stat
           label="ייבוא אחרון מקובץ מקור"
-          value={m.lastImportAt ? new Date(m.lastImportAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "אין ייבוא"}
-          tone={m.lastImportAt ? undefined : "warning"}
+          value={freshness.lastImportAt ? new Date(freshness.lastImportAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "אין ייבוא"}
+          tone={freshness.lastImportAt ? undefined : "warning"}
         />
-        <Stat label="נציגים עם נתונים" value={`${withCount}`} tone="success" />
-        <Stat label="חסרים נתונים" value={`${missingCount}`} tone={missingCount > 0 ? "danger" : undefined} />
+        <Stat
+          label="רענון מסד הנתונים"
+          value={freshness.lastRefreshAt ? new Date(freshness.lastRefreshAt).toLocaleString("he-IL", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "טרם בוצע"}
+        />
+        <Stat label="נציגים עם נתונים" value={`${withCount}`} tone={withCount > 0 ? "success" : "warning"} />
+        <Stat label="ללא נתוני ביצוע" value={`${missingCount}`} tone={missingCount > 0 ? "danger" : undefined} />
+        <Stat label="נתונים מתיישנים" value={`${staleCount}`} tone={staleCount > 0 ? "warning" : undefined} />
       </div>
       <div className="mt-3">
         <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
@@ -252,6 +537,7 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
       )}
       <p className="mt-2 text-[11px] text-muted-foreground">
         הבדיקה טוענת מחדש את הנתונים ממסד הנתונים של Pulse. נתונים חדשים נכנסים למערכת רק דרך ייבוא קובץ מקור.
+        {realZeroCount > 0 && ` ${realZeroCount} נציגים דווחו עם תוצאה אפס — זהו נתון אמיתי, לא נתון חסר.`}
       </p>
       <div className="mt-3 flex gap-2">
         <Button size="sm" onClick={runCheck} disabled={checking}>
@@ -267,7 +553,9 @@ function DataStatusCard({ completeness, withCount, missingCount }: { completenes
 }
 
 /* ============ Quality Check ============ */
-function QualityCheckCard({ reps, repsMissingData, goalsByRepId }: { reps: Rep[]; repsMissingData: Rep[]; goalsByRepId: Map<string, number> }) {
+function QualityCheckCard({ reps, repsMissingData, staleReps, goalsByRepId }: {
+  reps: Rep[]; repsMissingData: Rep[]; staleReps: Rep[]; goalsByRepId: Map<string, number>;
+}) {
   const { open } = useRepWorkspace();
   // Official monthly target (representative_goals) — never the legacy
   // rep.monthlyTarget column (§19).
@@ -275,16 +563,23 @@ function QualityCheckCard({ reps, repsMissingData, goalsByRepId }: { reps: Rep[]
   const nameCounts = reps.reduce<Record<string, number>>((acc, r) => { acc[r.name] = (acc[r.name] ?? 0) + 1; return acc; }, {});
   const duplicates = reps.filter((r) => nameCounts[r.name] > 1);
   const unknownTeam = reps.filter((r) => !r.teamId);
-  const stale = reps.filter((r) => r.lastUpdatedAt && (Date.now() - new Date(r.lastUpdatedAt).getTime()) / 86400000 > 1);
-  const bigDrops: Rep[] = []; // no daily history; keep hook ready
+  /**
+   * §P1. This was `representatives.updated_at` older than a day — a column
+   * that moves when a NAME is corrected and does not move when a
+   * renewals-only import lands. It was uncorrelated with performance
+   * freshness in both directions: it flagged fully-imported renewals teams as
+   * stale, and cleared the flag for a team whose only change was an admin
+   * fixing a typo. Staleness now comes from the newest DATED measurement, via
+   * classifyRepData.
+   */
+  const stale = staleReps;
 
   const warnings: { icon: typeof AlertTriangle; text: string; onClick?: () => void; href?: string }[] = [
     ...repsMissingData.map((r) => ({ icon: AlertTriangle, text: `נציג ללא ביצוע: ${r.name}`, onClick: () => open(r.id) })),
     ...noTarget.map((r) => ({ icon: AlertTriangle, text: `נציג ללא יעד: ${r.name}`, onClick: () => open(r.id) })),
-    ...stale.map((r) => ({ icon: Clock, text: `נתונים לא עודכנו מאתמול: ${r.name}`, onClick: () => open(r.id) })),
+    ...stale.map((r) => ({ icon: Clock, text: `נתוני ביצוע מתיישנים: ${r.name}`, onClick: () => open(r.id) })),
     ...duplicates.map((r) => ({ icon: AlertTriangle, text: `כפילות בשם: ${r.name}`, href: "/admin" as const })),
     ...unknownTeam.map((r) => ({ icon: AlertTriangle, text: `צוות לא מזוהה: ${r.name}`, onClick: () => open(r.id) })),
-    ...bigDrops.map((r) => ({ icon: TrendingDown, text: `ירידה חריגה: ${r.name}`, onClick: () => open(r.id) })),
   ];
 
   return (
@@ -324,10 +619,9 @@ function QualityCheckCard({ reps, repsMissingData, goalsByRepId }: { reps: Rep[]
 }
 
 /* ============ Target Achievement ============ */
-function AchievementCard({ achievementPct, change, hasTarget, totalResult }: {
-  achievementPct: number | null; change: number | null; hasTarget: boolean; totalResult: number;
+function AchievementCard({ achievementPct, trend, hasTarget, totalResult }: {
+  achievementPct: number | null; trend: AchievementTrend; hasTarget: boolean; totalResult: number;
 }) {
-  const m = useMorning();
   if (!hasTarget || achievementPct === null) {
     return (
       <div className="rounded-xl border p-4 bg-card">
@@ -345,7 +639,7 @@ function AchievementCard({ achievementPct, change, hasTarget, totalResult }: {
       </div>
     );
   }
-  const up = (change ?? 0) >= 0;
+  const up = trend.available && trend.changePct >= 0;
   return (
     <div className="rounded-xl border p-4 bg-card">
       <div className="flex items-start justify-between gap-2">
@@ -353,31 +647,53 @@ function AchievementCard({ achievementPct, change, hasTarget, totalResult }: {
           <Percent className="h-4 w-4 text-primary" />
           <div className="font-semibold">אחוז עמידה ביעד</div>
         </div>
-        {change !== null && (
+        {/* The badge renders ONLY when a real prior-day snapshot exists. It
+            used to render unconditionally against a column nothing ever
+            wrote, so it always read "+<the entire achievement>" in green. */}
+        {trend.available && (
           <Badge variant="outline" className={cn("gap-1", up ? "text-success-foreground" : "text-primary")}>
             {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            {up ? "+" : ""}{change.toFixed(1)}%
+            {up ? "+" : ""}{trend.changePct.toFixed(1)}%
           </Badge>
         )}
       </div>
       <div className="mt-2 text-4xl font-extrabold tracking-tight">{formatPct(achievementPct)}</div>
-      <div className="text-xs text-muted-foreground">מול {formatPct(m.yesterdayAchievementPct)} אתמול · ממוצע חודשי {formatPct(m.monthlyAvgAchievementPct)}</div>
+      {trend.available ? (
+        <div className="text-xs text-muted-foreground">
+          מול {formatPct(trend.previousPct)} ב-{formatDateIL(trend.previousDate)}
+          {trend.monthlyAvgPct !== null ? ` · ממוצע חודשי ${formatPct(trend.monthlyAvgPct)}` : ""}
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">{TREND_UNAVAILABLE_LABEL[trend.reason]}</div>
+      )}
     </div>
   );
 }
 
 /* ============ Priorities ============ */
-function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnderwriting, staleData, competitionsEndingSoon }: {
-  underPace: number; noListening: number; noFeedback: number; openCalls: number; openUnderwriting: number; staleData: number;
+function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnderwriting, missingData, staleSourceData, overdueListening, competitionsEndingSoon }: {
+  underPace: number; noListening: number; noFeedback: number; openCalls: number; openUnderwriting: number;
+  /** Representatives with genuinely no performance record — a real count now. */
+  missingData: number;
+  /** 1 when the newest dated measurement is older than the staleness threshold. */
+  staleSourceData: number;
+  /** Scheduled listening sessions whose date passed without completion or cancellation. */
+  overdueListening: number;
   competitionsEndingSoon: number;
 }) {
+  // Every counter here is now scoped to the same population: the workspace
+  // team. "נושאי חיתום פתוחים" in particular used to be organization-wide
+  // (its RLS policy was a bare is_staff() check) while sitting in a row of
+  // otherwise team-scoped numbers.
   const items = [
+    { label: "נציגים ללא נתוני ביצוע", count: missingData, href: "/data-import", urgency: missingData * 5 },
+    { label: "נתוני מקור לא עדכניים", count: staleSourceData, href: "/data-import", urgency: staleSourceData * 5 },
     { label: "נציגים מתחת לקצב", count: underPace, href: "/performance", urgency: underPace * 3 },
+    { label: "האזנות שעבר זמנן", count: overdueListening, href: "/feedback", urgency: overdueListening * 3 },
     { label: "האזנות חסרות השבוע", count: noListening, href: "/feedback", urgency: noListening * 2 },
     { label: "נושאי חיתום פתוחים", count: openUnderwriting, href: "#underwriting", urgency: openUnderwriting * 2 },
     { label: "שיחות מנהל פתוחות", count: openCalls, href: "#calls", urgency: openCalls * 2 },
     { label: "נציגים ללא משוב", count: noFeedback, href: "/feedback", urgency: noFeedback },
-    { label: "נתונים חסרים / לא מעודכנים", count: staleData, href: "/data-import", urgency: staleData * 5 },
     { label: "תחרויות שמסתיימות בקרוב", count: competitionsEndingSoon, href: "/competitions", urgency: competitionsEndingSoon },
   ].filter((x) => x.count > 0).sort((a, b) => b.urgency - a.urgency);
 
@@ -425,15 +741,56 @@ function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnd
 }
 
 /* ============ Listening ============ */
-function ListeningCard({ reps, feedback, noRecentListening }: { reps: Rep[]; feedback: { repId: string; score: number; date: string }[]; noRecentListening: Rep[] }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const completedToday = feedback.filter((f) => f.date.slice(0, 10) === today).length;
-  const planned = 5;
-  const remaining = Math.max(0, planned - completedToday);
-  const avg = feedback.length > 0 ? feedback.reduce((a, f) => a + f.score, 0) / feedback.length : 0;
+/**
+ * §P0 real listening plan · §P2 explicit average scope.
+ *
+ * `planned` was the literal 5. The average was computed over ALL feedback the
+ * manager could read — every team, all time, drafts included — and displayed
+ * inside a card titled "האזנות להיום", so a lifetime figure sat under a
+ * today-scoped heading with nothing saying which it was.
+ *
+ * Both are now what the card claims: counts come from listening_schedules for
+ * today in the current workspace, and the average is over TODAY'S completed
+ * evaluations only. The PR #22 draft-inclusion rule applies and is disclosed
+ * here the same way it is in the Feedback module — drafts count, because the
+ * listening happened, and the card says so.
+ */
+function ListeningCard({ reps, plan, todaysEvaluations, noRecentListening, isLoading, isError }: {
+  reps: Rep[];
+  plan: ListeningPlan;
+  todaysEvaluations: { repId: string; score: number; date: string; published: boolean }[];
+  noRecentListening: Rep[];
+  isLoading?: boolean;
+  isError?: boolean;
+}) {
+  const avgToday = todaysEvaluations.length > 0
+    ? todaysEvaluations.reduce((a, f) => a + f.score, 0) / todaysEvaluations.length
+    : null;
+  const draftsToday = todaysEvaluations.filter((f) => !f.published).length;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [chosen, setChosen] = useState<string>("");
   const { open: openRepWorkspace } = useRepWorkspace();
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border p-4 bg-card">
+        <div className="flex items-center gap-2 font-semibold mb-3">
+          <Headphones className="h-4 w-4 text-primary" />האזנות להיום
+        </div>
+        <div className="h-24 animate-pulse rounded-lg bg-muted" />
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <div className="rounded-xl border p-4 bg-card">
+        <div className="flex items-center gap-2 font-semibold mb-3">
+          <Headphones className="h-4 w-4 text-primary" />האזנות להיום
+        </div>
+        <p className="text-sm text-destructive">שגיאה בטעינת יומן ההאזנות — לא ניתן להציג את תוכנית ההאזנות להיום.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border p-4 bg-card">
@@ -442,14 +799,28 @@ function ListeningCard({ reps, feedback, noRecentListening }: { reps: Rep[]; fee
           <Headphones className="h-4 w-4 text-primary" />
           האזנות להיום
         </div>
-        <Badge variant="outline">{completedToday}/{planned}</Badge>
+        <Badge variant="outline">{plan.completedToday}/{plan.plannedToday}</Badge>
       </div>
+      {plan.plannedToday === 0 && (
+        <p className="mb-3 rounded-lg border border-dashed p-2.5 text-xs text-muted-foreground">
+          לא תוזמנו האזנות להיום ביומן. ניתן לתזמן האזנה או לבצע האזנה יזומה.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3">
-        <MiniStat label="מתוכננות" value={String(planned)} />
-        <MiniStat label="הושלמו היום" value={String(completedToday)} />
-        <MiniStat label="נותרו" value={String(remaining)} tone={remaining > 0 ? "warning" : "success"} />
-        <MiniStat label="ציון ממוצע" value={Math.round(avg).toString()} />
+        <MiniStat label="מתוכננות היום" value={String(plan.plannedToday)} />
+        <MiniStat label="הושלמו היום" value={String(plan.completedToday)} />
+        <MiniStat label="נותרו היום" value={String(plan.remainingToday)} tone={plan.remainingToday > 0 ? "warning" : "success"} />
+        <MiniStat label="עבר זמנן" value={String(plan.overdue)} tone={plan.overdue > 0 ? "danger" : undefined} />
       </div>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <MiniStat label="משובים שנרשמו היום" value={String(plan.evaluationsToday)} />
+        <MiniStat label="ציון ממוצע היום" value={avgToday === null ? "—" : String(Math.round(avgToday))} />
+      </div>
+      {draftsToday > 0 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          הממוצע מחושב על {todaysEvaluations.length} משובים שנרשמו היום, כולל {draftsToday} טיוטות שטרם פורסמו לנציגים.
+        </p>
+      )}
       {noRecentListening.length > 0 && (
         <div className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">
           <div className="font-semibold text-primary mb-1">{noRecentListening.length} נציגים ללא האזנה השבוע:</div>
@@ -562,6 +933,26 @@ function AddCallDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChan
   const [repId, setRepId] = useState("");
   const [subject, setSubject] = useState("");
   const [when, setWhen] = useState(() => new Date(Date.now() + 3600e3).toISOString().slice(0, 16));
+  const [saving, setSaving] = useState(false);
+
+  // §P0: was a fire-and-forget addManagerCall() followed on the next line by
+  // an unconditional toast.success("שיחה נוספה"). The dialog closed and the
+  // manager believed the commitment was recorded whether or not it was. On
+  // failure the dialog now STAYS OPEN with the typed values intact.
+  const submit = async () => {
+    if (!subject.trim()) return toast.error("יש להזין נושא לשיחה");
+    setSaving(true);
+    try {
+      await m.addManagerCall({ repId, subject: subject.trim(), scheduledAt: new Date(when).toISOString() });
+      toast.success("השיחה נוספה");
+      setSubject(""); setRepId("");
+      onOpenChange(false);
+    } catch (e) {
+      toast.error((e as Error).message || "הוספת השיחה נכשלה");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent dir="rtl">
@@ -586,13 +977,7 @@ function AddCallDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChan
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={() => {
-            if (!subject) return;
-            m.addManagerCall({ repId, subject, scheduledAt: new Date(when).toISOString() });
-            toast.success("שיחה נוספה");
-            setSubject(""); setRepId("");
-            onOpenChange(false);
-          }}>הוסף</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? "שומר..." : "הוסף"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -603,6 +988,49 @@ function CallSummaryDialog({ call, onClose }: { call: ManagerCall | null; onClos
   const m = useMorning();
   const [summary, setSummary] = useState("");
   const [followUp, setFollowUp] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  /**
+   * §P0. Two writes, both previously fire-and-forget, followed by one
+   * unconditional success toast: completing the call, and — when a follow-up
+   * date was given — creating the follow-up call. Either could fail silently.
+   *
+   * They are sequenced deliberately rather than run together: closing the
+   * call is the primary act and is a complete, valid end state on its own. If
+   * the follow-up then fails, the caller is told exactly that instead of
+   * being shown a blanket failure for work that did commit.
+   */
+  const submit = async () => {
+    if (!call) return;
+    setSaving(true);
+    try {
+      await m.updateManagerCall(call.id, {
+        status: "completed",
+        summary,
+        followUpAt: followUp ? new Date(followUp).toISOString() : undefined,
+      });
+      if (followUp) {
+        try {
+          await m.addManagerCall({
+            repId: call.repId,
+            subject: `מעקב: ${call.subject}`,
+            scheduledAt: new Date(followUp).toISOString(),
+          });
+          toast.success("השיחה סומנה כהושלמה ונקבע מעקב");
+        } catch (e) {
+          toast.warning(`השיחה סומנה כהושלמה, אך יצירת שיחת המעקב נכשלה: ${(e as Error).message}`);
+        }
+      } else {
+        toast.success("השיחה סומנה כהושלמה");
+      }
+      setSummary(""); setFollowUp("");
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message || "עדכון השיחה נכשל");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <Dialog open={!!call} onOpenChange={(o) => !o && onClose()}>
       <DialogContent dir="rtl">
@@ -621,16 +1049,7 @@ function CallSummaryDialog({ call, onClose }: { call: ManagerCall | null; onClos
           </div>
         )}
         <DialogFooter>
-          <Button onClick={() => {
-            if (!call) return;
-            m.updateManagerCall(call.id, { status: "completed", summary, followUpAt: followUp ? new Date(followUp).toISOString() : undefined });
-            if (followUp) {
-              m.addManagerCall({ repId: call.repId, subject: `מעקב: ${call.subject}`, scheduledAt: new Date(followUp).toISOString() });
-            }
-            toast.success("השיחה סומנה כהושלמה");
-            setSummary(""); setFollowUp("");
-            onClose();
-          }}>שמור</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? "שומר..." : "שמור"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -702,6 +1121,19 @@ function useUwMeta(u: UnderwritingIssue, reps: Rep[]) {
 function UwCard({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
   const m = useMorning();
   const { rep, priorityCls, priorityLabel } = useUwMeta(u, reps);
+  const [busy, setBusy] = useState(false);
+  const setStatus = async (v: UnderwritingStatus) => {
+    setBusy(true);
+    try { await m.updateUnderwriting(u.id, { status: v }); toast.success("הסטטוס עודכן"); }
+    catch (e) { toast.error((e as Error).message || "עדכון הסטטוס נכשל"); }
+    finally { setBusy(false); }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try { await m.removeUnderwriting(u.id); toast.success("נושא החיתום נמחק"); }
+    catch (e) { toast.error((e as Error).message || "המחיקה נכשלה"); }
+    finally { setBusy(false); }
+  };
   return (
     <div className="rounded-lg border p-3 space-y-2">
       <div className="flex items-start justify-between gap-2">
@@ -717,11 +1149,11 @@ function UwCard({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
         <span>אחראי: {u.owner}</span>
       </div>
       <div className="flex items-center gap-2">
-        <Select value={u.status} onValueChange={(v) => m.updateUnderwriting(u.id, { status: v as UnderwritingStatus })}>
+        <Select value={u.status} disabled={busy} onValueChange={(v) => void setStatus(v as UnderwritingStatus)}>
           <SelectTrigger className="flex-1 text-sm" aria-label={`סטטוס עבור ${u.subject}`}><SelectValue /></SelectTrigger>
           <SelectContent>{UW_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
         </Select>
-        <Button size="sm" variant="ghost" onClick={() => { m.removeUnderwriting(u.id); toast.success("נמחק"); }}>מחק</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove()}>מחק</Button>
       </div>
     </div>
   );
@@ -730,6 +1162,21 @@ function UwCard({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
 function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
   const m = useMorning();
   const { rep, priorityCls, priorityLabel } = useUwMeta(u, reps);
+  const [busy, setBusy] = useState(false);
+  // §P0: both of these were fire-and-forget; the delete additionally fired an
+  // unconditional toast.success("נמחק") while the row vanished optimistically.
+  const setStatus = async (v: UnderwritingStatus) => {
+    setBusy(true);
+    try { await m.updateUnderwriting(u.id, { status: v }); toast.success("הסטטוס עודכן"); }
+    catch (e) { toast.error((e as Error).message || "עדכון הסטטוס נכשל"); }
+    finally { setBusy(false); }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try { await m.removeUnderwriting(u.id); toast.success("נושא החיתום נמחק"); }
+    catch (e) { toast.error((e as Error).message || "המחיקה נכשלה"); }
+    finally { setBusy(false); }
+  };
   return (
     <tr className="border-t">
       <td className="p-2">{rep?.name ?? "—"}</td>
@@ -737,7 +1184,7 @@ function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
       <td className="p-2"><Badge variant="secondary" className={priorityCls}>{priorityLabel}</Badge></td>
       <td className="p-2 text-xs text-muted-foreground">{formatDateIL(u.openedAt)}</td>
       <td className="p-2">
-        <Select value={u.status} onValueChange={(v) => m.updateUnderwriting(u.id, { status: v as UnderwritingStatus })}>
+        <Select value={u.status} disabled={busy} onValueChange={(v) => void setStatus(v as UnderwritingStatus)}>
           <SelectTrigger className="h-8 w-[130px] text-xs" aria-label={`סטטוס עבור ${u.subject}`}><SelectValue /></SelectTrigger>
           <SelectContent>{UW_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
         </Select>
@@ -745,7 +1192,7 @@ function UwRow({ u, reps }: { u: UnderwritingIssue; reps: Rep[] }) {
       <td className="p-2 text-xs">{u.owner}</td>
       <td className="p-2 text-xs text-muted-foreground">{formatDateIL(u.dueAt)}</td>
       <td className="p-2 text-end">
-        <Button size="sm" variant="ghost" onClick={() => { m.removeUnderwriting(u.id); toast.success("נמחק"); }}>מחק</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove()}>מחק</Button>
       </td>
     </tr>
   );
@@ -759,6 +1206,7 @@ function AddUwDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChange
   const [priority, setPriority] = useState<UnderwritingPriority>("medium");
   const [owner, setOwner] = useState("חיתום");
   const [dueAt, setDueAt] = useState(() => new Date(Date.now() + 3 * 24 * 3600e3).toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -797,11 +1245,26 @@ function AddUwDialog({ open, onOpenChange, reps }: { open: boolean; onOpenChange
         <DialogFooter>
           <Button onClick={() => {
             if (!subject) return;
-            m.addUnderwriting({ repId, subject, priority, owner, status: "חדש", dueAt });
-            toast.success("נושא חיתום נוסף");
-            setSubject(""); setRepId("");
-            onOpenChange(false);
-          }}>הוסף</Button>
+            void (async () => {
+              // A representative is now required: the corrected RLS policy
+              // scopes an issue by the rep it concerns, so an issue with none
+              // is admin-only and a manager could create one they then could
+              // not see.
+              if (!repId) return toast.error("יש לבחור נציג עבור נושא החיתום");
+              if (!subject.trim()) return toast.error("יש להזין נושא");
+              setSaving(true);
+              try {
+                await m.addUnderwriting({ repId, subject: subject.trim(), priority, owner, status: "חדש", dueAt });
+                toast.success("נושא החיתום נוסף");
+                setSubject(""); setRepId("");
+                onOpenChange(false);
+              } catch (e) {
+                toast.error((e as Error).message || "הוספת נושא החיתום נכשלה");
+              } finally {
+                setSaving(false);
+              }
+            })();
+          }} disabled={saving}>{saving ? "שומר..." : "הוסף"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -825,7 +1288,31 @@ function MorningUpdateCard({ achievementPct, hasTeamTarget, teamTarget, repGoals
       .map((r) => ({ ...r, pct: calculateAchievement(r.currentResult, repGoalsByRepId.get(r.id) as number) }))
       .sort((a, b) => b.pct - a.pct);
     const leaders = withPct.slice(0, 3).map((r) => `${r.name} (${formatPct(r.pct)})`).join(", ") || "—";
-    const focus = withPct.slice(-2).reverse().map((r) => r.name).join(", ") || "—";
+
+    /**
+     * §P2. This was `withPct.slice(-2)` — the two lowest-RANKED
+     * representatives, named in a message copied to WhatsApp and sent to the
+     * whole team. On a team where everyone beat target it still named two
+     * people as the day's problem, purely because someone has to sort last.
+     *
+     * The default broadcast no longer names anyone as needing help. It states
+     * the team goal, the pace, and the leaders. A manager who genuinely wants
+     * to name individuals can still type them in — "ערוך לפני העתקה" exists —
+     * but that is now an explicit act, not something the generator does on
+     * their behalf.
+     */
+    const needing = repsNeedingSupport(withPct.map((r) => ({
+      repId: r.id,
+      repName: r.name,
+      achievementPct: r.pct,
+      currentResult: r.currentResult,
+      target: repGoalsByRepId.get(r.id) ?? null,
+      workdaysTotal: workdaysInMonth(),
+      workdaysPassed: workdaysPassed(),
+    })));
+    const focusLine = needing.length === 0
+      ? "🎯 פוקוס להיום: שמירה על הקצב — כל הצוות בקצב הנדרש"
+      : `🎯 פוקוס להיום: סגירת פערים מול היעד (${needing.length} נציגים מתחת לקצב)`;
 
     const targetLine = hasTeamTarget && achievementPct !== null
       ? `📊 אחוז עמידה ביעד: ${formatPct(achievementPct)} (${formatNum(totalResult)}/${formatNum(teamTarget ?? 0)})`
@@ -846,17 +1333,21 @@ function MorningUpdateCard({ achievementPct, hasTeamTarget, teamTarget, repGoals
 ${targetLine}
 
 ⭐ מובילים: ${leaders}
-🎯 פוקוס להיום: ${focus}
+${focusLine}
 ${paceLine}
 בואו נצא לדרך - יום מצוין ומוצלח!`;
     setText(msg);
     setEditing(false);
   };
 
+  // §Polish: this opened with `if (!text) generate();` and then read `text`
+  // on the very next line. React state is not synchronous, so that path would
+  // have copied an empty string and still reported success — unreachable only
+  // because the button is disabled while `text` is empty. Removed rather than
+  // left as a trap for whoever removes the guard.
   const copy = async () => {
-    if (!text) generate();
-    const t = text || "";
-    try { await navigator.clipboard.writeText(t); toast.success("הועתק ל-WhatsApp"); }
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); toast.success("הועתק ל-WhatsApp"); }
     catch { toast.error("העתקה נכשלה"); }
   };
 
@@ -887,7 +1378,11 @@ ${paceLine}
         <Button size="sm" onClick={generate}><Sparkles className="ms-1 h-4 w-4" />צור עדכון</Button>
         <Button size="sm" variant="outline" onClick={copy} disabled={!text}><Copy className="ms-1 h-4 w-4" />העתק ל-WhatsApp</Button>
         <Button size="sm" variant="outline" onClick={() => setEditing((v) => !v)} disabled={!text}>{editing ? "סיים עריכה" : "ערוך לפני העתקה"}</Button>
-        <Button size="sm" variant="ghost" onClick={() => { if (text) { m.saveTemplate(text); toast.success("נשמר כתבנית"); } }} disabled={!text}>
+        <Button size="sm" variant="ghost" onClick={() => void (async () => {
+          if (!text) return;
+          try { await m.saveTemplate(text); toast.success("נשמר כתבנית"); }
+          catch (e) { toast.error((e as Error).message || "שמירת התבנית נכשלה"); }
+        })()} disabled={!text}>
           <Save className="ms-1 h-4 w-4" />שמור כתבנית
         </Button>
         {m.savedUpdateTemplate && (
@@ -903,7 +1398,19 @@ ${paceLine}
 /* ============ Checklist ============ */
 function ChecklistCard() {
   const m = useMorning();
+  const [busy, setBusy] = useState<string | null>(null);
   const done = CHECKLIST.filter((t) => m.isChecked(t)).length;
+
+  // §P0: the toggle is server-side and awaited. It used to be
+  // `void checklist.upsert({ checked: !current?.checked })` computed from a
+  // 15s-stale cache, so a concurrent toggle was silently lost and a cache
+  // miss was coerced to "checked".
+  const toggle = async (task: string) => {
+    setBusy(task);
+    try { await m.toggleChecklist(task); }
+    catch (e) { toast.error((e as Error).message || "עדכון הצ'קליסט נכשל"); }
+    finally { setBusy(null); }
+  };
   return (
     <div className="rounded-xl border p-4 bg-card">
       <div className="flex items-center justify-between mb-3">
@@ -920,7 +1427,7 @@ function ChecklistCard() {
           return (
             <li key={t}>
               <label className={cn("flex items-center gap-3 rounded-lg border p-2.5 cursor-pointer text-sm transition-colors hover:bg-accent/40", checked && "bg-accent/30")}>
-                <Checkbox checked={checked} onCheckedChange={() => m.toggleChecklist(t)} aria-label={t} />
+                <Checkbox checked={checked} disabled={busy === t} onCheckedChange={() => void toggle(t)} aria-label={t} />
                 <span className={cn(checked && "line-through text-muted-foreground")}>{t}</span>
               </label>
             </li>

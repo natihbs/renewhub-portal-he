@@ -27,7 +27,13 @@ type NotificationRow = {
   read: boolean;
   created_at: string;
 };
-type ActivityRow = { id: string; kind: string; text: string; created_at: string };
+// activity_events is retired (see 20260807091000_activity_events_lockdown.sql):
+// it had a USING (true) SELECT policy readable by every representative in the
+// organization, and exactly two writers — both feedback publishes — while the
+// dashboard card rendered five event kinds and a badge capped by the fetch
+// limit. The dashboard feed now comes from audit_log via listDashboardActivity,
+// which scopes rows to the caller server-side. Nothing here reads or writes
+// activity_events any more.
 
 /** UI preference only — favorites are a per-browser convenience, not business data. */
 const FAVORITES_KEY = "renewhub_favorites";
@@ -36,12 +42,17 @@ const DEFAULT_FAVORITES = ["/performance", "/feedback"];
 type Ctx = {
   favorites: string[];
   notifications: Notification[];
-  activity: Activity[];
   toggleFavorite: (path: string) => void;
   isFavorite: (path: string) => boolean;
-  markNotificationRead: (id: string) => void;
-  markAllRead: () => void;
-  pushActivity: (a: Omit<Activity, "id" | "date">) => void;
+  /**
+   * §P0. Both of these were `void notifs.update(...)` — a rejected write was
+   * swallowed while the bell optimistically re-rendered as read. They now
+   * return promises that reject, so a caller can report the truth.
+   */
+  markNotificationRead: (id: string) => Promise<void>;
+  markAllRead: () => Promise<void>;
+  isLoading: boolean;
+  isError: boolean;
 };
 
 const UxCtx = createContext<Ctx | null>(null);
@@ -54,11 +65,6 @@ export function UxProvider({ children }: { children: ReactNode }) {
     order: { column: "created_at" },
     limit: 50,
   });
-  const activityCloud = useCloudCollection<ActivityRow>("activity_events", {
-    order: { column: "created_at" },
-    limit: 30,
-  });
-
   useEffect(() => {
     try {
       const raw = localStorage.getItem(FAVORITES_KEY);
@@ -83,34 +89,31 @@ export function UxProvider({ children }: { children: ReactNode }) {
       read: n.read,
       href: n.href ?? undefined,
     }));
-    const activity: Activity[] = activityCloud.rows.map((a) => ({
-      id: a.id,
-      kind: a.kind as Activity["kind"],
-      text: a.text,
-      date: a.created_at,
-    }));
-
     return {
       favorites,
       notifications,
-      activity,
       toggleFavorite: (path) =>
         setFavorites((f) => (f.includes(path) ? f.filter((p) => p !== path) : [...f, path])),
       isFavorite: (path) => favorites.includes(path),
-      markNotificationRead: (id) => {
+      markNotificationRead: async (id) => {
         if (!notifs.live) return;
-        void notifs.update(id, { read: true });
+        await notifs.update(id, { read: true });
+        await notifs.refetch();
       },
-      markAllRead: () => {
+      // Awaited together, so "mark all read" reports success only once every
+      // row has actually been written. Promise.all rather than a sequential
+      // loop: these are independent single-row updates.
+      markAllRead: async () => {
         if (!notifs.live) return;
-        for (const n of notifications.filter((x) => !x.read)) void notifs.update(n.id, { read: true });
+        const unread = notifications.filter((x) => !x.read);
+        if (unread.length === 0) return;
+        await Promise.all(unread.map((n) => notifs.update(n.id, { read: true })));
+        await notifs.refetch();
       },
-      pushActivity: (a) => {
-        if (!activityCloud.live) return;
-        void activityCloud.insert({ kind: a.kind, text: a.text }, "actor_id");
-      },
+      isLoading: notifs.isLoading,
+      isError: notifs.isError,
     };
-  }, [favorites, notifs, activityCloud]);
+  }, [favorites, notifs]);
 
   return <UxCtx.Provider value={value}>{children}</UxCtx.Provider>;
 }

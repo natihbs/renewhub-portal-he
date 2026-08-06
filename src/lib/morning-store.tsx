@@ -1,7 +1,12 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAuth } from "@/lib/auth";
+import { useServerFn } from "@tanstack/react-start";
+import { useWorkspace } from "@/lib/workspace-context";
+import {
+  underwritingCreate, underwritingUpdate, underwritingDelete, toggleChecklistItem,
+} from "@/lib/dashboard.functions";
 
 /**
  * Outcome of a data-freshness check (§P0). "complete" is only ever reachable
@@ -109,19 +114,20 @@ type IssueRow = {
   owner: string;
   due_on: string | null;
 };
-type ChecklistRow = { id: string; checklist_date: string; task_key: string; checked: boolean };
+type ChecklistRow = { id: string; checklist_date: string; task_key: string; checked: boolean; team_id: string | null };
 type SettingsRow = {
   user_id: string;
   saved_update_template: string | null;
   last_refresh_at: string | null;
   refresh_status: string;
   data_as_of: string | null;
-  /** @deprecated mislabeled as a renewal rate; replaced by yesterday_achievement_pct. */
-  yesterday_renewal_pct: number;
-  /** @deprecated mislabeled as a renewal rate; replaced by monthly_avg_achievement_pct. */
-  monthly_avg_renewal_pct: number;
-  yesterday_achievement_pct: number;
-  monthly_avg_achievement_pct: number;
+  // yesterday_achievement_pct / monthly_avg_achievement_pct are DELIBERATELY
+  // absent. No code path ever wrote them; the read side's "?? 0" turned that
+  // into a permanent, plausible-looking zero, which is what made the trend
+  // badge always read "+<the entire achievement>" in green. They are
+  // superseded by team_achievement_snapshots and documented as dead in
+  // 20260807093000_team_achievement_snapshots.sql. Do not reintroduce them
+  // here — a field on this type is an invitation to render it.
 };
 
 type Ctx = {
@@ -133,8 +139,6 @@ type Ctx = {
   dataAsOf: string;
   /** Timestamp of the most recent successful source-file import, or null if none. */
   lastImportAt: string | null;
-  yesterdayAchievementPct: number;
-  monthlyAvgAchievementPct: number;
   managerCalls: ManagerCall[];
   underwriting: UnderwritingIssue[];
   savedUpdateTemplate: string | null;
@@ -145,15 +149,32 @@ type Ctx = {
    * anything at all.
    */
   runFreshnessCheck: () => Promise<FreshnessCheckResult>;
-  addManagerCall: (c: Omit<ManagerCall, "id" | "status"> & { status?: ManagerCall["status"] }) => void;
-  updateManagerCall: (id: string, p: Partial<ManagerCall>) => void;
-  removeManagerCall: (id: string) => void;
-  addUnderwriting: (u: Omit<UnderwritingIssue, "id" | "openedAt"> & { openedAt?: string }) => void;
-  updateUnderwriting: (id: string, p: Partial<UnderwritingIssue>) => void;
-  removeUnderwriting: (id: string) => void;
-  toggleChecklist: (task: string) => void;
+  /**
+   * §P0. Every mutation below returns a promise and REJECTS on failure.
+   *
+   * They were all `void cloud.insert/update/remove(...)` — a rejected promise
+   * was recorded by error-capture.ts and never surfaced, while the calling
+   * dialog fired toast.success() on the very next line. Adding a manager call
+   * or deleting an underwriting issue reported success whether or not
+   * anything was written, and the optimistic cache made the row appear or
+   * disappear until the next refetch.
+   *
+   * Callers must await these and report the real outcome.
+   */
+  addManagerCall: (c: Omit<ManagerCall, "id" | "status"> & { status?: ManagerCall["status"] }) => Promise<void>;
+  updateManagerCall: (id: string, p: Partial<ManagerCall>) => Promise<void>;
+  removeManagerCall: (id: string) => Promise<void>;
+  addUnderwriting: (u: Omit<UnderwritingIssue, "id" | "openedAt"> & { openedAt?: string }) => Promise<void>;
+  updateUnderwriting: (id: string, p: Partial<UnderwritingIssue>) => Promise<void>;
+  removeUnderwriting: (id: string) => Promise<void>;
+  /** Returns the state the DATABASE committed, never a value guessed from cache. */
+  toggleChecklist: (task: string) => Promise<boolean>;
   isChecked: (task: string) => boolean;
-  saveTemplate: (text: string) => void;
+  saveTemplate: (text: string) => Promise<void>;
+  /** Async view state for the morning collections — loading, error and empty are distinct. */
+  isLoading: boolean;
+  isError: boolean;
+  errorMessage: string | null;
 };
 
 const MCtx = createContext<Ctx | null>(null);
@@ -177,6 +198,12 @@ const FRESHNESS_SOURCES: { key: FreshnessSourceKey; queryKey: readonly unknown[]
 export function MorningProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const { workspace } = useWorkspace();
+  const workspaceTeamId = workspace.type === "team" ? workspace.teamId : null;
+  const createUw = useServerFn(underwritingCreate);
+  const updateUw = useServerFn(underwritingUpdate);
+  const deleteUw = useServerFn(underwritingDelete);
+  const toggleItem = useServerFn(toggleChecklistItem);
   const calls = useCloudCollection<CallRow>("manager_calls", {
     order: { column: "scheduled_at", ascending: true },
   });
@@ -187,9 +214,35 @@ export function MorningProvider({ children }: { children: ReactNode }) {
     limit: 1,
   });
   const issues = useCloudCollection<IssueRow>("underwriting_issues", { order: { column: "opened_on" } });
-  const today = isoDate();
+
+  // §P2 midnight rollover. `today` used to be computed once, at provider
+  // mount. A session left open past midnight kept writing checklist ticks to
+  // the PREVIOUS day's date until the tab was reloaded. This ticks the date
+  // forward on its own, so the boundary is crossed without a remount.
+  const [today, setToday] = useState(isoDate());
+  useEffect(() => {
+    const check = () => setToday((prev) => (prev === isoDate() ? prev : isoDate()));
+    // A minute is well inside the tolerance for a date boundary and costs
+    // nothing; the state only changes on the one tick per day that crosses it.
+    const timer = window.setInterval(check, 60_000);
+    // Coming back to a backgrounded tab is the common way this is noticed.
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, []);
+
+  // Scoped by team as well as by date (§P2): a manager of two teams had ONE
+  // checklist per day, so ticking "תכנון האזנות" in team A marked it done in
+  // team B. `null` team_id is the organization-level checklist and is its own
+  // distinct scope, not a catch-all.
   const checklist = useCloudCollection<ChecklistRow>("morning_checklist", {
-    eq: { checklist_date: today },
+    eq: workspaceTeamId
+      ? { checklist_date: today, team_id: workspaceTeamId }
+      : { checklist_date: today, team_id: null },
   });
   const settings = useCloudCollection<SettingsRow>("morning_settings", {});
 
@@ -206,8 +259,6 @@ export function MorningProvider({ children }: { children: ReactNode }) {
         lastFailedSources: [],
         dataAsOf: isoDate(new Date(Date.now() - 24 * 3600e3)),
         lastImportAt: null,
-        yesterdayAchievementPct: 0,
-        monthlyAvgAchievementPct: 0,
         managerCalls: demoCalls,
         underwriting: demoIssues,
         savedUpdateTemplate: demoTemplate,
@@ -219,17 +270,27 @@ export function MorningProvider({ children }: { children: ReactNode }) {
           sources: [],
           failed: [],
         }),
-        addManagerCall: (c) =>
+        // Demo Mode keeps working exactly as before, but through the same
+        // promise-returning contract as Live Mode, so the UI has one code
+        // path and never has to branch on mode to know whether to await.
+        addManagerCall: async (c) =>
           setDemoCalls((s) => [{ id: uid(), status: c.status ?? "planned", ...c }, ...s]),
-        updateManagerCall: (id, p) => setDemoCalls((s) => s.map((c) => (c.id === id ? { ...c, ...p } : c))),
-        removeManagerCall: (id) => setDemoCalls((s) => s.filter((c) => c.id !== id)),
-        addUnderwriting: (u) =>
+        updateManagerCall: async (id, p) => setDemoCalls((s) => s.map((c) => (c.id === id ? { ...c, ...p } : c))),
+        removeManagerCall: async (id) => setDemoCalls((s) => s.filter((c) => c.id !== id)),
+        addUnderwriting: async (u) =>
           setDemoIssues((s) => [{ id: uid(), openedAt: u.openedAt ?? isoDate(), ...u }, ...s]),
-        updateUnderwriting: (id, p) => setDemoIssues((s) => s.map((x) => (x.id === id ? { ...x, ...p } : x))),
-        removeUnderwriting: (id) => setDemoIssues((s) => s.filter((x) => x.id !== id)),
-        toggleChecklist: (task) => setDemoChecklist((s) => ({ ...s, [task]: !s[task] })),
+        updateUnderwriting: async (id, p) => setDemoIssues((s) => s.map((x) => (x.id === id ? { ...x, ...p } : x))),
+        removeUnderwriting: async (id) => setDemoIssues((s) => s.filter((x) => x.id !== id)),
+        toggleChecklist: async (task) => {
+          const next = !demoChecklist[task];
+          setDemoChecklist((s) => ({ ...s, [task]: next }));
+          return next;
+        },
         isChecked: (task) => !!demoChecklist[task],
-        saveTemplate: (text) => setDemoTemplate(text),
+        saveTemplate: async (text) => setDemoTemplate(text),
+        isLoading: false,
+        isError: false,
+        errorMessage: null,
       };
     }
 
@@ -264,10 +325,6 @@ export function MorningProvider({ children }: { children: ReactNode }) {
       lastFailedSources: [],
       dataAsOf: s?.data_as_of ?? isoDate(new Date(Date.now() - 24 * 3600e3)),
       lastImportAt: latestImport?.created_at ?? null,
-      // New column is authoritative; fall back to the deprecated renewal-named column
-      // for any row written before this migration, then to 0.
-      yesterdayAchievementPct: s?.yesterday_achievement_pct ?? s?.yesterday_renewal_pct ?? 0,
-      monthlyAvgAchievementPct: s?.monthly_avg_achievement_pct ?? s?.monthly_avg_renewal_pct ?? 0,
       managerCalls,
       underwriting,
       savedUpdateTemplate: s?.saved_update_template ?? null,
@@ -315,8 +372,11 @@ export function MorningProvider({ children }: { children: ReactNode }) {
 
         return { status, checkedAt, sources: results, failed: results.filter((r) => !r.ok).map((r) => r.key) };
       },
-      addManagerCall: (c) =>
-        void calls.insert({
+      // manager_calls is already owner-scoped by RLS (owner_id = auth.uid()),
+      // so the generic writer is an adequate authorization boundary here —
+      // what it was missing was the await. These now reject on failure.
+      addManagerCall: async (c) => {
+        await calls.insert({
           representative_id: c.repId || null,
           subject: c.subject,
           scheduled_at: c.scheduledAt,
@@ -324,8 +384,10 @@ export function MorningProvider({ children }: { children: ReactNode }) {
           summary: c.summary ?? null,
           follow_up_at: c.followUpAt ?? null,
           owner_id: user?.id ?? "",
-        }),
-      updateManagerCall: (id, p) => {
+        });
+        await calls.refetch();
+      },
+      updateManagerCall: async (id, p) => {
         const row: Record<string, string | null> = {};
         if (p.repId !== undefined) row.representative_id = p.repId || null;
         if (p.subject !== undefined) row.subject = p.subject;
@@ -333,51 +395,83 @@ export function MorningProvider({ children }: { children: ReactNode }) {
         if (p.status !== undefined) row.status = p.status;
         if (p.summary !== undefined) row.summary = p.summary ?? null;
         if (p.followUpAt !== undefined) row.follow_up_at = p.followUpAt ?? null;
-        void calls.update(id, row);
+        await calls.update(id, row);
+        await calls.refetch();
       },
-      removeManagerCall: (id) => void calls.remove(id),
-      addUnderwriting: (u) =>
-        void issues.insert(
-          {
-            representative_id: u.repId || null,
+      removeManagerCall: async (id) => {
+        await calls.remove(id);
+        await calls.refetch();
+      },
+      // §P0 SECURITY: underwriting writes no longer go through the generic
+      // proxy. They are authorized against the representative and audited
+      // with before/after state — see dashboard.functions.ts. The RLS policy
+      // behind them was `private.is_staff()`, i.e. any manager could
+      // re-status or delete any organization issue.
+      addUnderwriting: async (u) => {
+        await createUw({
+          data: {
+            representative_id: u.repId,
             subject: u.subject,
             priority: u.priority,
-            opened_on: u.openedAt ?? isoDate(),
             status: u.status,
             owner: u.owner,
             due_on: u.dueAt || null,
+            opened_on: u.openedAt ?? isoDate(),
           },
-          "created_by",
-        ),
-      updateUnderwriting: (id, p) => {
-        const row: Record<string, string | null> = {};
-        if (p.repId !== undefined) row.representative_id = p.repId || null;
-        if (p.subject !== undefined) row.subject = p.subject;
-        if (p.priority !== undefined) row.priority = p.priority;
-        if (p.openedAt !== undefined) row.opened_on = p.openedAt;
-        if (p.status !== undefined) row.status = p.status;
-        if (p.owner !== undefined) row.owner = p.owner;
-        if (p.dueAt !== undefined) row.due_on = p.dueAt || null;
-        void issues.update(id, row);
+        });
+        await issues.refetch();
       },
-      removeUnderwriting: (id) => void issues.remove(id),
-      toggleChecklist: (task) => {
-        const current = checklist.rows.find((r) => r.task_key === task);
-        void checklist.upsert(
-          {
-            user_id: user?.id ?? "",
-            checklist_date: today,
-            task_key: task,
-            checked: !current?.checked,
+      updateUnderwriting: async (id, p) => {
+        await updateUw({
+          data: {
+            issue_id: id,
+            ...(p.subject !== undefined ? { subject: p.subject } : {}),
+            ...(p.priority !== undefined ? { priority: p.priority } : {}),
+            ...(p.status !== undefined ? { status: p.status } : {}),
+            ...(p.owner !== undefined ? { owner: p.owner } : {}),
+            ...(p.dueAt !== undefined ? { due_on: p.dueAt || null } : {}),
           },
-          "user_id,checklist_date,task_key",
-        );
+        });
+        await issues.refetch();
+      },
+      removeUnderwriting: async (id) => {
+        await deleteUw({ data: { issue_id: id } });
+        await issues.refetch();
+      },
+      /**
+       * §P0 concurrency. This was:
+       *     const current = checklist.rows.find(...)
+       *     void checklist.upsert({ checked: !current?.checked }, ...)
+       * — a read-modify-write against a React Query cache with a 15s
+       * staleTime. Two tabs could both read the same value and write the same
+       * result, silently losing a toggle, and a row missing from the cache
+       * was coerced to `true` rather than read from the database.
+       *
+       * The server flips the value Postgres holds, under a row lock, and
+       * returns what committed. The caller renders that, not a guess.
+       */
+      toggleChecklist: async (task) => {
+        const res = await toggleItem({
+          data: { task_key: task, checklist_date: today, team_id: workspaceTeamId },
+        });
+        await checklist.refetch();
+        return res.checked;
       },
       isChecked: (task) => !!checklist.rows.find((r) => r.task_key === task)?.checked,
-      saveTemplate: (text) =>
-        void settings.upsert({ user_id: user?.id ?? "", saved_update_template: text }, "user_id"),
+      saveTemplate: async (text) => {
+        await settings.upsert({ user_id: user?.id ?? "", saved_update_template: text }, "user_id");
+        await settings.refetch();
+      },
+      isLoading: calls.isLoading || issues.isLoading || checklist.isLoading,
+      isError: calls.isError || issues.isError || checklist.isError,
+      errorMessage:
+        calls.isError || issues.isError || checklist.isError
+          ? "שגיאה בטעינת נתוני פתיחת היום. נסו לרענן את הדף."
+          : null,
     };
-  }, [calls, issues, checklist, settings, importHistory.rows, qc, user, today, demoCalls, demoIssues, demoChecklist, demoTemplate]);
+  }, [calls, issues, checklist, settings, importHistory.rows, qc, user, today, workspaceTeamId,
+      createUw, updateUw, deleteUw, toggleItem,
+      demoCalls, demoIssues, demoChecklist, demoTemplate]);
 
   return <MCtx.Provider value={value}>{children}</MCtx.Provider>;
 }
