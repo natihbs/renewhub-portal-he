@@ -14,6 +14,224 @@ export type Database = {
   }
   public: {
     Tables: {
+      ingestion_sources: {
+        Row: {
+          active: boolean
+          created_at: string
+          display_name: string
+          freshness_critical_hours: number
+          freshness_warning_hours: number
+          id: string
+          ingestion_mode: string
+          key: string
+          max_invalid_row_pct: number
+          updated_at: string
+          volume_baseline_batches: number
+          volume_floor_pct: number
+          work_type_id: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          display_name: string
+          freshness_critical_hours?: number
+          freshness_warning_hours?: number
+          id?: string
+          ingestion_mode?: string
+          key: string
+          max_invalid_row_pct?: number
+          updated_at?: string
+          volume_baseline_batches?: number
+          volume_floor_pct?: number
+          work_type_id: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          display_name?: string
+          freshness_critical_hours?: number
+          freshness_warning_hours?: number
+          id?: string
+          ingestion_mode?: string
+          key?: string
+          max_invalid_row_pct?: number
+          updated_at?: string
+          volume_baseline_batches?: number
+          volume_floor_pct?: number
+          work_type_id?: string
+        }
+        Relationships: []
+      }
+      ingestion_batches: {
+        Row: {
+          checksum: string | null
+          completed_at: string | null
+          created_at: string
+          duration_ms: number | null
+          external_batch_ref: string | null
+          id: string
+          rejection_code: string | null
+          rejection_detail: string | null
+          row_count: number
+          rows_inserted: number
+          rows_rejected: number
+          rows_unchanged: number
+          rows_updated: number
+          rows_voided: number
+          source_id: string
+          staged_at: string | null
+          started_at: string
+          status: string
+          trigger_kind: string
+          triggered_by: string | null
+          validated_at: string | null
+          validation_result: Json | null
+        }
+        Insert: {
+          checksum?: string | null
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          external_batch_ref?: string | null
+          id?: string
+          rejection_code?: string | null
+          rejection_detail?: string | null
+          row_count?: number
+          rows_inserted?: number
+          rows_rejected?: number
+          rows_unchanged?: number
+          rows_updated?: number
+          rows_voided?: number
+          source_id: string
+          staged_at?: string | null
+          started_at?: string
+          status?: string
+          trigger_kind?: string
+          triggered_by?: string | null
+          validated_at?: string | null
+          validation_result?: Json | null
+        }
+        Update: {
+          checksum?: string | null
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          external_batch_ref?: string | null
+          id?: string
+          rejection_code?: string | null
+          rejection_detail?: string | null
+          row_count?: number
+          rows_inserted?: number
+          rows_rejected?: number
+          rows_unchanged?: number
+          rows_updated?: number
+          rows_voided?: number
+          source_id?: string
+          staged_at?: string | null
+          started_at?: string
+          status?: string
+          trigger_kind?: string
+          triggered_by?: string | null
+          validated_at?: string | null
+          validation_result?: Json | null
+        }
+        Relationships: []
+      }
+      ingestion_staging_rows: {
+        Row: {
+          batch_id: string
+          business_value: number | null
+          business_value_raw: string | null
+          created_at: string
+          due_at: string | null
+          due_at_raw: string | null
+          eligible_from: string | null
+          eligible_from_raw: string | null
+          error_code: string | null
+          error_detail: string | null
+          external_ref: string | null
+          id: number
+          owner_external_ref: string | null
+          owner_representative_id: string | null
+          row_checksum: string
+          row_number: number
+          subject_label: string | null
+          subject_ref: string | null
+          valid: boolean | null
+        }
+        Insert: {
+          batch_id: string
+          business_value?: number | null
+          business_value_raw?: string | null
+          created_at?: string
+          due_at?: string | null
+          due_at_raw?: string | null
+          eligible_from?: string | null
+          eligible_from_raw?: string | null
+          error_code?: string | null
+          error_detail?: string | null
+          external_ref?: string | null
+          owner_external_ref?: string | null
+          owner_representative_id?: string | null
+          row_number: number
+          subject_label?: string | null
+          subject_ref?: string | null
+          valid?: boolean | null
+        }
+        Update: {
+          batch_id?: string
+          business_value?: number | null
+          business_value_raw?: string | null
+          created_at?: string
+          due_at?: string | null
+          due_at_raw?: string | null
+          eligible_from?: string | null
+          eligible_from_raw?: string | null
+          error_code?: string | null
+          error_detail?: string | null
+          external_ref?: string | null
+          owner_external_ref?: string | null
+          owner_representative_id?: string | null
+          row_number?: number
+          subject_label?: string | null
+          subject_ref?: string | null
+          valid?: boolean | null
+        }
+        Relationships: []
+      }
+      ingestion_events: {
+        Row: {
+          batch_id: string | null
+          created_at: string
+          detail: Json | null
+          event_code: string
+          id: string
+          message: string
+          severity: string
+          source_id: string | null
+        }
+        Insert: {
+          batch_id?: string | null
+          created_at?: string
+          detail?: Json | null
+          event_code: string
+          id?: string
+          message: string
+          severity: string
+          source_id?: string | null
+        }
+        Update: {
+          batch_id?: string | null
+          created_at?: string
+          detail?: Json | null
+          event_code?: string
+          id?: string
+          message?: string
+          severity?: string
+          source_id?: string | null
+        }
+        Relationships: []
+      }
       assignment_capabilities: {
         Row: {
           assignment_id: string
@@ -1726,6 +1944,89 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ingestion_begin_batch: {
+        Args: {
+          _external_batch_ref: string | null
+          _source_key: string
+          _trigger_kind: string
+          _triggered_by: string | null
+        }
+        Returns: {
+          out_batch_id: string
+          out_ingestion_mode: string
+          out_source_id: string
+          out_work_type_id: string
+        }[]
+      }
+      ingestion_finalize_staging: {
+        Args: {
+          _batch_id: string
+        }
+        Returns: {
+          out_checksum: string
+          out_row_count: number
+        }[]
+      }
+      ingestion_validate_batch: {
+        Args: {
+          _batch_id: string
+        }
+        Returns: {
+          out_passed: boolean
+          out_rejection_code: string | null
+          out_validation_result: Json
+        }[]
+      }
+      ingestion_publish_batch: {
+        Args: {
+          _batch_id: string
+        }
+        Returns: {
+          out_duration_ms: number
+          out_rows_inserted: number
+          out_rows_unchanged: number
+          out_rows_updated: number
+          out_rows_voided: number
+        }[]
+      }
+      ingestion_reject_batch: {
+        Args: {
+          _batch_id: string
+          _code: string
+          _detail: string | null
+        }
+        Returns: {
+          out_batch_id: string
+          out_status: string
+        }[]
+      }
+      ingestion_freshness: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          out_age_seconds: number | null
+          out_consecutive_failures: number
+          out_critical_hours: number
+          out_last_attempt_at: string | null
+          out_last_attempt_status: string | null
+          out_last_batch_id: string | null
+          out_last_published_at: string | null
+          out_last_row_count: number | null
+          out_open_item_count: number
+          out_source_key: string
+          out_source_name: string
+          out_warning_hours: number
+          out_work_type_key: string
+        }[]
+      }
+      ingestion_purge_staging: {
+        Args: {
+          _older_than_days: number
+        }
+        Returns: {
+          out_batches_purged: number
+          out_rows_purged: number
+        }[]
+      }
       accountability_gaps: {
         Args: Record<PropertyKey, never>
         Returns: {
