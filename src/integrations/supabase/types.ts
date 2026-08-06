@@ -792,6 +792,7 @@ export type Database = {
       morning_checklist: {
         Row: {
           checked: boolean
+          team_id: string | null
           checklist_date: string
           created_at: string
           id: string
@@ -801,6 +802,7 @@ export type Database = {
         }
         Insert: {
           checked?: boolean
+          team_id?: string | null
           checklist_date?: string
           created_at?: string
           id?: string
@@ -810,6 +812,7 @@ export type Database = {
         }
         Update: {
           checked?: boolean
+          team_id?: string | null
           checklist_date?: string
           created_at?: string
           id?: string
@@ -864,6 +867,7 @@ export type Database = {
       notifications: {
         Row: {
           body: string
+          dedupe_key: string | null
           created_at: string
           href: string | null
           id: string
@@ -875,6 +879,7 @@ export type Database = {
         }
         Insert: {
           body?: string
+          dedupe_key?: string | null
           created_at?: string
           href?: string | null
           id?: string
@@ -886,6 +891,7 @@ export type Database = {
         }
         Update: {
           body?: string
+          dedupe_key?: string | null
           created_at?: string
           href?: string | null
           id?: string
@@ -1136,6 +1142,50 @@ export type Database = {
           },
         ]
       }
+      team_achievement_snapshots: {
+        Row: {
+          achievement_pct: number | null
+          created_at: string
+          id: string
+          representative_count: number
+          result_value: number
+          snapshot_date: string
+          target_value: number | null
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          achievement_pct?: number | null
+          created_at?: string
+          id?: string
+          representative_count?: number
+          result_value: number
+          snapshot_date?: string
+          target_value?: number | null
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          achievement_pct?: number | null
+          created_at?: string
+          id?: string
+          representative_count?: number
+          result_value?: number
+          snapshot_date?: string
+          target_value?: number | null
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_achievement_snapshots_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_goals: {
         Row: {
           created_at: string
@@ -1310,6 +1360,20 @@ export type Database = {
           schedule_completed: boolean
         }[]
       }
+      deliver_operational_notification: {
+        Args: {
+          _body: string
+          _dedupe_key: string
+          _href: string
+          _kind: string
+          _title: string
+          _user_id: string
+        }
+        Returns: {
+          out_created: boolean
+          out_notification_id: string | null
+        }[]
+      }
       link_representative_to_user: {
         Args: {
           _check_expected: boolean
@@ -1323,6 +1387,20 @@ export type Database = {
           rep_id: string
           rep_name: string
           rep_team_id: string | null
+        }[]
+      }
+      record_team_achievement_snapshot: {
+        Args: {
+          _achievement_pct: number | null
+          _representative_count: number
+          _result_value: number
+          _snapshot_date: string
+          _target_value: number | null
+          _team_id: string
+        }
+        Returns: {
+          out_created: boolean
+          out_snapshot_id: string
         }[]
       }
       set_feedback_published: {
@@ -1359,6 +1437,19 @@ export type Database = {
           previous_profile_team_id: string
           previous_representative_team_id: string
           representative_id: string
+        }[]
+      }
+      toggle_morning_checklist_item: {
+        Args: {
+          _checklist_date: string
+          _task_key: string
+          _team_id: string | null
+          _user_id: string
+        }
+        Returns: {
+          out_checked: boolean
+          out_checklist_date: string
+          out_task_key: string
         }[]
       }
       toggle_rep_task_done: {

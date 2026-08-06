@@ -54,7 +54,10 @@ export function useCloudTeams(options?: { includeInactive?: boolean }) {
   });
 
   const teams: CloudTeam[] = filterVisibleTeams((query.data?.teams ?? []) as RawTeam[], includeInactive);
-  return { teams, isLoading: query.isLoading };
+  // isError is exposed because a failed teams query and an organization with
+  // no teams are different facts, and the dashboard must not render the
+  // second when the first is true (§P1 loading/error states).
+  return { teams, isLoading: query.isLoading, isError: query.isError };
 }
 
 /**

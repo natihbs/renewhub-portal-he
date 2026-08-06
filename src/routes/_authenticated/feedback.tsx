@@ -13,7 +13,6 @@ import { useRepWorkspace } from "@/lib/rep-workspace";
 import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
 import { useWorkspace } from "@/lib/workspace-context";
-import { useUx } from "@/lib/ux-store";
 import { useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
 import { calculateAchievement } from "@/lib/performance-domain";
 import { useServerFn } from "@tanstack/react-start";
@@ -152,7 +151,6 @@ function ListeningCenter() {
   const isManager = useIsManager();
   const { isAdmin } = useAuth();
   const { isDemo } = useAppMode();
-  const { pushActivity } = useUx();
   const actions = useFeedbackActions();
   const [openForm, setOpenForm] = useState(false);
   const [openSchedule, setOpenSchedule] = useState(false);
@@ -227,9 +225,10 @@ function ListeningCenter() {
     setPublishingId(id);
     try {
       const res = await actions.setPublished({ id, published: true });
-      const f = state.feedback.find((x) => x.id === id);
       if (res.changed) {
-        if (f) pushActivity({ kind: "feedback", text: `משוב פורסם עבור ${nameOf(f.repId)}` });
+        // The publish is recorded in audit_log by setFeedbackPublished, which
+        // is what the dashboard activity feed now reads. The previous
+        // fire-and-forget activity_events insert here is gone with the table.
         toast.success("המשוב פורסם והנציג קיבל התראה");
       } else {
         toast.info("המשוב כבר היה מפורסם — לא נשלחה התראה נוספת");
@@ -2128,7 +2127,6 @@ function FeedbackFormDialog({ open, onOpenChange, defaultRepId, defaultScheduleI
  */
 function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { state } = useApp();
-  const { pushActivity } = useUx();
   const preview = useServerFn(previewUnpublishedFeedback);
   const bulkPublish = useServerFn(publishFeedbackBulk);
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
@@ -2171,7 +2169,6 @@ function AdminBulkPublishDialog({ open, onOpenChange }: { open: boolean; onOpenC
     setPublishing(true);
     try {
       const res = await bulkPublish({ data: filters });
-      if (res.updated > 0) pushActivity({ kind: "feedback", text: `פורסמו ${res.updated} רשומות משוב קיימות` });
       toast.success(`פורסמו ${res.updated} רשומות משוב ליעדים שנבחרו.`);
       close(false);
     } catch (e) {

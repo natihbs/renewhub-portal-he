@@ -16,6 +16,9 @@ import type { KpiValueRow } from "./kpi-values";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { listRepresentatives } from "@/lib/rep-admin.functions";
 
 type Ctx = {
   state: AppState;
@@ -119,7 +122,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentRepId, setCurrentRepId] = useState<string>("");
   const [reps, setReps] = useState<Rep[]>([]);
   const [demo, setDemo] = useState<AppState>(SEED);
-  const { isAdmin, isManager } = useAuth();
+  const { isAdmin, isManager, user } = useAuth();
+  const { isDemo } = useAppMode();
 
   const announcements = useCloudCollection<AnnouncementRow>("announcements", {
     order: { column: "published_on" },
@@ -140,6 +144,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // over-fetches (rep) or queries an empty `in: []` (manager) while reps are still loading.
   const isRepOnly = !isAdmin && !isManager;
   const repIds = useMemo(() => reps.map((r) => r.id), [reps]);
+
+  /**
+   * Async status of the representatives list. `reps` itself is a mirror
+   * written by CloudRepsSync, which strips the loading/error signal — so an
+   * empty mirror meant "no representatives", "still loading" and "the query
+   * failed" indistinguishably, and the dashboard rendered the first of those
+   * for all three. Observing the SAME query key here is free: TanStack
+   * dedupes by key, so this adds no network round trip.
+   */
+  const loadReps = useServerFn(listRepresentatives);
+  const repsQuery = useQuery({
+    queryKey: ["representatives"],
+    queryFn: () => loadReps(),
+    enabled: !isDemo && !!user,
+    staleTime: 30_000,
+  });
+  const repsLoading = repsQuery.isLoading;
+  const repsError = repsQuery.isError ? "שגיאה בטעינת רשימת הנציגים" : null;
   const feedback = useCloudCollection<FeedbackRow>("feedback", {
     order: { column: "feedback_date" },
     eq: isRepOnly && currentRepId ? { representative_id: currentRepId } : undefined,
@@ -154,6 +176,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     in: !isRepOnly && repIds.length > 0 ? { representative_id: repIds } : undefined,
     enabled: isRepOnly ? !!currentRepId : repIds.length > 0,
   });
+
+  /**
+   * §P2 historical team attribution, client side.
+   *
+   * kpi_values RLS already grants a manager rows ATTRIBUTED to a team they
+   * manage — "kpi_values manager read" is
+   *     can_manage_rep(representative_id) OR manages_team(team_id)
+   * precisely so a team keeps its history after a representative moves on.
+   * The client then threw that away: the query above filters
+   * `representative_id IN (current roster)`, so rows produced FOR this team
+   * by someone who has since transferred or been deactivated never arrived,
+   * and renewalTotalsForTeamHistorical silently under-reported. A team's
+   * recorded history shrank when a person left.
+   *
+   * This second read fetches by the immutable attribution instead. The two
+   * are merged below and de-duplicated by row id, so a rep still on the team
+   * contributes exactly once.
+   */
+  const managedTeamIds = useMemo(
+    () => [...new Set(reps.map((r) => r.teamId).filter((t): t is string => !!t))].sort(),
+    [reps],
+  );
+  const kpiByTeam = useCloudCollection<KpiValueRow>("kpi_values", {
+    order: { column: "metric_date" },
+    in: !isRepOnly && managedTeamIds.length > 0 ? { team_id: managedTeamIds } : undefined,
+    enabled: !isRepOnly && managedTeamIds.length > 0,
+  });
+  const mergedKpiValues = useMemo(() => {
+    if (isRepOnly) return kpiValues.rows;
+    const byId = new Map<string, KpiValueRow>();
+    for (const row of kpiValues.rows) byId.set(row.id, row);
+    for (const row of kpiByTeam.rows) byId.set(row.id, row);
+    return [...byId.values()];
+  }, [isRepOnly, kpiValues.rows, kpiByTeam.rows]);
 
   const live = announcements.live;
 
@@ -238,9 +294,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })),
       feedbackLoading: feedback.isLoading,
       feedbackError: feedback.isError ? (feedback.error?.message ?? "שגיאה בטעינת נתוני משוב") : null,
-      kpiValues: kpiValues.rows,
+      repsLoading,
+      repsError,
+      kpiLoading: kpiValues.isLoading || kpiByTeam.isLoading,
+      kpiError: kpiValues.isError || kpiByTeam.isError ? "שגיאה בטעינת נתוני חידושים" : null,
+      kpiValues: mergedKpiValues,
     };
-  }, [live, demo, role, currentRepId, reps, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error, kpiValues.rows]);
+  }, [live, demo, role, currentRepId, reps, repsLoading, repsError, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error, mergedKpiValues, kpiValues.isLoading, kpiValues.isError, kpiByTeam.isLoading, kpiByTeam.isError]);
 
   const value: Ctx = useMemo(() => {
     const shared = {

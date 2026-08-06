@@ -13,7 +13,11 @@ export const CLOUD_TABLES = [
   "announcements",
   "articles",
   "ideas",
-  "activity_events",
+  // activity_events was removed here in the Dashboard sprint. It is retired
+  // (see 20260807091000_activity_events_lockdown.sql): admin-only reads, no
+  // client writes, and no application reader. The dashboard feed now comes
+  // from audit_log via listDashboardActivity. Leaving it on this list would
+  // invite a future caller back onto a dead path.
   "competitions",
   "competition_categories",
   "competition_scores",
@@ -35,6 +39,7 @@ export const CLOUD_TABLES = [
   "representative_goals",
   "coaching_plans",
   "feedback_revisions",
+  "team_achievement_snapshots",
 ] as const;
 
 /**
@@ -66,6 +71,15 @@ export const CLOUD_TABLES = [
  * Reads are deliberately still allowed here: store.tsx's RLS-scoped
  * subscriptions are the single read path every consumer shares, and RLS is a
  * complete authorization answer for a read.
+ *
+ * underwriting_issues, morning_checklist and team_achievement_snapshots join
+ * them in the Dashboard sprint. An underwriting issue is a cross-team
+ * commitment record that needs authorization derived from the representative
+ * plus a before/after audit entry on every change; a checklist tick needs a
+ * concurrency-safe server-side toggle rather than a value computed from a
+ * 15s-stale cache; and an achievement snapshot is the baseline a trend is
+ * measured against, so a client that could write one could manufacture its
+ * own history.
  */
 export const CLOUD_WRITE_PROTECTED_TABLES = [
   "kpi_values",
@@ -73,6 +87,9 @@ export const CLOUD_WRITE_PROTECTED_TABLES = [
   "listening_schedules",
   "coaching_plans",
   "feedback_revisions",
+  "underwriting_issues",
+  "morning_checklist",
+  "team_achievement_snapshots",
 ] as const;
 
 export type CloudTable = (typeof CLOUD_TABLES)[number];

@@ -79,6 +79,21 @@ export type AppState = {
   /** Set when the Live Mode feedback query failed. Always null in Demo Mode. */
   feedbackError: string | null;
   /**
+   * Async state for the representatives list — the dataset almost every
+   * dashboard figure is derived from.
+   *
+   * §P1: the dashboard previously had no way to tell "this organization has
+   * no representatives" apart from "the query has not finished" or "the query
+   * failed", because useCloudCollection returns `rows: data ?? []`. An admin
+   * whose representatives query failed was shown "נציגים 0" and "אין נציגים
+   * להצגה עדיין" — a confident, false statement about their organization.
+   */
+  repsLoading: boolean;
+  repsError: string | null;
+  /** Async state for the dated renewal values. Same rationale as above. */
+  kpiLoading: boolean;
+  kpiError: string | null;
+  /**
    * Dated renewal-specific values (see src/lib/kpi-values.ts). Always empty in Demo
    * Mode — there is no fabricated renewal data; Demo Mode's teams have no real KPI
    * profile, so renewal sections correctly never render for them.
@@ -104,6 +119,10 @@ export const SEED: AppState = {
   currentRepId: "r1",
   feedbackLoading: false,
   feedbackError: null,
+  repsLoading: false,
+  repsError: null,
+  kpiLoading: false,
+  kpiError: null,
   kpiValues: [],
   reps: [
     { id: "r1", name: "יעל כהן", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 98 },

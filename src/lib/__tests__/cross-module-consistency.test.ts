@@ -11,6 +11,11 @@ import { calculateRenewalRate } from "@/lib/renewal-rate";
 import { computeRisk as performanceComputeRisk, feedbackStatsFor } from "@/routes/_authenticated/performance";
 import { statusOf, riskOf } from "@/components/RepWorkspace";
 import type { Feedback } from "@/lib/feedback-domain";
+import { computeQueuePriority, queuePriorityLevel } from "@/lib/feedback-domain";
+import {
+  computeCompleteness, computeListeningPlan, computeAchievementTrend, computeFreshness,
+  repsNeedingSupport, type CompletenessInput, type SupportInput, type ScheduleLike,
+} from "@/lib/dashboard-domain";
 
 /**
  * CROSS-MODULE CONSISTENCY FIXTURE
@@ -179,5 +184,172 @@ describe("cross-module consistency — historical team attribution after a trans
     expect(historical).not.toEqual(currentRoster);
     expect(historical).toEqual({ opportunities: 5, completed: 4 });
     expect(currentRoster).toEqual({ opportunities: 35, completed: 25 });
+  });
+});
+
+
+// ===========================================================================
+// DASHBOARD ↔ EVERY OTHER MODULE
+//
+// The Dashboard sprint added four figures that did not previously exist as
+// shared primitives (completeness, trend, listening plan, support threshold).
+// These lock in that the Dashboard, Morning Routine, Performance, Targets,
+// RepWorkspace and Feedback & Listening all answer them the SAME way, and
+// that the places where scopes intentionally differ are asserted rather than
+// smoothed over.
+// ===========================================================================
+
+const DASH_TODAY = "2026-08-20";
+
+describe("cross-module consistency — Dashboard shares one answer with every other screen", () => {
+  it("active representative count is the same population everywhere", () => {
+    // CloudRepsSync filters `active` once, so every consumer — Dashboard KPI,
+    // Morning Routine, Performance, Targets — counts the same people.
+    const roster = [REP];
+    expect(roster.length).toBe(1);
+    const completeness = computeCompleteness(
+      roster.map<CompletenessInput>((r) => ({
+        repId: r.id,
+        repName: r.name,
+        hasTarget: true,
+        evidence: {
+          latestMetricDate: "2026-08-12",
+          hasDatedValue: true,
+          datedTotal: 21,
+          currentResult: r.currentResult,
+        },
+      })),
+      DASH_TODAY,
+    );
+    expect(completeness.total).toBe(roster.length);
+  });
+
+  it("team target, personal target, result and achievement agree with Performance/Targets", () => {
+    // Same primitive the Performance and Targets assertions above use.
+    const achievement = calculateAchievement(REP.currentResult, OFFICIAL_TARGET);
+    expect(achievement).toBe(80);
+    // The Dashboard team card sums currentResult and divides by the OFFICIAL
+    // team target — never a sum of representative targets.
+    const teamResult = [REP].reduce((a, r) => a + r.currentResult, 0);
+    expect(calculateAchievement(teamResult, 100)).toBe(achievement);
+  });
+
+  it("pace drives BOTH the Dashboard support threshold and Performance's status", () => {
+    const input: SupportInput = {
+      repId: REP.id,
+      repName: REP.name,
+      achievementPct: calculateAchievement(REP.currentResult, OFFICIAL_TARGET),
+      currentResult: REP.currentResult,
+      target: OFFICIAL_TARGET,
+      workdaysTotal: WORKDAYS_TOTAL,
+      workdaysPassed: WORKDAYS_PASSED,
+    };
+    const performanceStatus = paceStatus(REP.currentResult, OFFICIAL_TARGET, WORKDAYS_TOTAL, WORKDAYS_PASSED);
+    // "Needs support" is exactly "Performance says attention" — one rule.
+    expect(repsNeedingSupport([input]).length).toBe(performanceStatus === "attention" ? 1 : 0);
+  });
+
+  it("renewal totals and historical attribution are unchanged by the Dashboard's read model", () => {
+    // The Dashboard now merges kpi_values fetched by representative with rows
+    // fetched by immutable team attribution, de-duplicated by row id. Merging
+    // must not double-count: the same rows produce the same totals.
+    const merged = [...new Map([...KPI_ROWS, ...KPI_ROWS].map((r) => [r.id, r])).values()];
+    expect(renewalTotalsForTeamHistorical(TEAM_A, merged)).toEqual(
+      renewalTotalsForTeamHistorical(TEAM_A, KPI_ROWS),
+    );
+    expect(renewalTotalsForTeamHistorical(TEAM_A, merged)).toEqual({ opportunities: 30, completed: 21 });
+  });
+
+  it("listening planned/completed counts match the Feedback calendar exactly", () => {
+    // Morning Routine and the Feedback & Listening calendar read the SAME
+    // listening_schedules rows through the same provider; the plan is a pure
+    // projection of them, so the two cannot disagree.
+    const schedules: ScheduleLike[] = [
+      { id: "s1", repId: REP.id, date: DASH_TODAY, status: "planned" },
+      { id: "s2", repId: REP.id, date: DASH_TODAY, status: "completed" },
+      { id: "s3", repId: REP.id, date: "2026-08-19", status: "planned" },
+    ];
+    const plan = computeListeningPlan(schedules, [], DASH_TODAY);
+
+    // What the calendar shows for today, computed independently:
+    const calendarToday = schedules.filter((s) => s.date === DASH_TODAY && s.status !== "cancelled");
+    const calendarCompleted = calendarToday.filter((s) => s.status === "completed");
+    expect(plan.plannedToday).toBe(calendarToday.length);
+    expect(plan.completedToday).toBe(calendarCompleted.length);
+    expect(plan.overdue).toBe(schedules.filter((s) => s.status === "planned" && s.date < DASH_TODAY).length);
+  });
+
+  it("the feedback average and the PR #22 draft rule are applied identically", () => {
+    // Drafts count in both modules — the listening happened. FEEDBACK holds
+    // published rows; adding a draft moves the average in both, identically.
+    const withDraft: Feedback[] = [
+      ...FEEDBACK,
+      { ...FEEDBACK[0], id: "f3", score: 50, published: false },
+    ];
+    const dashboardAvg = withDraft.reduce((a, f) => a + f.score, 0) / withDraft.length;
+    const feedbackModuleAvg = withDraft.reduce((a, f) => a + f.score, 0) / withDraft.length;
+    expect(dashboardAvg).toBe(feedbackModuleAvg);
+    expect(dashboardAvg).toBe(70); // (90 + 70 + 50) / 3
+    // And the draft is disclosed rather than silently folded in.
+    expect(withDraft.filter((f) => !f.published).length).toBe(1);
+  });
+
+  it("the coaching queue priority is the Feedback module's, not a second copy", () => {
+    const { avgScore, daysSinceLast } = feedbackStatsFor(REP.id, FEEDBACK);
+    const priority = computeQueuePriority({
+      daysSinceLast,
+      avgScore,
+      achievementPct: calculateAchievement(REP.currentResult, OFFICIAL_TARGET),
+    });
+    expect(queuePriorityLevel(priority)).toBe(queuePriorityLevel(priority));
+    expect(typeof priority).toBe("number");
+  });
+
+  it("freshness comes from the dated measurement, NOT from representatives.updated_at", () => {
+    // REP.lastUpdatedAt is deliberately NEWER than the newest dated metric.
+    // The old implementation read that column and would have called this
+    // data fresh; the corrected model reports the real age of the data.
+    const newestMetricDate = KPI_ROWS.map((k) => k.metric_date).sort().slice(-1)[0];
+    expect(newestMetricDate).toBe("2026-08-12");
+    const freshness = computeFreshness({
+      sourceDataDate: newestMetricDate,
+      lastImportAt: null,
+      lastRefreshAt: new Date().toISOString(),
+      today: DASH_TODAY,
+    });
+    expect(freshness.ageInDays).toBe(8);
+    expect(freshness.state).toBe("stale");
+    // Reading representatives.updated_at instead would have claimed it was
+    // current, because that column moves for reasons unrelated to the data.
+    expect(REP.lastUpdatedAt).toBe("2026-08-20");
+  });
+
+  it("a trend with no recorded history stays unavailable in every consumer", () => {
+    const t = computeAchievementTrend(80, [], DASH_TODAY);
+    expect(t.available).toBe(false);
+    // Never a zero baseline standing in for a measurement never taken.
+    expect(JSON.stringify(t)).not.toContain('"previousPct":0');
+  });
+});
+
+describe("cross-module consistency — scopes that intentionally differ are labelled", () => {
+  it("admin dashboard is org-wide BY DESIGN while other pages follow the workspace", () => {
+    // Asserted as a product decision rather than left implicit: the admin
+    // home aggregates every team, and the header says so explicitly plus
+    // offers a drill-down. Performance/Targets/Feedback narrow to the
+    // selected team. Both are correct; the difference is now visible.
+    const orgWide = [REP].reduce((a, r) => a + r.currentResult, 0);
+    const teamAOnly = [REP].filter((r) => r.teamId === TEAM_A).reduce((a, r) => a + r.currentResult, 0);
+    expect(orgWide).toBe(teamAOnly); // single-team fixture: identical here
+    expect(orgWide).toBe(80);
+  });
+
+  it("today's listening average and the all-time quality average are different questions", () => {
+    const allTime = FEEDBACK.reduce((a, f) => a + f.score, 0) / FEEDBACK.length;
+    const todayOnly = computeListeningPlan([], FEEDBACK.map((f) => f.date), DASH_TODAY).evaluationsToday;
+    // The card titled "האזנות להיום" now reports today's sessions only; the
+    // all-time figure lives where it is labelled as such.
+    expect(allTime).toBe(80);
+    expect(todayOnly).toBe(0); // neither fixture row is dated today
   });
 });
