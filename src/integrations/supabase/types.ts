@@ -14,6 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      metric_facts: {
+        Row: {
+          computed_at: string
+          created_at: string
+          eligible_count: number
+          eligible_value: number
+          engaged_count: number
+          engaged_value: number
+          expired_unworked_count: number
+          expired_unworked_value: number
+          freshness_state: string
+          granularity: string
+          id: string
+          metric_key: string
+          pending_count: number
+          pending_value: number
+          period_end: string
+          period_start: string
+          scope_id: string
+          scope_lineage: Json
+          source_batch_id: string | null
+          work_type_id: string
+        }
+        Insert: {
+          computed_at?: string
+          created_at?: string
+          eligible_count?: number
+          eligible_value?: number
+          engaged_count?: number
+          engaged_value?: number
+          expired_unworked_count?: number
+          expired_unworked_value?: number
+          freshness_state: string
+          granularity?: string
+          id?: string
+          metric_key: string
+          pending_count?: number
+          pending_value?: number
+          period_end: string
+          period_start: string
+          scope_id: string
+          scope_lineage: Json
+          source_batch_id?: string | null
+          work_type_id: string
+        }
+        Update: {
+          computed_at?: string
+          created_at?: string
+          eligible_count?: number
+          eligible_value?: number
+          engaged_count?: number
+          engaged_value?: number
+          expired_unworked_count?: number
+          expired_unworked_value?: number
+          freshness_state?: string
+          granularity?: string
+          id?: string
+          metric_key?: string
+          pending_count?: number
+          pending_value?: number
+          period_end?: string
+          period_start?: string
+          scope_id?: string
+          scope_lineage?: Json
+          source_batch_id?: string | null
+          work_type_id?: string
+        }
+        Relationships: []
+      }
       ingestion_sources: {
         Row: {
           active: boolean
@@ -1944,6 +2013,99 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      compute_coverage_fact: {
+        Args: {
+          _as_of?: string
+          _period_end: string
+          _period_start: string
+          _scope_id: string
+          _work_type_id: string
+        }
+        Returns: {
+          out_eligible_count: number
+          out_eligible_value: number
+          out_engaged_count: number
+          out_engaged_value: number
+          out_expired_unworked_count: number
+          out_expired_unworked_value: number
+          out_fact_id: string
+          out_freshness_state: string
+          out_pending_count: number
+          out_pending_value: number
+        }[]
+      }
+      compute_coverage_facts_for_date: {
+        Args: {
+          _as_of: string
+        }
+        Returns: {
+          out_duration_ms: number
+          out_facts_written: number
+          out_scopes: number
+        }[]
+      }
+      coverage_for_actor: {
+        Args: {
+          _period_end: string
+          _period_start: string
+          _person_id: string
+          _work_type_id: string
+        }
+        Returns: {
+          out_accountable: boolean
+          out_display_name: string
+          out_eligible_count: number
+          out_eligible_value: number
+          out_engaged_count: number
+          out_engaged_value: number
+          out_expired_unworked_count: number
+          out_expired_unworked_value: number
+          out_pending_count: number
+          out_pending_value: number
+          out_scope_id: string
+          out_scope_key: string | null
+          out_scope_kind: string
+        }[]
+      }
+      coverage_for_representative: {
+        Args: {
+          _period_end: string
+          _period_start: string
+          _representative_id: string
+          _work_type_id: string
+        }
+        Returns: {
+          out_eligible_count: number
+          out_eligible_value: number
+          out_engaged_count: number
+          out_engaged_value: number
+          out_expired_unworked_count: number
+          out_expired_unworked_value: number
+          out_pending_count: number
+          out_pending_value: number
+        }[]
+      }
+      coverage_facts_rollup: {
+        Args: {
+          _period_end: string
+          _period_start: string
+          _scope_ids: string[]
+          _work_type_id: string
+        }
+        Returns: {
+          out_eligible_count: number
+          out_eligible_value: number
+          out_engaged_count: number
+          out_engaged_value: number
+          out_expired_unworked_count: number
+          out_expired_unworked_value: number
+          out_fact_count: number
+          out_oldest_computed_at: string | null
+          out_pending_count: number
+          out_pending_value: number
+          out_worst_freshness: string
+        }[]
+      }
       ingestion_begin_batch: {
         Args: {
           _external_batch_ref: string | null

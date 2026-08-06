@@ -61,6 +61,21 @@ WHERE NOT EXISTS (
 );
 
 -- ---------------------------------------------------------------------------
+-- scopes
+-- ---------------------------------------------------------------------------
+--
+-- The PR #1 backfill creates a scope per team, but it runs at migration time —
+-- before these teams exist. A fixture that creates teams must create their
+-- scopes too, or everything scope-based (coverage above all) silently measures
+-- an empty organization and reports success.
+
+INSERT INTO public.scopes (key, display_name, kind, team_id)
+SELECT 'team:' || t.id::text, t.name, 'team', t.id
+FROM public.teams t
+WHERE t.name LIKE 'צוות סינתטי %'
+  AND NOT EXISTS (SELECT 1 FROM public.scopes s WHERE s.kind = 'team' AND s.team_id = t.id);
+
+-- ---------------------------------------------------------------------------
 -- work type and source
 -- ---------------------------------------------------------------------------
 
