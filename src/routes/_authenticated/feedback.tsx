@@ -313,7 +313,16 @@ function ListeningCenter() {
             <CalendarTab reps={scopedReps} openNewFor={openNewFor} />
           </TabsContent>
           <TabsContent value="history" className="mt-4">
-            <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} isLoading={state.feedbackLoading} isError={!!state.feedbackError} />
+            <HistoryTable
+              list={feedbackList}
+              nameOf={nameOf}
+              teamNameOf={teamNameOf}
+              onView={setView}
+              onPublish={publish}
+              publishingId={publishingId}
+              isLoading={state.feedbackLoading}
+              isError={!!state.feedbackError}
+            />
           </TabsContent>
         </Tabs>
       ) : (
@@ -1598,8 +1607,14 @@ function MyTasksAndNotes() {
 }
 
 // -------------------- History table --------------------
-function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: {
+function HistoryTable({ list, nameOf, teamNameOf, onView, onPublish, publishingId, isLoading, isError }: {
   list: Feedback[]; nameOf: (id: string) => string; teamNameOf: (id: string) => string; onView: (id: string) => void;
+  /** Present only for manager/admin — publishes through the same audited
+   * setFeedbackPublished path as the button inside the feedback view. A
+   * representative never receives this prop (and only ever sees published
+   * rows to begin with — visibleFeedback). */
+  onPublish?: (id: string) => void;
+  publishingId?: string | null;
   isLoading?: boolean; isError?: boolean;
 }) {
   if (isLoading) {
@@ -1623,7 +1638,12 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: 
   }
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">היסטוריית האזנות</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle className="text-base">היסטוריית האזנות</CardTitle>
+        {onPublish && (
+          <p className="text-xs text-muted-foreground">משוב בטיוטה אינו גלוי לנציג עד לפרסום.</p>
+        )}
+      </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
           <Table>
@@ -1657,12 +1677,31 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, isLoading, isError }: 
                     <span className={cn("font-bold", SCORE_TEXT_CLASS[scoreTone(f.score)])}>{f.score}</span>
                   </TableCell>
                   <TableCell>
-                    {f.published
-                      ? <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">פורסם</Badge>
-                      : <Badge variant="outline">טיוטה</Badge>}
+                    {f.published ? (
+                      <Badge className="bg-[color:var(--success)]/15 text-success-foreground hover:bg-[color:var(--success)]/15 border-transparent">
+                        פורסם
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">טיוטה — לא גלוי לנציג</Badge>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <Button size="icon" variant="ghost" aria-label="צפייה בהאזנה" onClick={() => onView(f.id)}><Eye className="h-4 w-4" /></Button>
+                    <div className="flex items-center justify-end gap-1">
+                      {onPublish && !f.published && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 whitespace-nowrap"
+                          disabled={publishingId === f.id}
+                          onClick={() => onPublish(f.id)}
+                        >
+                          {publishingId === f.id ? "מפרסם..." : "פרסום לנציג"}
+                        </Button>
+                      )}
+                      <Button size="icon" variant="ghost" aria-label="צפייה בהאזנה" onClick={() => onView(f.id)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
