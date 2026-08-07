@@ -212,10 +212,14 @@ function formatPerformancePrompt(ctx: Awaited<ReturnType<typeof fetchPerformance
     "תפקיד הצופה: " + (scope.role === "admin" ? "מנהל מערכת" : scope.role === "manager" ? "מנהל צוות" : "נציג"),
     "",
     "צוותים:",
-    ...teamRows.map((t) => `- ${t.name} | פעיל: ${t.active ? "כן" : "לא"} | נציגים: ${t.repCount} | ביצוע: ${t.totalResult} | יעד: ${t.goal ?? "לא הוגדר"} | אחוז: ${t.achievement ?? "N/A"}%`),
+    ...teamRows.map((t: { name: string; active: boolean; repCount: number; totalResult: number; goal: number | null; achievement: number | null }) =>
+      `- ${t.name} | פעיל: ${t.active ? "כן" : "לא"} | נציגים: ${t.repCount} | ביצוע: ${t.totalResult} | יעד: ${t.goal ?? "לא הוגדר"} | אחוז: ${t.achievement ?? "N/A"}%`
+    ),
     "",
     "נציגים:",
-    ...rows.map((r) => `- ${r.name} (${r.team}) | פעיל: ${r.active ? "כן" : "לא"} | ביצוע: ${r.currentResult} | יעד אישי: ${r.goal ?? "לא הוגדר"} | אחוז: ${r.achievement ?? "N/A"}%`),
+    ...rows.map((r: { name: string; team: string; active: boolean; currentResult: number; goal: number | null; achievement: number | null }) =>
+      `- ${r.name} (${r.team}) | פעיל: ${r.active ? "כן" : "לא"} | ביצוע: ${r.currentResult} | יעד אישי: ${r.goal ?? "לא הוגדר"} | אחוז: ${r.achievement ?? "N/A"}%`
+    ),
     "",
     "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש. אל תמציא נתונים או שמות שלא הוצגו.",
   ].join("\n");
