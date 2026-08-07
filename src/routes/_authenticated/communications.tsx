@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
   MessageSquare, Sunrise, Moon, Trophy, PartyPopper, Target, Headphones,
@@ -7,6 +9,11 @@ import {
   Mail, Megaphone, Sparkles,
 } from "lucide-react";
 import { useApp, useIsManager, teamsFromReps, competitionLeaderboard } from "@/lib/store";
+import { useAppMode } from "@/lib/app-mode";
+import {
+  publishAnnouncement,
+  ANNOUNCEMENT_AUDIENCE_ORG_LABEL,
+} from "@/lib/announcements.functions";
 import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useTeamGoals, useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
@@ -425,6 +432,7 @@ function Generator() {
               </TabsContent>
               <TabsContent value="internal" className="mt-3">
                 <InternalPreview title={title} body={body} />
+                <PublishInternalAnnouncement title={title} body={body} />
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -473,6 +481,93 @@ function InternalPreview({ title, body }: { title: string; body: string }) {
       </div>
       <h3 className="text-lg font-bold">{title}</h3>
       <div className="mt-2 whitespace-pre-wrap text-[14px] leading-relaxed">{body}</div>
+    </div>
+  );
+}
+
+/**
+ * "פרסום כהודעה פנימית" — turns the generated draft into a REAL announcement
+ * (the one ManagerHome and RepresentativeHome render in "הודעות אחרונות"),
+ * not a communications-history row. Deliberately separate from "שמור
+ * בהיסטוריה": history is the manager's private archive, this is publication.
+ *
+ * Audience is organization-wide and says so — the announcements schema has no
+ * team scope, every announcement is readable by every authenticated user, and
+ * the confirmation dialog states that instead of pretending otherwise (see
+ * announcements.functions.ts). Publishing runs server-side against the real
+ * authenticated role (admin/manager only) and writes an audit_log entry.
+ */
+function PublishInternalAnnouncement({ title, body }: { title: string; body: string }) {
+  const { isDemo } = useAppMode();
+  const { addAnnouncement } = useApp();
+  const publishFn = useServerFn(publishAnnouncement);
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!title.trim() || !body.trim()) throw new Error("נדרשות כותרת ותוכן להודעה");
+      if (isDemo) {
+        addAnnouncement({ title: title.trim(), body: body.trim() });
+        return;
+      }
+      await publishFn({
+        data: { title: title.trim(), body: body.trim(), source: "communications" },
+      });
+      // The homes read announcements through the cloud collection cache.
+      await qc.invalidateQueries({ queryKey: ["cloud", "announcements"] });
+    },
+    onSuccess: () => {
+      toast.success("ההודעה פורסמה", {
+        description: `"${title.trim()}" · ${ANNOUNCEMENT_AUDIENCE_ORG_LABEL}`,
+      });
+      setOpen(false);
+    },
+    onError: (e: Error) => toast.error("הפרסום נכשל", { description: e.message }),
+  });
+
+  return (
+    <div className="mt-3">
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button size="sm" className="w-full" disabled={!title.trim() || !body.trim()}>
+            <Megaphone className="ms-1 h-4 w-4" /> פרסום כהודעה פנימית
+          </Button>
+        </DialogTrigger>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle>אישור פרסום הודעה פנימית</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <span className="shrink-0 text-muted-foreground">כותרת</span>
+              <span className="font-semibold text-end">{title}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">קהל יעד</span>
+              <Badge variant="secondary">{ANNOUNCEMENT_AUDIENCE_ORG_LABEL}</Badge>
+            </div>
+            <div>
+              <div className="mb-1 text-muted-foreground">תוכן ההודעה</div>
+              <div className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border p-3 text-[13px] leading-relaxed">
+                {body}
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              ההודעה תופיע בכרטיס "הודעות אחרונות" בדפי הבית של המנהלים והנציגים. הפרסום נרשם ביומן
+              הפעילות והוא נפרד משמירה בהיסטוריה.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={mutation.isPending}>
+              ביטול
+            </Button>
+            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+              {mutation.isPending ? "מפרסם..." : "פרסום כהודעה פנימית"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
