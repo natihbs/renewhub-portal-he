@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Menu, Search, Star, LogOut, User as UserIcon, KeyRound, Info, UsersRound, Settings } from "lucide-react";
+import { Menu, Search, Star, LogOut, User as UserIcon, KeyRound, Info, UsersRound, Settings, Eye } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/store";
@@ -11,7 +11,9 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   type AppRole, navItemsByGroup, navLabel, type NavItem, NAV_ITEMS,
 } from "@/lib/navigation-config";
-import { useResolvedRole } from "@/lib/use-resolved-role";
+import { useRealAppRole, useResolvedRole } from "@/lib/use-resolved-role";
+import { useAdminView } from "@/lib/admin-view";
+import { ADMIN_VIEW_OPTIONS, ADMIN_VIEW_BANNER } from "@/lib/navigation-config";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -145,6 +147,67 @@ function Brand({ onDark = false }: { onDark?: boolean }) {
           {subtitle}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Admin-only business-view switcher ("תצוגה") — presentation only, see
+ * navigation-config.ts. Rendered ONLY when the signed-in user's REAL role is
+ * admin: a real manager or representative never sees it, and for them the
+ * stored view mode is inert anyway (applyAdminView ignores it).
+ */
+function AdminViewSwitcher() {
+  const realRole = useRealAppRole();
+  const { mode, setMode } = useAdminView();
+  // Rendered only when the REAL role is admin. That includes Demo Mode's
+  // demo-manager (which resolves to admin) — without it the demo would have
+  // no path to the business presentations at all.
+  if (realRole !== "admin") return null;
+  return (
+    <Select
+      value={mode}
+      onValueChange={(v) => setMode(v as (typeof ADMIN_VIEW_OPTIONS)[number]["value"])}
+    >
+      <SelectTrigger className="h-9 w-32 sm:w-36" aria-label="תצוגה">
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <SelectValue />
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        {ADMIN_VIEW_OPTIONS.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/**
+ * Visible whenever an admin is in a non-default view mode, so a support
+ * session can never be mistaken for the real thing. States explicitly that
+ * permissions are unchanged — this is presentation, not impersonation.
+ */
+function AdminViewBanner() {
+  const realRole = useRealAppRole();
+  const { mode, setMode } = useAdminView();
+  if (realRole !== "admin" || mode === "admin") return null;
+  const text = ADMIN_VIEW_BANNER[mode];
+  if (!text) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2 border-b bg-primary/10 px-4 py-1.5 text-xs font-medium text-primary">
+      <Eye className="h-3.5 w-3.5 shrink-0" />
+      <span>{text}</span>
+      <button
+        type="button"
+        onClick={() => setMode("admin")}
+        className="underline underline-offset-2 hover:opacity-80"
+      >
+        חזרה לתצוגת מנהל מערכת
+      </button>
     </div>
   );
 }
@@ -512,11 +575,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
             </div>
             <NotificationBell />
+            <AdminViewSwitcher />
             <WorkspaceSwitcher />
             <RoleSwitcher />
             <UserMenu />
           </div>
         </header>
+
+        <AdminViewBanner />
 
         <main className="flex-1 p-4 pb-24 md:p-6 lg:p-8 lg:pb-8 min-w-0">{children}</main>
       </div>

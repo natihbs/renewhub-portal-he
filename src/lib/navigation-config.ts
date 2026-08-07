@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Upload, MessageSquare,
-  Users2, UsersRound, Target, Sparkles,
+  Users2, UsersRound, Target, Sparkles, FileText,
 } from "lucide-react";
 
 // Single source of truth for role-aware navigation. AppShell (sidebar +
@@ -74,22 +74,22 @@ export const NAV_ITEMS: NavItem[] = [
     label: "תובנות AI", group: "primary",
   },
   {
-    id: "performance", to: "/performance", icon: BarChart3, roles: ["admin", "manager", "representative"],
+    id: "performance", to: "/performance", icon: BarChart3, roles: ["manager", "representative"],
     label: "ביצועים", roleLabel: { representative: "הביצועים שלי" }, group: "primary",
   },
   {
-    id: "targets", to: "/targets", icon: Target, roles: ["admin", "manager", "representative"],
+    id: "targets", to: "/targets", icon: Target, roles: ["manager", "representative"],
     label: "יעדים", roleLabel: { representative: "היעד שלי" }, group: "primary",
   },
   {
-    id: "feedback", to: "/feedback", icon: Headphones, roles: ["admin", "manager", "representative"],
+    id: "feedback", to: "/feedback", icon: Headphones, roles: ["manager", "representative"],
     label: "האזנות ומשוב", roleLabel: { representative: "המשוב שלי" }, group: "primary",
   },
-  { id: "competitions", to: "/competitions", icon: Trophy, roles: ["admin", "manager", "representative"], label: "תחרויות", group: "primary" },
-  { id: "knowledge", to: "/knowledge", icon: BookOpen, roles: ["admin", "manager", "representative"], label: "מרכז ידע", group: "primary" },
+  { id: "competitions", to: "/competitions", icon: Trophy, roles: ["manager", "representative"], label: "תחרויות", group: "primary" },
+  { id: "knowledge", to: "/knowledge", icon: BookOpen, roles: ["manager", "representative"], label: "מרכז ידע", group: "primary" },
 
   { id: "representatives", to: "/representatives", icon: Users2, roles: ["admin", "manager"], label: "ניהול נציגים", group: "management" },
-  { id: "communications", to: "/communications", icon: MessageSquare, roles: ["admin", "manager"], label: "מרכז תקשורת", group: "management" },
+  { id: "communications", to: "/communications", icon: MessageSquare, roles: ["manager"], label: "מרכז תקשורת", group: "management" },
   {
     id: "teams", to: "/teams", icon: UsersRound, roles: ["admin", "manager"], label: "ניהול צוותים",
     // A manager only ever sees their own team(s) here (RLS-scoped read on
@@ -111,6 +111,7 @@ export const NAV_ITEMS: NavItem[] = [
     group: "management",
   },
   { id: "admin", to: "/admin", icon: Settings, roles: ["admin"], label: "ניהול המערכת", group: "management" },
+  { id: "changelog", to: "/changelog", icon: FileText, roles: ["admin"], label: "יומן שינויים", group: "management" },
 ];
 
 /** Nav items visible to this role, in display order. */
@@ -138,10 +139,10 @@ export function navItemsByGroup(role: AppRole): { primary: NavItem[]; management
  */
 export const QUICK_ACTIONS: QuickAction[] = [
   { id: "add-representative", to: "/representatives", icon: Users2, roles: ["admin", "manager"], label: "הוספת נציג" },
-  { id: "manage-targets", to: "/targets", icon: Target, roles: ["admin", "manager"], label: "עדכון יעדים" },
-  { id: "add-feedback", to: "/feedback", icon: Headphones, roles: ["admin", "manager"], label: "הוספת האזנה / משוב" },
-  { id: "create-competition", to: "/competitions", icon: Trophy, roles: ["admin", "manager"], label: "יצירת תחרות" },
-  { id: "open-knowledge", to: "/knowledge", icon: BookOpen, roles: ["admin", "manager", "representative"], label: "פתיחת מרכז הידע" },
+  { id: "manage-targets", to: "/targets", icon: Target, roles: ["manager"], label: "עדכון יעדים" },
+  { id: "add-feedback", to: "/feedback", icon: Headphones, roles: ["manager"], label: "הוספת האזנה / משוב" },
+  { id: "create-competition", to: "/competitions", icon: Trophy, roles: ["manager"], label: "יצירת תחרות" },
+  { id: "open-knowledge", to: "/knowledge", icon: BookOpen, roles: ["manager", "representative"], label: "פתיחת מרכז הידע" },
   { id: "add-announcement", to: "/admin", icon: MessageSquare, roles: ["admin"], label: "הוספת הודעה" },
   { id: "import-data", to: "/data-import", icon: Upload, roles: ["admin", "manager"], label: "ייבוא נתונים" },
 ];
@@ -152,4 +153,45 @@ export function quickActionsForRole(role: AppRole): QuickAction[] {
 
 export function quickActionLabel(action: QuickAction, role: AppRole): string {
   return action.roleLabel?.[role] ?? action.label;
+}
+
+// ============================================================================
+// Admin business-view switcher — presentation only.
+//
+// Admin is a system administrator ("מנהל מערכת"). Their default navigation is
+// system-only (see the roles arrays above), but for support/QA they can put
+// the UI into another role's presentation. This is NOT impersonation: the
+// signed-in user, their auth session, their RLS context and every permission
+// check stay exactly what they were. Only which navigation/home/labels render
+// changes. A non-admin's role is never overridden.
+// ============================================================================
+
+/** Presentation mode an admin can select. "admin" is the default (own view). */
+export type AdminViewMode = AppRole;
+
+/**
+ * The options offered by the switcher, in display order. Future presentation
+ * modes (e.g. מנהל מוקד, מנהל פעילות, סמנכ״ל / מנהל ממ״ט) are added here once
+ * those roles have their own navigation/home to present.
+ */
+export const ADMIN_VIEW_OPTIONS: { value: AdminViewMode; label: string }[] = [
+  { value: "admin", label: "מנהל מערכת" },
+  { value: "manager", label: "מנהל צוות" },
+  { value: "representative", label: "נציג" },
+];
+
+/** Banner text per non-default view mode — says permissions are unchanged. */
+export const ADMIN_VIEW_BANNER: Partial<Record<AdminViewMode, string>> = {
+  manager: "מצב צפייה כמנהל צוות · הרשאות מנהל מערכת נשמרות",
+  representative: "מצב צפייה כנציג · הרשאות מנהל מערכת נשמרות",
+};
+
+/**
+ * The single rule that turns a real role + a selected view mode into the role
+ * whose PRESENTATION renders. Only a real admin can be overlaid; for everyone
+ * else the view mode is inert, whatever it claims to be.
+ */
+export function applyAdminView(realRole: AppRole, viewMode: AdminViewMode): AppRole {
+  if (realRole !== "admin") return realRole;
+  return viewMode;
 }

@@ -2,23 +2,42 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  resolveAppRole, navItemsForRole, navLabel, quickActionsForRole, NAV_ITEMS,
+  resolveAppRole,
+  navItemsForRole,
+  navLabel,
+  quickActionsForRole,
+  NAV_ITEMS,
+  applyAdminView,
+  ADMIN_VIEW_OPTIONS,
+  ADMIN_VIEW_BANNER,
 } from "@/lib/navigation-config";
 
 describe("resolveAppRole", () => {
   it("resolves Live Mode roles from real Supabase roles, admin taking priority", () => {
-    expect(resolveAppRole({ isDemo: false, demoRole: "rep", isAdmin: true, isManager: true })).toBe("admin");
-    expect(resolveAppRole({ isDemo: false, demoRole: "rep", isAdmin: false, isManager: true })).toBe("manager");
-    expect(resolveAppRole({ isDemo: false, demoRole: "rep", isAdmin: false, isManager: false })).toBe("representative");
+    expect(resolveAppRole({ isDemo: false, demoRole: "rep", isAdmin: true, isManager: true })).toBe(
+      "admin",
+    );
+    expect(
+      resolveAppRole({ isDemo: false, demoRole: "rep", isAdmin: false, isManager: true }),
+    ).toBe("manager");
+    expect(
+      resolveAppRole({ isDemo: false, demoRole: "rep", isAdmin: false, isManager: false }),
+    ).toBe("representative");
   });
 
   it("never trusts the demo role switcher in Live Mode", () => {
-    expect(resolveAppRole({ isDemo: false, demoRole: "manager", isAdmin: false, isManager: false })).toBe("representative");
+    expect(
+      resolveAppRole({ isDemo: false, demoRole: "manager", isAdmin: false, isManager: false }),
+    ).toBe("representative");
   });
 
   it("resolves Demo Mode from the local switcher only, manager -> admin superset", () => {
-    expect(resolveAppRole({ isDemo: true, demoRole: "manager", isAdmin: false, isManager: false })).toBe("admin");
-    expect(resolveAppRole({ isDemo: true, demoRole: "rep", isAdmin: false, isManager: false })).toBe("representative");
+    expect(
+      resolveAppRole({ isDemo: true, demoRole: "manager", isAdmin: false, isManager: false }),
+    ).toBe("admin");
+    expect(
+      resolveAppRole({ isDemo: true, demoRole: "rep", isAdmin: false, isManager: false }),
+    ).toBe("representative");
   });
 });
 
@@ -46,21 +65,102 @@ describe("navItemsForRole", () => {
     expect(ids).not.toContain("admin");
   });
 
-  it("gives an admin every route except business-performance AI", () => {
+  // Admin is a system administrator ("מנהל מערכת"). The default admin
+  // navigation is system-only: business areas are reachable by URL for
+  // support/QA (no route was deleted, no guard changed) and through the
+  // admin-only business-view switcher, but they are not admin's own nav.
+  it("gives an admin system-administration navigation only", () => {
     const ids = navItemsForRole("admin").map((i) => i.id);
-    for (const item of NAV_ITEMS.filter((i) => i.id !== "ai-insights")) {
-      expect(ids).toContain(item.id);
+    for (const id of [
+      "home",
+      "users",
+      "teams",
+      "representatives",
+      "data-import",
+      "admin",
+      "changelog",
+    ]) {
+      expect(ids).toContain(id);
+    }
+    for (const id of [
+      "performance",
+      "targets",
+      "feedback",
+      "competitions",
+      "knowledge",
+      "ai-insights",
+      "communications",
+    ]) {
+      expect(ids).not.toContain(id);
     }
   });
 
-  // Admin is a system administrator ("מנהל מערכת"), not a business owner.
-  // /ai-insights is business-performance AI, so it is not offered in admin
-  // navigation — but the route itself stays unguarded, so an admin can still
-  // reach it directly for support/QA. This test pins the nav decision only.
-  it("does not offer business-performance AI in admin navigation, but keeps it for manager and representative", () => {
-    expect(navItemsForRole("admin").map((i) => i.id)).not.toContain("ai-insights");
-    expect(navItemsForRole("manager").map((i) => i.id)).toContain("ai-insights");
-    expect(navItemsForRole("representative").map((i) => i.id)).toContain("ai-insights");
+  it("keeps business navigation for manager and representative", () => {
+    const managerIds = navItemsForRole("manager").map((i) => i.id);
+    for (const id of [
+      "performance",
+      "targets",
+      "feedback",
+      "competitions",
+      "knowledge",
+      "ai-insights",
+      "communications",
+    ]) {
+      expect(managerIds).toContain(id);
+    }
+    const repIds = navItemsForRole("representative").map((i) => i.id);
+    for (const id of [
+      "performance",
+      "targets",
+      "feedback",
+      "competitions",
+      "knowledge",
+      "ai-insights",
+    ]) {
+      expect(repIds).toContain(id);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Admin business-view switcher — presentation only, never a permission or an
+// identity. applyAdminView is the single rule every surface goes through.
+// ---------------------------------------------------------------------------
+describe("applyAdminView", () => {
+  it("lets a real admin present as any offered view mode", () => {
+    expect(applyAdminView("admin", "admin")).toBe("admin");
+    expect(applyAdminView("admin", "manager")).toBe("manager");
+    expect(applyAdminView("admin", "representative")).toBe("representative");
+  });
+
+  it("is inert for a real manager — their experience never changes", () => {
+    expect(applyAdminView("manager", "admin")).toBe("manager");
+    expect(applyAdminView("manager", "representative")).toBe("manager");
+    expect(applyAdminView("manager", "manager")).toBe("manager");
+  });
+
+  it("is inert for a real representative — their experience never changes", () => {
+    expect(applyAdminView("representative", "admin")).toBe("representative");
+    expect(applyAdminView("representative", "manager")).toBe("representative");
+  });
+
+  it("presents admin-as-manager with exactly the real manager navigation", () => {
+    const presented = navItemsForRole(applyAdminView("admin", "manager")).map((i) => i.id);
+    const real = navItemsForRole("manager").map((i) => i.id);
+    expect(presented).toEqual(real);
+  });
+
+  it("offers every switcher option with a Hebrew label, מנהל מערכת first as the default", () => {
+    expect(ADMIN_VIEW_OPTIONS[0]).toEqual({ value: "admin", label: "מנהל מערכת" });
+    for (const o of ADMIN_VIEW_OPTIONS) {
+      expect(["admin", "manager", "representative"]).toContain(o.value);
+      expect(o.label).toMatch(/[֐-׿]/);
+    }
+  });
+
+  it("states in every banner that system-administrator permissions are kept", () => {
+    expect(ADMIN_VIEW_BANNER.manager).toBe("מצב צפייה כמנהל צוות · הרשאות מנהל מערכת נשמרות");
+    expect(ADMIN_VIEW_BANNER.representative).toBe("מצב צפייה כנציג · הרשאות מנהל מערכת נשמרות");
   });
 });
 
@@ -77,7 +177,7 @@ describe("navLabel", () => {
     expect(navLabel(home, "representative")).toBe("דף הבית");
   });
 
-  it("labels the teams destination \"הצוות שלי\" for a manager, but the generic label for an admin", () => {
+  it('labels the teams destination "הצוות שלי" for a manager, but the generic label for an admin', () => {
     const teams = NAV_ITEMS.find((i) => i.id === "teams")!;
     expect(navLabel(teams, "manager")).toBe("הצוות שלי");
     expect(navLabel(teams, "admin")).toBe("ניהול צוותים");
@@ -98,6 +198,16 @@ describe("quickActionsForRole", () => {
     expect(ids).toContain("manage-targets");
     expect(ids).toContain("import-data");
     expect(ids).not.toContain("add-announcement");
+  });
+
+  it("gives an admin system quick actions only — no business actions by default", () => {
+    const ids = quickActionsForRole("admin").map((a) => a.id);
+    expect(ids).toContain("add-representative");
+    expect(ids).toContain("add-announcement");
+    expect(ids).toContain("import-data");
+    for (const id of ["manage-targets", "add-feedback", "create-competition", "open-knowledge"]) {
+      expect(ids).not.toContain(id);
+    }
   });
 });
 
