@@ -87,7 +87,7 @@ type PendingAction = { type: ActionType; user: UserRow } | null;
 
 const roleLabel: Record<AppRole, string> = {
   admin: "מנהל מערכת",
-  manager: "מנהל",
+  manager: "מנהל צוות",
   representative: "נציג",
 };
 
@@ -235,7 +235,7 @@ function UsersPage() {
                   <SelectContent>
                     <SelectItem value="all">כל התפקידים</SelectItem>
                     <SelectItem value="admin">מנהל מערכת</SelectItem>
-                    <SelectItem value="manager">מנהל</SelectItem>
+                    <SelectItem value="manager">מנהל צוות</SelectItem>
                     <SelectItem value="representative">נציג</SelectItem>
                   </SelectContent>
                 </Select>
@@ -986,7 +986,7 @@ function CreateUserDialog({ teams, managers, onDone }: { teams: Team[]; managers
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">מנהל מערכת</SelectItem>
-                    <SelectItem value="manager">מנהל</SelectItem>
+                    <SelectItem value="manager">מנהל צוות</SelectItem>
                     <SelectItem value="representative">נציג</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1125,7 +1125,7 @@ function EditUserDialog({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">מנהל מערכת</SelectItem>
-                  <SelectItem value="manager">מנהל</SelectItem>
+                  <SelectItem value="manager">מנהל צוות</SelectItem>
                   <SelectItem value="representative">נציג</SelectItem>
                 </SelectContent>
               </Select>

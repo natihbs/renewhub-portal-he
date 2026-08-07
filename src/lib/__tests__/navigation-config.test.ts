@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   resolveAppRole, navItemsForRole, navLabel, quickActionsForRole, NAV_ITEMS,
@@ -44,9 +46,21 @@ describe("navItemsForRole", () => {
     expect(ids).not.toContain("admin");
   });
 
-  it("gives an admin every route", () => {
+  it("gives an admin every route except business-performance AI", () => {
     const ids = navItemsForRole("admin").map((i) => i.id);
-    for (const item of NAV_ITEMS) expect(ids).toContain(item.id);
+    for (const item of NAV_ITEMS.filter((i) => i.id !== "ai-insights")) {
+      expect(ids).toContain(item.id);
+    }
+  });
+
+  // Admin is a system administrator ("מנהל מערכת"), not a business owner.
+  // /ai-insights is business-performance AI, so it is not offered in admin
+  // navigation — but the route itself stays unguarded, so an admin can still
+  // reach it directly for support/QA. This test pins the nav decision only.
+  it("does not offer business-performance AI in admin navigation, but keeps it for manager and representative", () => {
+    expect(navItemsForRole("admin").map((i) => i.id)).not.toContain("ai-insights");
+    expect(navItemsForRole("manager").map((i) => i.id)).toContain("ai-insights");
+    expect(navItemsForRole("representative").map((i) => i.id)).toContain("ai-insights");
   });
 });
 
@@ -84,5 +98,29 @@ describe("quickActionsForRole", () => {
     expect(ids).toContain("manage-targets");
     expect(ids).toContain("import-data");
     expect(ids).not.toContain("add-announcement");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Role-label discipline (pinned against the component source, following the
+// repo's readFileSync pattern): the technical role names stay `admin` /
+// `manager`, but every user-facing label must say "מנהל מערכת" / "מנהל צוות".
+// A bare "מנהל" as a role label is ambiguous — it reads as a business manager
+// and was exactly how admin drifted into being treated as a VP.
+// ---------------------------------------------------------------------------
+describe("role labels in AppShell", () => {
+  const src = readFileSync(resolve(__dirname, "../../components/layout/AppShell.tsx"), "utf8");
+
+  it("labels the roles מנהל מערכת / מנהל צוות / נציג in the profile and switcher", () => {
+    expect(src).toContain('"מנהל מערכת"');
+    expect(src).toContain('"מנהל צוות"');
+    expect(src).not.toMatch(/\?\s*"מנהל"\s*:/);
+  });
+
+  it("titles the admin management group ניהול מערכת, not ניהול ארגוני", () => {
+    expect(src).toContain('admin: "ניהול מערכת"');
+    expect(src).toContain('manager: "ניהול הצוות"');
+    expect(src).toContain('representative: "ניווט"');
+    expect(src).not.toContain("ניהול ארגוני");
   });
 });

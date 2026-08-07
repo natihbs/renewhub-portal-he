@@ -66,7 +66,11 @@ export type QuickAction = {
 export const NAV_ITEMS: NavItem[] = [
   { id: "home", to: "/", icon: Home, roles: ["admin", "manager", "representative"], label: "דף הבית", group: "primary" },
   {
-    id: "ai-insights", to: "/ai-insights", icon: Sparkles, roles: ["admin", "manager", "representative"],
+    // Not offered to admin: this page is business-performance AI (performance,
+    // feedback and goal insights), and admin is a system administrator, not a
+    // business owner. The route itself has no role guard, so an admin can still
+    // reach /ai-insights directly for support/QA — only the nav entry is scoped.
+    id: "ai-insights", to: "/ai-insights", icon: Sparkles, roles: ["manager", "representative"],
     label: "תובנות AI", group: "primary",
   },
   {
