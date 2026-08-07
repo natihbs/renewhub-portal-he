@@ -13,7 +13,11 @@ import {
 } from "@/lib/navigation-config";
 import { useRealAppRole, useResolvedRole } from "@/lib/use-resolved-role";
 import { useAdminView } from "@/lib/admin-view";
-import { ADMIN_VIEW_OPTIONS, ADMIN_VIEW_BANNER } from "@/lib/navigation-config";
+import {
+  ADMIN_VIEW_OPTIONS,
+  ADMIN_VIEW_BANNER,
+  workspaceSelectorBehavior,
+} from "@/lib/navigation-config";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -257,7 +261,46 @@ function RoleSwitcher() {
 function WorkspaceSwitcher() {
   const { isDemo } = useAppMode();
   const { workspace, options, setWorkspaceTeam, setWorkspaceOrg, ready } = useWorkspace();
+  const realRole = useRealAppRole();
+  const viewRole = useResolvedRole();
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
   if (isDemo || !ready || options.length === 0) return null;
+
+  // Admin-view-aware behavior (pure rule, see workspaceSelectorBehavior).
+  // "existing" falls through to the original rendering below, so a real
+  // manager's or representative's selector is untouched by construction.
+  const behavior = workspaceSelectorBehavior({ realRole, viewRole, pathname });
+  if (behavior === "hidden") return null;
+  if (behavior === "teams-only") {
+    const teamOptions = options.filter((o) => o.type === "team");
+    if (teamOptions.length === 0) return null;
+    return (
+      <Select
+        value={workspace.type === "team" ? workspace.teamId : undefined}
+        onValueChange={(v) => setWorkspaceTeam(v)}
+      >
+        <SelectTrigger className="h-9 w-40 sm:w-52" aria-label="בחירת צוות לתצוגה">
+          <SelectValue placeholder="בחרו צוות לתצוגה" />
+        </SelectTrigger>
+        <SelectContent>
+          {teamOptions.map((o) =>
+            o.type === "team" ? (
+              <SelectItem key={o.teamId} value={o.teamId}>
+                <span className="inline-flex items-center gap-1.5">
+                  {o.label}
+                  {!o.active && (
+                    <Badge variant="secondary" className="px-1 py-0 text-[10px]">
+                      מושבת
+                    </Badge>
+                  )}
+                </span>
+              </SelectItem>
+            ) : null,
+          )}
+        </SelectContent>
+      </Select>
+    );
+  }
 
   if (options.length === 1) {
     const only = options[0];
