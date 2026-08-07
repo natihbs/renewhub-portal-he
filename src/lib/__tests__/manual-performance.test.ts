@@ -158,3 +158,47 @@ describe("product boundary — no CRM/queue/call-outcome surface", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Feedback publish discoverability (same PR): draft rows in the history table
+// get an explicit "פרסום לנציג" action instead of hiding publish inside the
+// eye-icon view. Source-pinned against feedback.tsx.
+// ---------------------------------------------------------------------------
+describe("feedback publish row action", () => {
+  const feedbackSrc = read("../../routes/_authenticated/feedback.tsx");
+
+  it("draft rows show פרסום לנציג, gated on the manager-only onPublish prop", () => {
+    expect(feedbackSrc).toContain("{onPublish && !f.published && (");
+    expect(feedbackSrc).toContain("פרסום לנציג");
+  });
+
+  it("published rows keep פורסם and never get the publish action; drafts say they are invisible to the rep", () => {
+    // The action's gate excludes published rows by construction (!f.published).
+    expect(feedbackSrc).toContain("טיוטה — לא גלוי לנציג");
+    expect(feedbackSrc).toContain(">\n                        פורסם\n");
+  });
+
+  it("a representative never receives the publish wiring — their table call site passes no onPublish", () => {
+    const repCallSite = feedbackSrc.slice(
+      feedbackSrc.indexOf("{isManager ? ("),
+      feedbackSrc.indexOf("{isManager && ("),
+    );
+    // Two HistoryTable call sites inside this region: the manager one carries
+    // onPublish, the representative one must not.
+    const calls = repCallSite.split("<HistoryTable").slice(1);
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toContain("onPublish={publish}");
+    expect(calls[1]).not.toContain("onPublish");
+  });
+
+  it("the row action publishes through the existing audited setPublished flow", () => {
+    // One publish handler, awaited, real-outcome toast — reused by both the
+    // view button and the new row action.
+    expect(feedbackSrc).toContain("await actions.setPublished({ id, published: true })");
+    expect(feedbackSrc).toContain("onPublish={publish}");
+  });
+
+  it("the helper text near the history table exists, manager-gated", () => {
+    expect(feedbackSrc).toContain("משוב בטיוטה אינו גלוי לנציג עד לפרסום.");
+  });
+});
