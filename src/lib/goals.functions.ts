@@ -337,6 +337,40 @@ export type CopyGoalsPreview = {
 };
 
 /**
+ * The pure no-overwrite rule of "copy from previous month", extracted so it
+ * is directly unit-testable: a target that already exists for the
+ * destination month always wins — the copy only fills gaps, and every skip
+ * is reported, never hidden. The server handler feeds this from the DB and
+ * writes exactly what it returns.
+ */
+export function computeCopyGoalsPreview(input: {
+  previousMonth: string;
+  prevTeamGoal: { target_value: number } | null;
+  curTeamGoal: { target_value: number } | null;
+  prevRepGoals: { representative_id: string; target_value: number }[];
+  curRepGoalIds: Set<string>;
+  repNameById: Map<string, string>;
+}): CopyGoalsPreview {
+  const { previousMonth, prevTeamGoal, curTeamGoal, prevRepGoals, curRepGoalIds, repNameById } = input;
+  const willCopyTeam = prevTeamGoal != null && curTeamGoal == null;
+  return {
+    previous_month: previousMonth,
+    team_target_will_copy: willCopyTeam ? prevTeamGoal.target_value : null,
+    team_target_skipped_reason: willCopyTeam ? null : prevTeamGoal == null ? "no_previous" : "already_set",
+    representatives_to_copy: prevRepGoals
+      .filter((g) => !curRepGoalIds.has(g.representative_id))
+      .map((g) => ({
+        representative_id: g.representative_id,
+        name: repNameById.get(g.representative_id) ?? "",
+        target_value: g.target_value,
+      })),
+    representatives_skipped: prevRepGoals
+      .filter((g) => curRepGoalIds.has(g.representative_id))
+      .map((g) => ({ representative_id: g.representative_id, name: repNameById.get(g.representative_id) ?? "" })),
+  };
+}
+
+/**
  * Copies last month's official targets into the given month. Never
  * overwrites a target that already exists for the target month — existing
  * current-month values always win silently over the copy, and every skip is
@@ -375,26 +409,14 @@ export const copyGoalsFromPreviousMonth = createServerFn({ method: "POST" })
         ? supabaseAdmin.from("representative_goals").select("representative_id").eq("goal_month", data.month).in("representative_id", repIds)
         : Promise.resolve({ data: [] as { representative_id: string }[] }),
     ]);
-    const curRepGoalIds = new Set((curRepGoals ?? []).map((g: { representative_id: string }) => g.representative_id));
-
-    const willCopyTeam = prevTeamGoal != null && curTeamGoal == null;
-    const teamSkippedReason: CopyGoalsPreview["team_target_skipped_reason"] =
-      willCopyTeam ? null : prevTeamGoal == null ? "no_previous" : "already_set";
-
-    const repsToCopy = (prevRepGoals ?? []).filter((g: { representative_id: string }) => !curRepGoalIds.has(g.representative_id));
-    const repsSkipped = (prevRepGoals ?? [])
-      .filter((g: { representative_id: string }) => curRepGoalIds.has(g.representative_id))
-      .map((g: { representative_id: string }) => ({ representative_id: g.representative_id, name: repNameById.get(g.representative_id) ?? "" }));
-
-    const preview: CopyGoalsPreview = {
-      previous_month: prevMonth,
-      team_target_will_copy: willCopyTeam ? (prevTeamGoal!.target_value as number) : null,
-      team_target_skipped_reason: teamSkippedReason,
-      representatives_to_copy: repsToCopy.map((g: { representative_id: string; target_value: number }) => ({
-        representative_id: g.representative_id, name: repNameById.get(g.representative_id) ?? "", target_value: g.target_value,
-      })),
-      representatives_skipped: repsSkipped,
-    };
+    const preview = computeCopyGoalsPreview({
+      previousMonth: prevMonth,
+      prevTeamGoal: (prevTeamGoal as { target_value: number } | null) ?? null,
+      curTeamGoal: (curTeamGoal as { target_value: number } | null) ?? null,
+      prevRepGoals: (prevRepGoals ?? []) as { representative_id: string; target_value: number }[],
+      curRepGoalIds: new Set(((curRepGoals ?? []) as { representative_id: string }[]).map((g) => g.representative_id)),
+      repNameById,
+    });
 
     if (data.dry_run) return { ok: true, applied: false, ...preview };
 
@@ -406,16 +428,17 @@ export const copyGoalsFromPreviousMonth = createServerFn({ method: "POST" })
     if (teamErr) throw new Error(teamErr.message);
     assertTeamIsActiveForOperationalWrite(team);
 
-    if (willCopyTeam) {
+    // The apply step writes exactly what the pure rule decided — nothing more.
+    if (preview.team_target_will_copy != null) {
       const { error } = await supabaseAdmin.from("team_goals").insert({
-        team_id: data.team_id, goal_month: data.month, target_value: prevTeamGoal!.target_value,
+        team_id: data.team_id, goal_month: data.month, target_value: preview.team_target_will_copy,
         created_by: ctx.userId, updated_by: ctx.userId,
       });
       if (error) throw new Error(error.message);
     }
-    if (repsToCopy.length > 0) {
+    if (preview.representatives_to_copy.length > 0) {
       const { error } = await supabaseAdmin.from("representative_goals").insert(
-        repsToCopy.map((g: { representative_id: string; target_value: number }) => ({
+        preview.representatives_to_copy.map((g) => ({
           representative_id: g.representative_id, goal_month: data.month, target_value: g.target_value,
           created_by: ctx.userId, updated_by: ctx.userId,
         })),
@@ -425,7 +448,7 @@ export const copyGoalsFromPreviousMonth = createServerFn({ method: "POST" })
 
     await logAudit(supabaseAdmin, ctx, "goals.copied_from_previous_month", {
       team_id: data.team_id, month: data.month, previous_month: prevMonth,
-      team_copied: willCopyTeam, reps_copied: repsToCopy.length,
+      team_copied: preview.team_target_will_copy != null, reps_copied: preview.representatives_to_copy.length,
     });
     return { ok: true, applied: true, ...preview };
   });

@@ -19,14 +19,19 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Target, ChevronRight, ChevronLeft, Users2, Save, Copy, AlertTriangle, Gauge } from "lucide-react";
 import { requireRole } from "@/lib/require-role";
-import { formatNum, formatPct } from "@/lib/format";
+import { formatMonthIL, formatNum, formatPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { calculateAchievement } from "@/lib/performance-domain";
 import { useApp } from "@/lib/store";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useResolvedRole } from "@/lib/use-resolved-role";
-import { useTeamGoal, useRepresentativeGoal, currentGoalMonth } from "@/lib/goals-hooks";
+import {
+  useTeamGoal,
+  useRepresentativeGoal,
+  currentGoalMonth,
+  goalMonthKind,
+} from "@/lib/goals-hooks";
 import {
   getTargetWorkspace, setTeamGoal, setRepresentativeGoals, copyGoalsFromPreviousMonth,
   type TargetWorkspaceRep, type CopyGoalsPreview,
@@ -60,10 +65,7 @@ export function invalidateRepresentativeGoalReaders(qc: QueryClient): Promise<un
   return qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
 }
 
-function monthLabel(month: string): string {
-  const d = new Date(`${month}T00:00:00`);
-  return new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(d);
-}
+const monthLabel = formatMonthIL;
 
 function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split("-").map(Number);
@@ -309,21 +311,66 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
 
   return (
     <div className="space-y-4">
-      {/* Month navigation */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="חודש קודם" onClick={() => onMonthChange(shiftMonth(month, -1))}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <div className="text-sm font-semibold min-w-28 text-center">{monthLabel(month)}</div>
-          <Button variant="ghost" size="icon" aria-label="חודש הבא" onClick={() => onMonthChange(shiftMonth(month, 1))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setCopyOpen(true)} disabled={readOnly}>
-          <Copy className="ms-1 h-4 w-4" />העתקת יעדים מהחודש הקודם
-        </Button>
-      </div>
+      {/* Month navigation — the month is the most important fact on this
+          page: every figure and every save below belongs to it and to it
+          alone. It is therefore the page's largest heading, with an explicit
+          badge saying whether this is execution (current), planning (future)
+          or history (past), and a one-click way back to now. */}
+      {(() => {
+        const kind = goalMonthKind(month);
+        return (
+          <div className="rounded-xl border bg-card p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="חודש קודם"
+                  onClick={() => onMonthChange(shiftMonth(month, -1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <div className="min-w-40 text-center px-2">
+                  <div className="text-xl font-extrabold leading-tight">{monthLabel(month)}</div>
+                  <Badge
+                    variant={kind === "current" ? "default" : "secondary"}
+                    className="mt-0.5 text-[11px]"
+                  >
+                    {kind === "current"
+                      ? "החודש הנוכחי"
+                      : kind === "future"
+                        ? "חודש עתידי · תכנון"
+                        : "חודש קודם · היסטוריה"}
+                  </Badge>
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="חודש הבא"
+                  onClick={() => onMonthChange(shiftMonth(month, 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                {kind !== "current" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onMonthChange(currentGoalMonth())}
+                  >
+                    חזרה לחודש הנוכחי
+                  </Button>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setCopyOpen(true)} disabled={readOnly}>
+                <Copy className="ms-1 h-4 w-4" />העתקת יעדים מהחודש הקודם
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              היעדים בעמוד זה נשמרים לחודש המוצג בלבד — כל חודש עומד בפני עצמו. חודש ללא יעדים יוצג ריק, ולא יירש ערכים מחודש אחר.
+            </p>
+          </div>
+        );
+      })()}
 
       {readOnly && (
         <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">

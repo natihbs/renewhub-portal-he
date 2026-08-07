@@ -12,7 +12,12 @@ import { currentMonthStart } from "@/lib/kpi-values";
 // src/lib/goals.functions.ts instead.
 
 export type TeamGoalRow = { id: string; team_id: string; goal_month: string; target_value: number };
-export type RepresentativeGoalRow = { id: string; representative_id: string; goal_month: string; target_value: number };
+export type RepresentativeGoalRow = {
+  id: string;
+  representative_id: string;
+  goal_month: string;
+  target_value: number;
+};
 
 /**
  * First day of the current calendar month — the "current" goal period every
@@ -20,6 +25,19 @@ export type RepresentativeGoalRow = { id: string; representative_id: string; goa
  * currentMonthStart rather than redefining "start of month" a second time.
  */
 export const currentGoalMonth = currentMonthStart;
+
+/**
+ * Which kind of month the targets page is looking at, relative to the
+ * current goal month. Pure so the badge on /targets and its tests share one
+ * rule: each month stands on its own — "current" is where execution lives,
+ * "future" is planning, "past" is history. Month strings are YYYY-MM-DD
+ * month starts, so plain string comparison is correct.
+ */
+export type GoalMonthKind = "current" | "future" | "past";
+export function goalMonthKind(month: string, current: string = currentGoalMonth()): GoalMonthKind {
+  if (month === current) return "current";
+  return month > current ? "future" : "past";
+}
 
 /**
  * Official monthly target for one team, for the given month (defaults to the
@@ -81,7 +99,10 @@ export function useRepresentativeGoals(repIds: string[], month: string = current
 }
 
 /** Official monthly target for exactly one representative. */
-export function useRepresentativeGoal(repId: string | null | undefined, month: string = currentGoalMonth()) {
+export function useRepresentativeGoal(
+  repId: string | null | undefined,
+  month: string = currentGoalMonth(),
+) {
   const { goalsByRepId, isLoading, isError } = useRepresentativeGoals(repId ? [repId] : [], month);
-  return { targetValue: repId ? goalsByRepId.get(repId) ?? null : null, isLoading, isError };
+  return { targetValue: repId ? (goalsByRepId.get(repId) ?? null) : null, isLoading, isError };
 }

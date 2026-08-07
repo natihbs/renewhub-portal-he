@@ -45,7 +45,14 @@ import { useCloudCollection } from "@/lib/cloud-hooks";
 import { getPerformanceDataFreshness } from "@/lib/dashboard.functions";
 import { computeFreshness } from "@/lib/dashboard-domain";
 import { scoreTone, SCORE_BADGE_CLASS, todayIsoDate } from "@/lib/feedback-domain";
-import { formatDateIL, formatNum, formatPct, workdaysInMonth, workdaysPassed } from "@/lib/format";
+import {
+  formatDateIL,
+  formatMonthIL,
+  formatNum,
+  formatPct,
+  workdaysInMonth,
+  workdaysPassed,
+} from "@/lib/format";
 import { ACHIEVEMENT_BADGE_CLASS } from "@/lib/performance-domain";
 import type { Rep } from "@/lib/seed";
 import {
@@ -300,7 +307,7 @@ export function TeamPaceCard({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              מתוך {split.measured} נציגים שהוגדר עבורם יעד חודשי
+              מתוך {split.measured} נציגים שהוגדר עבורם יעד לחודש {formatMonthIL(todayIsoDate())}
               {split.noTarget.length > 0 &&
                 ` · ${split.noTarget.length} נציגים ללא יעד אינם נכללים בחישוב`}
             </p>
