@@ -33,7 +33,6 @@ import { CommandPalette, useCommandPalette } from "@/components/CommandPalette";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ModeToggle } from "@/components/ModeToggle";
 import { AboutDialog } from "@/components/AboutDialog";
-import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { CloudRepsSync } from "@/components/CloudRepsSync";
 import { PulseLogo } from "@/components/PulseLogo";
 import { APP_NAME } from "@/lib/app-meta";
@@ -522,7 +521,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <BottomNav onOpenMenu={() => setOpen(true)} />
       <CommandPalette open={cmd.open} onOpenChange={cmd.setOpen} />
-      <WhatsNewDialog />
     </div>
   );
 }
