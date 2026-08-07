@@ -29,6 +29,10 @@ import {
   UsersRound, AlertTriangle, ShieldCheck, RefreshCw, ArrowLeft, Database,
 } from "lucide-react";
 import { MorningRoutine } from "@/components/MorningRoutine";
+import {
+  DataFreshnessBar, TeamPaceCard, TeamFeedbackCard, TeamCompetitionsCard,
+  MyFeedbackCard, MyCompetitionsCard, MyTasksCard,
+} from "@/components/HomeCards";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
@@ -430,6 +434,8 @@ function ManagerHome() {
         }
       />
 
+      <DataFreshnessBar teamId={workspaceTeamId} />
+
       <MorningRoutine />
 
       {workspace.type === "team" && (
@@ -453,15 +459,27 @@ function ManagerHome() {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TopPerformersCard
+        <TeamPaceCard
           reps={scopedReps}
           goalsByRepId={repGoals.goalsByRepId}
           isLoading={state.repsLoading || repGoals.isLoading}
           isError={!!state.repsError || repGoals.isError}
           className="lg:col-span-2"
         />
+        <TeamCompetitionsCard reps={scopedReps} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <TeamFeedbackCard repIds={scopedRepIds} reps={scopedReps} className="lg:col-span-2" />
         <AnnouncementsCard announcements={announcements} isStaff />
       </div>
+
+      <TopPerformersCard
+        reps={scopedReps}
+        goalsByRepId={repGoals.goalsByRepId}
+        isLoading={state.repsLoading || repGoals.isLoading}
+        isError={!!state.repsError || repGoals.isError}
+      />
 
       <RecentActivityCard />
 
@@ -495,6 +513,8 @@ function RepresentativeHome() {
   return (
     <div className="space-y-8">
       <HomeHeader role="representative" />
+
+      <DataFreshnessBar teamId={me?.teamId ?? null} />
 
       {state.repsLoading ? (
         <CardSkeleton rows={2} />
@@ -533,21 +553,20 @@ function RepresentativeHome() {
         <EmptyState icon={Users2} title="אין עדיין נתוני ביצוע" description="נתוני היעד והביצוע שלך יופיעו כאן לאחר עדכון ראשוני." compact />
       )}
 
+      {/*
+        §MVP. "המשוב שלי" was previously a card whose entire content was a link
+        to /feedback — it asserted nothing and could not tell a representative
+        whether there was anything waiting for them. It now renders the actual
+        published evaluations, and keeps the link for the full history.
+      */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MyFeedbackCard repId={currentRepId} />
+        <MyCompetitionsCard repId={me?.id ?? null} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MyTasksCard repId={me?.id ?? null} />
         <AnnouncementsCard announcements={announcements} isStaff={false} />
-        <Card className="card-interactive">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Headphones className="h-4 w-4 text-primary" />המשוב שלי
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">האזנות ומשוב שפורסמו עבורך.</p>
-            <Button asChild size="sm">
-              <Link to="/feedback"><Headphones className="ms-1 h-4 w-4" />צפייה במשוב שלי</Link>
-            </Button>
-          </CardContent>
-        </Card>
       </div>
 
       <ContentShortcutsRow articleCount={state.articles.length} activeCompetition={competitions.find((c) => c.active)?.name ?? null} />

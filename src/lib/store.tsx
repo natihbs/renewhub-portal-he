@@ -12,6 +12,7 @@ import {
   UNASSIGNED_TEAM_LABEL,
 } from "./seed";
 import { computeFeedbackScore, type Feedback, type CriterionValue } from "./feedback-domain";
+import { competitionStandings } from "./home-domain";
 import type { KpiValueRow } from "./kpi-values";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useAppMode } from "@/lib/app-mode";
@@ -567,14 +568,16 @@ export function teamsFromReps(reps: Rep[]): { teamId: string; teamName: string }
   return Array.from(map, ([teamId, teamName]) => ({ teamId, teamName }));
 }
 
+/**
+ * Points per representative, highest first.
+ *
+ * Delegates to home-domain's competitionStandings so the scoring formula has
+ * exactly one implementation — the home screens show a representative their own
+ * position in the same competition this leaderboard renders, and two copies of
+ * "points × count summed over categories" would eventually disagree. The rows
+ * additionally carry `rank`; existing callers that only read repId/total are
+ * unaffected.
+ */
 export function competitionLeaderboard(comp: Competition) {
-  const byRep: Record<string, number> = {};
-  for (const s of comp.scores) {
-    const cat = comp.categories.find((c) => c.id === s.categoryId);
-    if (!cat) continue;
-    byRep[s.repId] = (byRep[s.repId] ?? 0) + cat.points * s.count;
-  }
-  return Object.entries(byRep)
-    .map(([repId, total]) => ({ repId, total }))
-    .sort((a, b) => b.total - a.total);
+  return competitionStandings(comp);
 }
