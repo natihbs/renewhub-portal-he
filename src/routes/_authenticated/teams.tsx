@@ -831,7 +831,7 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{personName(m)}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {m.roles.includes("representative") ? "נציג" : m.roles.includes("manager") ? "מנהל" : m.roles.includes("admin") ? "מנהל מערכת" : "ללא תפקיד"}
+                          {m.roles.includes("representative") ? "נציג" : m.roles.includes("manager") ? "מנהל צוות" : m.roles.includes("admin") ? "מנהל מערכת" : "ללא תפקיד"}
                           {m.business_id ? ` · ${m.business_id}` : ""}
                         </div>
                       </div>

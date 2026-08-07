@@ -77,7 +77,7 @@ function NavRow({ item, label, active, onClick }: { item: NavItem; label: string
 }
 
 const GROUP_TITLE: Record<AppRole, string> = {
-  admin: "ניהול ארגוני",
+  admin: "ניהול מערכת",
   manager: "ניהול הצוות",
   representative: "ניווט",
 };
@@ -127,8 +127,10 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 // A representative is not managing a sales team — "מערכת לניהול צוותי
 // מכירות" (a sales-team-management system) misrepresents their own
 // experience, so it's shown only to the roles it's actually true for.
+// Admin's console is system administration, not business management, so
+// their subtitle says so.
 const BRAND_SUBTITLE: Partial<Record<AppRole, string>> = {
-  admin: "מערכת לניהול צוותי מכירות",
+  admin: "ניהול מערכת",
   manager: "מערכת לניהול צוותי מכירות",
 };
 
@@ -238,7 +240,7 @@ function initialsOf(name: string | null | undefined, email: string | null | unde
 
 function ProfileDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { user, profile, roles } = useAuth();
-  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
+  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל צוות" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent dir="rtl" className="sm:max-w-md">
@@ -293,7 +295,7 @@ function UserMenu() {
   const [aboutOpen, setAboutOpen] = useState(false);
   if (!user) return null;
   const name = profile?.full_name || user.email || "משתמש";
-  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
+  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל צוות" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
   const initials = initialsOf(profile?.full_name, user.email);
 
   const handleSignOut = async () => {

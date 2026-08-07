@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,8 @@ import { useVisibleTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
 import { useWorkspace } from "@/lib/workspace-context";
-import { useTeamGoal, useTeamGoals, useRepresentativeGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
+import { useTeamGoal, useRepresentativeGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
+import { listUsers } from "@/lib/user-admin.functions";
 import { useResolvedRole } from "@/lib/use-resolved-role";
 import type { AppRole } from "@/lib/navigation-config";
 import {
@@ -26,7 +28,7 @@ import { listDashboardActivity, type DashboardActivityItem } from "@/lib/dashboa
 import {
   Users2, TrendingUp, TrendingDown, Award, Trophy, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, Lightbulb, Sparkles, Users, Activity, BarChart3, FileText, MessageSquare,
-  UsersRound, AlertTriangle, ShieldCheck, RefreshCw, ArrowLeft, Database,
+  UsersRound, AlertTriangle, ShieldCheck, RefreshCw, ArrowLeft, Database, Upload, Settings,
 } from "lucide-react";
 import { MorningRoutine } from "@/components/MorningRoutine";
 import {
@@ -47,7 +49,10 @@ export const Route = createFileRoute("/_authenticated/")({
   component: HomePage,
 });
 
-const ORG_SCOPE_LABEL = "כלל הארגון";
+// The admin scope line deliberately says "system administration", not
+// "כלל הארגון": admin is a system administrator, and their home is a system
+// console, not an organization-wide business dashboard.
+const ADMIN_SCOPE_LABEL = "ניהול מערכת";
 const NO_TEAM_LABEL = "ללא צוות משויך";
 
 function HomePage() {
@@ -105,18 +110,12 @@ function ErrorState({ message, onRetry, compact }: { message?: string; onRetry?:
 /**
  * "שלום, {name}" + workspace scope.
  *
- * §P2 admin workspace — PRODUCT DECISION: the admin dashboard is ALWAYS
- * organization-wide, and now says so explicitly instead of silently ignoring
- * the switcher.
- *
- * The rationale is that an admin's home is an organizational overview, not a
- * team console; every other page (Performance, Representatives, Targets,
- * Feedback) already narrows to the selected workspace, so a per-team view is
- * one click away and duplicating it here would leave two places to keep in
- * sync. What was wrong before was not the choice but the silence — the
- * switcher visibly changed while this page did not, with nothing explaining
- * why. When a team is selected the header now labels the difference and
- * offers a direct drill-down into that team.
+ * The admin home is a system-administration console and ignores the workspace
+ * switcher entirely — there is no per-team system administration. What must
+ * not happen is silence: the switcher visibly changes while this page does
+ * not, so when a team is selected the header says the home is a system
+ * console and offers the drill-down into that team's business view on
+ * /performance, which does honor the workspace.
  */
 function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNode }) {
   const { profile, user } = useAuth();
@@ -125,7 +124,7 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
   const me = state.reps.find((r) => r.id === state.currentRepId);
   const displayName = profile?.full_name || user?.email || "משתמש";
   const scopeLine =
-    role === "admin" ? ORG_SCOPE_LABEL
+    role === "admin" ? ADMIN_SCOPE_LABEL
     : role === "manager" ? (workspace.type === "team" ? workspace.teamName : NO_TEAM_LABEL)
     : (me?.teamName || NO_TEAM_LABEL);
 
@@ -141,7 +140,7 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
       {role === "admin" && workspace.type === "team" && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2.5 text-xs text-muted-foreground">
           <span>
-            דף הבית של מנהל המערכת מציג תמיד נתוני <strong>כלל הארגון</strong>, גם כאשר נבחר צוות מסוים במתג סביבת העבודה.
+            דף הבית של מנהל המערכת הוא לוח ניהול מערכת. לצפייה בנתוני הביצועים של {workspace.teamName} עברו לעמוד הביצועים.
           </span>
           <Button asChild size="sm" variant="outline" className="h-7">
             <Link to="/performance">
@@ -156,36 +155,69 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
 }
 
 // ============================================================================
-// Administrator — organizational overview.
+// Administrator — system administration console.
+//
+// §Role correction: admin is "מנהל מערכת", not a VP or business owner. The
+// previous admin home was an organization-wide business dashboard (team cards
+// with target attainment, top performers, business insights, competitions) —
+// which framed the admin as the person running the business. That framing now
+// belongs to team managers. The admin home is a system console: users, teams,
+// representatives, data import, data readiness, and the audit trail. Every
+// business page (Performance, Targets, Competitions…) remains reachable for
+// support/QA — nothing was de-permissioned, only re-framed.
 // ============================================================================
 function AdminHome() {
   const { state } = useApp();
-  const { reps, announcements, competitions } = state;
+  const { reps } = state;
   const { teams: cloudTeams, isLoading: teamsLoading, isError: teamsError } = useVisibleTeams();
+  const { isDemo } = useAppMode();
 
-  // §P2 team count / team card reconciliation. The KPI counted teams from
-  // useVisibleTeams while the cards below were rendered from
-  // teamsFromReps(reps) — teams DERIVED from the representative list. A team
-  // with no active representatives was counted in "צוותים פעילים" and then
-  // never rendered, so the number above disagreed with the cards below and
-  // nothing said which team was missing. cloudTeams is now authoritative for
-  // both, and an empty team renders with an honest empty state.
-  const teamIds = useMemo(() => cloudTeams.map((t) => t.id), [cloudTeams]);
-  const teamGoals = useTeamGoals(teamIds);
-  const repIds = useMemo(() => reps.map((r) => r.id), [reps]);
-  const repGoals = useRepresentativeGoals(repIds);
+  // Same query key as /users so the two screens share one cache entry.
+  const listUsersFn = useServerFn(listUsers);
+  const usersQ = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: () => listUsersFn(),
+    enabled: !isDemo,
+    staleTime: 60_000,
+  });
+  const userRows = (usersQ.data?.users ?? []) as { active: boolean }[];
+  const activeUsers = userRows.filter((u) => u.active).length;
 
   const activeTeams = cloudTeams.filter((t) => t.active).length;
   const teamsState = viewState({ isLoading: teamsLoading, isError: teamsError, isEmpty: cloudTeams.length === 0 });
   const repsState = viewState({ isLoading: state.repsLoading, isError: !!state.repsError, isEmpty: reps.length === 0 });
+  const usersState: ViewState = isDemo ? "ready" : viewState({ isLoading: usersQ.isLoading, isError: usersQ.isError, isEmpty: userRows.length === 0 });
 
   return (
     <div className="space-y-8">
-      <HomeHeader role="admin" />
+      <HomeHeader
+        role="admin"
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link to="/users"><Users2 className="ms-1 h-4 w-4" />ניהול משתמשים</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/data-import"><Upload className="ms-1 h-4 w-4" />ייבוא נתונים</Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link to="/admin"><Settings className="ms-1 h-4 w-4" />ניהול המערכת</Link>
+            </Button>
+          </div>
+        }
+      />
+
+      <DataFreshnessBar teamId={null} />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* §Polish: KPI cards are drill-downs now. They were read-only tiles
-            while every other card on the page navigated somewhere. */}
+        <KPICard
+          icon={Users}
+          label="חשבונות משתמשים"
+          value={isDemo ? "—" : String(userRows.length)}
+          sub={isDemo ? "לא נטען במצב הדגמה" : `${activeUsers} פעילים`}
+          state={usersState}
+          to="/users"
+        />
         <KPICard
           icon={UsersRound}
           label="צוותים פעילים"
@@ -202,150 +234,52 @@ function AdminHome() {
           state={repsState}
           to="/representatives"
         />
-        <CompetitionKpiCard competitions={competitions} />
       </div>
 
-      {teamsState === "loading" ? (
-        <div className="space-y-3">
-          <div className="text-sm font-semibold">צוותים</div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card><CardContent className="pt-6"><CardSkeleton /></CardContent></Card>
-            <Card><CardContent className="pt-6"><CardSkeleton /></CardContent></Card>
-          </div>
-        </div>
-      ) : teamsState === "error" ? (
-        <ErrorState message="שגיאה בטעינת רשימת הצוותים. לא ניתן להציג מצב צוותים כרגע." />
-      ) : cloudTeams.length > 0 ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">צוותים</div>
-            <Badge variant="outline">{cloudTeams.length} כרטיסים</Badge>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {cloudTeams.map((t) => {
-              const teamReps = reps.filter((r) => r.teamId === t.id);
-              const profile = t.kpiProfile ?? DEFAULT_KPI_PROFILE;
-              return (
-                <TeamCard
-                  key={t.id}
-                  teamName={t.name}
-                  teamActive={t.active}
-                  reps={teamReps}
-                  teamTarget={teamGoals.goalsByTeamId.get(t.id) ?? null}
-                  targetsLoading={teamGoals.isLoading}
-                  targetsError={teamGoals.isError}
-                  kpiProfile={profile}
-                  renewal={
-                    profile === "renewals"
-                      ? (() => {
-                          const totals = renewalTotalsForTeamHistorical(t.id, state.kpiValues);
-                          return { totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
-                        })()
-                      : null
-                  }
-                />
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <EmptyState icon={UsersRound} title="לא הוגדרו צוותים עדיין" description="הגדירו צוות ראשון כדי לראות מצב ארגוני." compact />
-      )}
+      <SystemGapsCard reps={reps} teams={cloudTeams} teamsLoading={teamsLoading} teamsError={teamsError} />
 
-      <AdminReadinessCard reps={reps} teams={cloudTeams} teamGoals={teamGoals} repGoals={repGoals} competitions={competitions} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TopPerformersCard
-          reps={reps}
-          goalsByRepId={repGoals.goalsByRepId}
-          isLoading={state.repsLoading || repGoals.isLoading}
-          isError={!!state.repsError || repGoals.isError}
-          className="lg:col-span-2"
-        />
-        <AnnouncementsCard announcements={announcements} isStaff />
-      </div>
-
-      <InsightsCard
-        reps={reps}
-        repGoalsByRepId={repGoals.goalsByRepId}
-        teamGoalsByTeamId={teamGoals.goalsByTeamId}
-        isLoading={state.repsLoading || repGoals.isLoading}
-        isError={!!state.repsError || repGoals.isError}
-      />
+      <AdminShortcutsGrid />
 
       <RecentActivityCard />
-
-      <ContentShortcutsRow articleCount={state.articles.length} activeCompetition={competitions.find((c) => c.active)?.name ?? null} />
     </div>
   );
 }
 
 /**
- * §P2 admin morning readiness — a minimal organization-level operational
- * surface, built only from primitives that already exist.
- *
- * MorningRoutine renders for managers only, so an admin previously had no
- * readiness view at all: no priorities, no data freshness, no coverage,
- * nothing saying what needed attention today. Asked "would a VP run the
- * business from this screen", the honest answer was no — they would open
- * Performance instead.
- *
- * Deliberately scoped: every row is a count with a real drill-down, not a new
- * analytics surface. The full VP / activity-manager hierarchy remains a later
- * product phase and is not being built here.
+ * Structural gaps an administrator is actually responsible for closing —
+ * entities whose wiring is incomplete, not business results. Performance
+ * against targets, pace and competitions are deliberately absent: those
+ * belong to team managers, and showing them here re-crowns the admin as a
+ * business owner.
  */
-function AdminReadinessCard({ reps, teams, teamGoals, repGoals, competitions }: {
+function SystemGapsCard({ reps, teams, teamsLoading, teamsError }: {
   reps: Rep[];
   teams: { id: string; name: string; active: boolean }[];
-  teamGoals: { goalsByTeamId: Map<string, number>; isLoading: boolean; isError: boolean };
-  repGoals: { goalsByRepId: Map<string, number>; isLoading: boolean; isError: boolean };
-  competitions: { id: string; name: string; endDate: string; active: boolean }[];
+  teamsLoading: boolean;
+  teamsError: boolean;
 }) {
   const { state } = useApp();
-  const wdTotal = workdaysInMonth();
-  const wdPassed = workdaysPassed();
-
-  const isLoading = state.repsLoading || teamGoals.isLoading || repGoals.isLoading;
-  const isError = !!state.repsError || teamGoals.isError || repGoals.isError;
+  const isLoading = state.repsLoading || teamsLoading;
+  const isError = !!state.repsError || teamsError;
   const ready = canAssertAbsence({ isLoading, isError });
 
   const items = useMemo(() => {
     if (!ready) return [];
     const activeTeams = teams.filter((t) => t.active);
-    const teamsMissingGoal = activeTeams.filter((t) => !teamGoals.goalsByTeamId.has(t.id));
     const teamsWithoutReps = activeTeams.filter((t) => !reps.some((r) => r.teamId === t.id));
-    const repsMissingGoal = reps.filter((r) => !repGoals.goalsByRepId.has(r.id));
-
-    // "Below pace" uses the same expected-to-date arithmetic Performance and
-    // Morning Routine use, never a second definition of "behind".
-    const teamsBelowPace = activeTeams.filter((t) => {
-      const target = teamGoals.goalsByTeamId.get(t.id);
-      if (target === undefined) return false;
-      const result = reps.filter((r) => r.teamId === t.id).reduce((a, r) => a + r.currentResult, 0);
-      const expected = wdTotal > 0 ? (target / wdTotal) * Math.max(1, wdPassed) : 0;
-      return result < expected * 0.9;
-    });
-
-    const endingSoon = competitions.filter((c) => {
-      const days = (new Date(c.endDate).getTime() - Date.now()) / 86400000;
-      return c.active && days >= 0 && days <= 7;
-    });
-
+    const repsWithoutTeam = reps.filter((r) => !r.teamId);
     return [
-      { label: "צוותים מתחת לקצב", count: teamsBelowPace.length, href: "/performance" as const, urgency: teamsBelowPace.length * 4 },
-      { label: "צוותים ללא יעד חודשי", count: teamsMissingGoal.length, href: "/targets" as const, urgency: teamsMissingGoal.length * 3 },
-      { label: "נציגים ללא יעד אישי", count: repsMissingGoal.length, href: "/targets" as const, urgency: repsMissingGoal.length * 2 },
-      { label: "צוותים פעילים ללא נציגים", count: teamsWithoutReps.length, href: "/teams" as const, urgency: teamsWithoutReps.length * 2 },
-      { label: "תחרויות שמסתיימות בקרוב", count: endingSoon.length, href: "/competitions" as const, urgency: endingSoon.length },
-    ].filter((x) => x.count > 0).sort((a, b) => b.urgency - a.urgency);
-  }, [ready, teams, reps, teamGoals, repGoals, competitions, wdTotal, wdPassed]);
+      { label: "צוותים פעילים ללא נציגים", count: teamsWithoutReps.length, href: "/teams" as const },
+      { label: "נציגים ללא צוות משויך", count: repsWithoutTeam.length, href: "/representatives" as const },
+    ].filter((x) => x.count > 0);
+  }, [ready, teams, reps]);
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-base flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-primary" />
-          מוכנות תפעולית ארגונית
+          תקינות הגדרות המערכת
         </CardTitle>
         <Button asChild variant="ghost" size="sm">
           <Link to="/data-import"><Database className="ms-1 h-3.5 w-3.5" />ייבוא נתונים</Link>
@@ -353,26 +287,20 @@ function AdminReadinessCard({ reps, teams, teamGoals, repGoals, competitions }: 
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <CardSkeleton rows={3} />
+          <CardSkeleton rows={2} />
         ) : isError ? (
-          <ErrorState message="לא ניתן לחשב מוכנות תפעולית — חלק מהנתונים לא נטענו." />
+          <ErrorState message="לא ניתן לבדוק את תקינות ההגדרות — חלק מהנתונים לא נטענו." />
         ) : items.length === 0 ? (
-          <EmptyState icon={ShieldCheck} title="אין פערים תפעוליים פתוחים" description="כל הצוותים הפעילים עם יעד, נציגים ונתונים." compact />
+          <EmptyState icon={ShieldCheck} title="אין פערים מבניים פתוחים" description="כל הצוותים הפעילים מאוישים וכל הנציגים משויכים לצוות." compact />
         ) : (
           <ul className="space-y-2">
-            {items.map((it, idx) => (
+            {items.map((it) => (
               <li key={it.label}>
                 <Link
                   to={it.href}
-                  className={cn(
-                    "flex items-center justify-between gap-2 rounded-lg border p-2.5 transition-colors hover:bg-accent/40",
-                    idx === 0 && "border-primary/40 bg-primary/5",
-                  )}
+                  className="flex items-center justify-between gap-2 rounded-lg border p-2.5 transition-colors hover:bg-accent/40"
                 >
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className={cn("grid h-6 w-6 place-items-center rounded-md text-xs font-bold", idx === 0 ? "bg-primary text-primary-foreground" : "bg-accent text-primary")}>{idx + 1}</span>
-                    <span className="font-medium">{it.label}</span>
-                  </div>
+                  <span className="text-sm font-medium">{it.label}</span>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{it.count}</Badge>
                     <ArrowLeft className="h-3.5 w-3.5 text-muted-foreground" />
@@ -384,6 +312,41 @@ function AdminReadinessCard({ reps, teams, teamGoals, repGoals, competitions }: 
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Quick links to every system-management destination, styled like /admin's cards. */
+function AdminShortcutsGrid() {
+  const shortcuts = [
+    { title: "ניהול משתמשים", desc: "חשבונות, תפקידים וקישור נציגים", icon: Users, to: "/users" as const },
+    { title: "ניהול צוותים", desc: "יצירה, עריכה והשבתה של צוותים", icon: UsersRound, to: "/teams" as const },
+    { title: "ניהול נציגים", desc: "הוספה, השבתה והעברה בין צוותים", icon: Users2, to: "/representatives" as const },
+    { title: "ייבוא נתונים", desc: "ייבוא קבצי ביצועים והיסטוריית ייבוא", icon: Upload, to: "/data-import" as const },
+    { title: "ניהול המערכת", desc: "הודעות, תכנים ותחרויות", icon: Settings, to: "/admin" as const },
+    { title: "יומן שינויים", desc: "מה השתנה בכל גרסה של Pulse", icon: FileText, to: "/changelog" as const },
+  ];
+  return (
+    <div className="space-y-3">
+      <div className="text-sm font-semibold">ניהול מערכת</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {shortcuts.map((c) => {
+          const Icon = c.icon;
+          return (
+            <Link key={c.to} to={c.to} className="group focus:outline-none">
+              <Card className="h-full card-interactive">
+                <CardContent className="pt-5">
+                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent text-primary">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="mt-3 font-bold">{c.title}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{c.desc}</div>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -660,34 +623,6 @@ function AnnouncementsCard({ announcements, isStaff }: { announcements: { id: st
   );
 }
 
-/**
- * §Polish. A competition NAME was rendered into a KPI card's numeric value
- * slot (text-3xl, extrabold, truncate), so a long Hebrew name truncated to
- * nothing useful, and the sub-label read "כלל הארגון" — which says nothing
- * about the competition. The count is the KPI; the names are the detail.
- */
-function CompetitionKpiCard({ competitions }: { competitions: { id: string; name: string; active: boolean }[] }) {
-  const active = competitions.filter((c) => c.active);
-  return (
-    <Card className="card-interactive">
-      <Link to="/competitions" className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <CardContent className="pt-5">
-          <div className="flex items-start justify-between gap-2">
-            <div className="text-xs text-muted-foreground font-medium">תחרויות פעילות</div>
-            <div className="grid h-7 w-7 place-items-center rounded-lg bg-accent text-primary">
-              <Trophy className="h-3.5 w-3.5" />
-            </div>
-          </div>
-          <div className="mt-2 text-2xl md:text-3xl font-extrabold">{active.length}</div>
-          <div className="mt-1 text-xs text-muted-foreground line-clamp-2 min-h-[2rem]">
-            {active.length === 0 ? "אין תחרות פעילה כרגע" : active.map((c) => c.name).join(" · ")}
-          </div>
-        </CardContent>
-      </Link>
-    </Card>
-  );
-}
-
 function ContentShortcutsRow({ articleCount, activeCompetition }: { articleCount: number; activeCompetition: string | null }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -732,7 +667,7 @@ function KPICard({
   trend?: { dir: "up" | "down"; text: string };
   state?: ViewState;
   /** Makes the whole card a drill-down. */
-  to?: "/teams" | "/representatives" | "/performance" | "/competitions" | "/targets";
+  to?: "/teams" | "/representatives" | "/performance" | "/competitions" | "/targets" | "/users";
 }) {
   const color = tone === "success" ? "text-success-foreground" : tone === "danger" ? "text-primary" : tone === "warning" ? "text-warning-foreground" : "text-foreground";
   const TrendIcon = trend?.dir === "down" ? TrendingDown : TrendingUp;
