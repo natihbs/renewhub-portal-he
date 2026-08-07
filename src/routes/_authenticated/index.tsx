@@ -19,7 +19,7 @@ import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/rene
 import { useWorkspace } from "@/lib/workspace-context";
 import { useTeamGoal, useRepresentativeGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
 import { listUsers } from "@/lib/user-admin.functions";
-import { useResolvedRole } from "@/lib/use-resolved-role";
+import { useRealAppRole, useResolvedRole } from "@/lib/use-resolved-role";
 import type { AppRole } from "@/lib/navigation-config";
 import {
   repsNeedingSupport, viewState, canAssertAbsence, type SupportInput, type ViewState,
@@ -57,8 +57,23 @@ const NO_TEAM_LABEL = "ללא צוות משויך";
 
 function HomePage() {
   const role = useResolvedRole();
+  const realRole = useRealAppRole();
+  const { state } = useApp();
   if (role === "admin") return <AdminHome />;
   if (role === "manager") return <ManagerHome />;
+  // An admin viewing the representative presentation has no representative of
+  // their own — RepresentativeHome would render a wall of per-rep cards each
+  // explaining its own emptiness. Say the real situation once, honestly, and
+  // never invent a representative to show instead.
+  if (realRole === "admin" && !state.currentRepId) {
+    return (
+      <EmptyState
+        icon={Users2}
+        title="לא נבחר נציג לתצוגה"
+        description="תצוגת נציג מציגה את המסך האישי של הנציג המחובר. לחשבון מנהל המערכת אין נציג משויך, ולכן אין נתונים אישיים להצגה."
+      />
+    );
+  }
   return <RepresentativeHome />;
 }
 

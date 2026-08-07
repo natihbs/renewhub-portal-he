@@ -19,6 +19,7 @@ import { MorningProvider } from "@/lib/morning-store";
 import { CommsProvider } from "@/lib/comms-store";
 import { ListeningProvider } from "@/lib/listening-store";
 import { AppModeProvider } from "@/lib/app-mode";
+import { AdminViewProvider } from "@/lib/admin-view";
 import { IdeasProvider } from "@/lib/ideas-store";
 import { AuthProvider } from "@/lib/auth";
 import { WorkspaceProvider } from "@/lib/workspace-context";
@@ -60,7 +61,9 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4" dir="rtl">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">אירעה שגיאה בטעינת הדף</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          אירעה שגיאה בטעינת הדף
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">ניתן לרענן או לחזור לדף הבית.</p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -90,15 +93,32 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Pulse" },
-      { name: "description", content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת." },
+      {
+        name: "description",
+        content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת.",
+      },
       { property: "og:title", content: "Pulse" },
-      { property: "og:description", content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת." },
+      {
+        property: "og:description",
+        content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Pulse" },
-      { name: "twitter:description", content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png" },
+      {
+        name: "twitter:description",
+        content: "Pulse — מערכת לניהול צוותי מכירות. מצב צוות, התראות, משימות ותובנות בזמן אמת.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/fd634666-a265-44f0-bb06-751d900d63de/id-preview-59086163--f20b9a2c-ec66-4243-b41d-84858960cd6f.lovable.app-1784732448762.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -139,34 +159,34 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AppModeProvider>
-          <WorkspaceProvider>
-            <AppProvider>
-
-              <UxProvider>
-                <IdeasProvider>
-                  <ImportProvider>
-                    <RepWorkspaceProvider>
-                      <MorningProvider>
-                        <CommsProvider>
-                          <ListeningProvider>
-                            <AppShell>
-                              <Outlet />
-                            </AppShell>
-                            <RepWorkspace />
-                            <IdeaFeedbackButton />
-                            <Toaster position="top-center" richColors />
-                          </ListeningProvider>
-                        </CommsProvider>
-                      </MorningProvider>
-                    </RepWorkspaceProvider>
-                  </ImportProvider>
-                </IdeasProvider>
-              </UxProvider>
-            </AppProvider>
-          </WorkspaceProvider>
+          <AdminViewProvider>
+            <WorkspaceProvider>
+              <AppProvider>
+                <UxProvider>
+                  <IdeasProvider>
+                    <ImportProvider>
+                      <RepWorkspaceProvider>
+                        <MorningProvider>
+                          <CommsProvider>
+                            <ListeningProvider>
+                              <AppShell>
+                                <Outlet />
+                              </AppShell>
+                              <RepWorkspace />
+                              <IdeaFeedbackButton />
+                              <Toaster position="top-center" richColors />
+                            </ListeningProvider>
+                          </CommsProvider>
+                        </MorningProvider>
+                      </RepWorkspaceProvider>
+                    </ImportProvider>
+                  </IdeasProvider>
+                </UxProvider>
+              </AppProvider>
+            </WorkspaceProvider>
+          </AdminViewProvider>
         </AppModeProvider>
       </AuthProvider>
-
     </QueryClientProvider>
   );
 }
