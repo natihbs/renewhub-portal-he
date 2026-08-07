@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   MessageSquare, Sunrise, Moon, Trophy, PartyPopper, Target, Headphones,
@@ -211,21 +211,37 @@ function Generator() {
   const [body, setBody] = useState(generated.body);
   const [title, setTitle] = useState(generated.title);
   const [dirty, setDirty] = useState(false);
-  const [lastGenerated, setLastGenerated] = useState(generated);
 
-  // Adjust body/title when generation changes and the user hasn't edited yet —
-  // computed directly during render (React's documented pattern for deriving
-  // state from a changing value), not from a useMemo side effect (RC-2).
-  // useMemo is a performance hint, not a correctness guarantee; React's own
-  // docs are explicit that it must never be relied on to run required side
-  // effects, which is exactly what the previous implementation did.
-  if (generated !== lastGenerated) {
-    setLastGenerated(generated);
-    if (!dirty) {
+  // A regeneration is "new" only when its CONTENT signature changes — a
+  // primitive string over the user's choices (kind, seed, rep, listening) and
+  // the produced text (title, body). Never object identity: `inputs` — and
+  // therefore the generated draft — is a fresh object whenever any upstream
+  // query settles, so an identity comparison fires on unrelated re-renders;
+  // done at render time it looped setState during render until the page error
+  // boundary tripped. The signature is applied inside an effect; render never
+  // calls setState. A signature change is always recorded, but the draft is
+  // only overwritten when the user hasn't edited it (dirty=false).
+  const generatedSignature = generationSignature({
+    kind,
+    seed,
+    repId: effectiveRepId,
+    listeningId: effectiveListeningId,
+    title: generated.title,
+    body: generated.body,
+  });
+  const appliedSignatureRef = useRef(generatedSignature);
+  useEffect(() => {
+    const { record, apply } = applyGeneratedDecision({
+      nextSignature: generatedSignature,
+      appliedSignature: appliedSignatureRef.current,
+      dirty,
+    });
+    if (record) appliedSignatureRef.current = generatedSignature;
+    if (apply) {
       setBody(generated.body);
       setTitle(generated.title);
     }
-  }
+  }, [generatedSignature, dirty, generated.title, generated.body]);
 
   const { saveMessage, saveTemplate } = useComms();
   const [tplName, setTplName] = useState("");
@@ -645,6 +661,40 @@ function EditForm({ msg, onSave }: { msg: CommsMessage; onSave: (p: { title: str
 type Inputs = ReturnType<typeof useGenerationInputs>;
 
 /**
+ * Primitive content signature for a generated draft. Two generations are "the
+ * same" iff every value here is equal — deliberately independent of the object
+ * identity of `generated` or `inputs`, which changes on every unrelated query
+ * settle. Exported for the regression tests pinning the /communications
+ * setState-during-render crash fix.
+ */
+export function generationSignature(s: {
+  kind: string;
+  seed: number;
+  repId: string;
+  listeningId: string;
+  title: string;
+  body: string;
+}): string {
+  return [s.kind, String(s.seed), s.repId, s.listeningId, s.title, s.body].join("\u0000");
+}
+
+/**
+ * The auto-apply rule for a regenerated draft: a changed signature is always
+ * recorded (so a later regeneration is compared against the latest content),
+ * but the visible title/body are only overwritten when the user has not
+ * edited them manually (dirty=false). An unchanged signature does nothing —
+ * which is exactly what makes the applying effect terminate.
+ */
+export function applyGeneratedDecision(s: {
+  nextSignature: string;
+  appliedSignature: string;
+  dirty: boolean;
+}): { record: boolean; apply: boolean } {
+  const changed = s.nextSignature !== s.appliedSignature;
+  return { record: changed, apply: changed && !s.dirty };
+}
+
+/**
  * Renewal-specific lines, appended as a distinct section after the universal
  * target/result summary — only for teams whose KPI profile is "renewals" and only
  * when a real rate is available. Never fabricates a rate and never merges renewal
@@ -660,7 +710,7 @@ export function renewalSectionLines(renewalTeams: Inputs["renewalTeams"]): strin
   return ["", "🔄 חידושים:", ...lines];
 }
 
-function generateMorning(i: Inputs): { title: string; body: string } {
+export function generateMorning(i: Inputs): { title: string; body: string } {
   const date = formatDateIL(new Date());
   const lines: string[] = [];
   lines.push(`${greeting()} ☀️`);
@@ -695,7 +745,7 @@ function generateMorning(i: Inputs): { title: string; body: string } {
   return { title: `עדכון בוקר · ${date}`, body: lines.join("\n") };
 }
 
-function generateEvening(i: Inputs): { title: string; body: string } {
+export function generateEvening(i: Inputs): { title: string; body: string } {
   const date = formatDateIL(new Date());
   const lines: string[] = [];
   lines.push(`סיכום יום · ${date} 🌙`);
@@ -726,7 +776,7 @@ function generateEvening(i: Inputs): { title: string; body: string } {
   return { title: `סיכום ערב · ${date}`, body: lines.join("\n") };
 }
 
-function generateCompetition(i: Inputs, seed: number): { title: string; body: string } {
+export function generateCompetition(i: Inputs, seed: number): { title: string; body: string } {
   const comp = i.activeComp;
   if (!comp) {
     return {
@@ -758,7 +808,7 @@ function generateCompetition(i: Inputs, seed: number): { title: string; body: st
   return { title: `עדכון תחרות · ${comp.name}`, body: lines.join("\n") };
 }
 
-function generateCongrats(i: Inputs, repId: string): { title: string; body: string } {
+export function generateCongrats(i: Inputs, repId: string): { title: string; body: string } {
   const rep = i.reps.find((r) => r.id === repId);
   if (!rep) return { title: "ברכה אישית", body: "בחרו נציג להפקת ברכה." };
   const lines: string[] = [];
@@ -785,7 +835,7 @@ function generateCongrats(i: Inputs, repId: string): { title: string; body: stri
   return { title: `ברכה אישית · ${rep.name}`, body: lines.join("\n") };
 }
 
-function generateCoaching(i: Inputs, repId: string): { title: string; body: string } {
+export function generateCoaching(i: Inputs, repId: string): { title: string; body: string } {
   const rep = i.reps.find((r) => r.id === repId);
   if (!rep) return { title: "משוב אימון", body: "בחרו נציג להפקת משוב." };
   const lines: string[] = [];
@@ -820,7 +870,7 @@ function generateCoaching(i: Inputs, repId: string): { title: string; body: stri
   return { title: `משוב אימון · ${rep.name}`, body: lines.join("\n") };
 }
 
-function generateListening(i: Inputs, listeningId: string): { title: string; body: string } {
+export function generateListening(i: Inputs, listeningId: string): { title: string; body: string } {
   const fb = i.listeningsThisWeek.find((f) => f.id === listeningId);
   if (!fb) return { title: "משוב האזנה", body: "בחרו האזנה להפקת סיכום." };
   const rep = i.reps.find((r) => r.id === fb.repId);
