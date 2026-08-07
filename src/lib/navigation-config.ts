@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Upload, MessageSquare,
-  Users2, UsersRound, Target,
+  Users2, UsersRound, Target, Sparkles,
 } from "lucide-react";
 
 // Single source of truth for role-aware navigation. AppShell (sidebar +
