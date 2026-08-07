@@ -301,7 +301,7 @@ function TeamsPage() {
                       <TableHead>שם הצוות</TableHead>
                       <TableHead>מחלקה / פעילות</TableHead>
                       <TableHead>פרופיל KPI</TableHead>
-                      <TableHead>מנהל משויך</TableHead>
+                      <TableHead>מנהל הצוות</TableHead>
                       <TableHead>נציגים</TableHead>
                       <TableHead>סטטוס</TableHead>
                       <TableHead>נוצר בתאריך</TableHead>
@@ -314,7 +314,20 @@ function TeamsPage() {
                         <TableCell className="font-semibold">{t.name}</TableCell>
                         <TableCell className="text-muted-foreground">{t.department || "—"}</TableCell>
                         <TableCell><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></TableCell>
-                        <TableCell>{t.manager_id ? personName(peopleById.get(t.manager_id)) : "—"}</TableCell>
+                        <TableCell>
+                          {t.manager_id ? (
+                            personName(peopleById.get(t.manager_id))
+                          ) : t.member_count > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-primary/10 text-primary border-primary/25"
+                            >
+                              ללא מנהל צוות
+                            </Badge>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
                         <TableCell>{t.rep_count} / {t.member_count}</TableCell>
                         <TableCell>
                           <Badge variant={t.active ? "default" : "secondary"}>{t.active ? "פעיל" : "מושבת"}</Badge>
@@ -348,7 +361,14 @@ function TeamsPage() {
                       <Badge variant={t.active ? "default" : "secondary"}>{t.active ? "פעיל" : "מושבת"}</Badge>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-                      <div>מנהל: {t.manager_id ? personName(peopleById.get(t.manager_id)) : "—"}</div>
+                      <div>
+                        מנהל הצוות:{" "}
+                        {t.manager_id
+                          ? personName(peopleById.get(t.manager_id))
+                          : t.member_count > 0
+                            ? "ללא מנהל צוות ⚠"
+                            : "—"}
+                      </div>
                       <div>נציגים: {t.rep_count} / {t.member_count}</div>
                       <div>נוצר: {formatDateIL(t.created_at)}</div>
                       <div><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></div>
@@ -519,7 +539,7 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
             <Input id="team-dep" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="לדוגמה: מכירות רכב" />
           </div>
           <div className="space-y-1">
-            <Label>מנהל משויך</Label>
+            <Label>מנהל הצוות</Label>
             <Select value={managerId} onValueChange={setManagerId}>
               <SelectTrigger aria-label="בחירת מנהל"><SelectValue placeholder="בחרו מנהל" /></SelectTrigger>
               <SelectContent>
@@ -529,6 +549,10 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              קובע מי מנהל את הצוות בפועל — הרשאות ניהול, יעדים, האזנות ומשוב נגזרות מהגדרה זו, לא
+              משיוך הצוות בפרופיל המשתמש.
+            </p>
           </div>
           <div className="space-y-1">
             <Label htmlFor="team-desc">תיאור</Label>

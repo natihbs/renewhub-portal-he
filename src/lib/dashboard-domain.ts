@@ -411,3 +411,57 @@ export function viewState(input: { isLoading: boolean; isError: boolean; isEmpty
 export function canAssertAbsence(input: { isLoading: boolean; isError: boolean }): boolean {
   return !input.isLoading && !input.isError;
 }
+
+// ---------------------------------------------------------------------------
+// Admin system console — structural gaps
+// ---------------------------------------------------------------------------
+
+export type StructuralGapTeam = {
+  id: string;
+  name: string;
+  active: boolean;
+  managerId: string | null;
+};
+export type StructuralGapRep = { teamId: string | null };
+
+export type StructuralGap = {
+  label: string;
+  count: number;
+  href: "/teams" | "/representatives";
+};
+
+/**
+ * The wiring gaps an administrator is responsible for closing, in the order
+ * they should be closed. Pure so the admin home and its tests share one rule.
+ *
+ * "Team with representatives but no manager" is listed FIRST because it is the
+ * most consequential: every manager scope in the app (workspace options, RLS
+ * helpers, target/feedback authorization) keys on teams.manager_id — a staffed
+ * team with none has people producing numbers that no manager can manage.
+ * Assigning the manager is an explicit admin action on the Teams page
+ * (updateTeam, audited as team.manager_assigned) — never something the system
+ * does silently.
+ */
+export function computeStructuralGaps(
+  teams: StructuralGapTeam[],
+  reps: StructuralGapRep[],
+): StructuralGap[] {
+  const activeTeams = teams.filter((t) => t.active);
+  const staffedTeamIds = new Set(reps.map((r) => r.teamId).filter((id): id is string => !!id));
+  const staffedWithoutManager = activeTeams.filter((t) => staffedTeamIds.has(t.id) && !t.managerId);
+  const teamsWithoutReps = activeTeams.filter((t) => !staffedTeamIds.has(t.id));
+  const repsWithoutTeam = reps.filter((r) => !r.teamId);
+  return [
+    {
+      label: "צוותים מאוישים ללא מנהל צוות",
+      count: staffedWithoutManager.length,
+      href: "/teams" as const,
+    },
+    { label: "צוותים פעילים ללא נציגים", count: teamsWithoutReps.length, href: "/teams" as const },
+    {
+      label: "נציגים ללא צוות משויך",
+      count: repsWithoutTeam.length,
+      href: "/representatives" as const,
+    },
+  ].filter((g) => g.count > 0);
+}
