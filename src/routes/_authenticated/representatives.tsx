@@ -21,6 +21,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Users, Plus, Search, Pencil, Trash2, Power, Link2, Link2Off, ArrowLeftRight, Target, Send } from "lucide-react";
 import { requireRole } from "@/lib/require-role";
+import { cn } from "@/lib/utils";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import {
   listRepresentatives, createRepresentative, createRepresentativeWithInvite, inviteRepresentativeLogin, updateRepresentative, setRepresentativeActive,
@@ -323,11 +324,14 @@ function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManage
   const [externalRef, setExternalRef] = useState(rep?.external_ref ?? "");
   const [userId, setUserId] = useState(rep?.user_id ?? NONE);
   const [active, setActive] = useState(rep?.active ?? true);
-  // Creation-only: mode 2 of §22 — create the representative AND invite them
-  // to sign in, in one step. Mode 3 (link to an existing account) happens
-  // afterward via the dedicated "קישור חשבון" row action, and mode 1 (no
-  // login) is simply leaving this toggle off — never mandatory.
-  const [inviteMode, setInviteMode] = useState(false);
+  // Creation-only. The PRIMARY flow is "יצירת נציג עם חשבון כניסה" — one step
+  // that creates the business record, invites the login account, assigns the
+  // representative role, links the two and syncs the profile team. Creating a
+  // representative WITHOUT a login stays available as the secondary mode, for
+  // people who should exist in performance data but not sign in yet. The two
+  // remain separate concepts underneath (representative vs user/profile) —
+  // this default only changes which workflow the admin lands in first.
+  const [inviteMode, setInviteMode] = useState(!rep);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteFullName, setInviteFullName] = useState("");
   // §P0-4 hardening: createRepresentativeWithInvite can partially succeed —
@@ -338,6 +342,10 @@ function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManage
   // the representative already exists, so only the invite step is retried,
   // via the same server function the row-level "הזמן להתחברות" action uses.
   const [inviteFailure, setInviteFailure] = useState<{ rep_id: string; name: string; email: string; full_name: string; reason: string } | null>(null);
+  // Success view for the with-login flow: the admin just triggered four
+  // linked effects (rep + account + role + link); a toast is too small to
+  // confirm all of them, and it vanishes before the email is even opened.
+  const [inviteSuccess, setInviteSuccess] = useState<{ name: string; email: string; teamName: string | null } | null>(null);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -370,7 +378,16 @@ function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManage
         setInviteFailure({ rep_id: res.rep_id, name: res.name, email: res.email, full_name: res.full_name, reason: res.reason });
         return;
       }
-      toast.success(rep ? "פרטי הנציג עודכנו" : inviteMode ? "הנציג נוצר וההזמנה להתחברות נשלחה" : "הנציג נוסף בהצלחה");
+      if (!rep && inviteMode) {
+        onDone();
+        setInviteSuccess({
+          name,
+          email: inviteEmail,
+          teamName: teamId === NONE ? null : (teams.find((t) => t.id === teamId)?.name ?? null),
+        });
+        return;
+      }
+      toast.success(rep ? "פרטי הנציג עודכנו" : "הנציג נוסף בהצלחה");
       onDone(); onClose();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -410,6 +427,30 @@ function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManage
     return list;
   }, [eligibleLinkAccounts, people, rep]);
 
+  if (inviteSuccess) {
+    return (
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>הנציג נוצר וההזמנה נשלחה</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <ul className="space-y-1.5 rounded-xl border p-3">
+              <li>✓ נוצר נציג בשם <b>{inviteSuccess.name}</b>{inviteSuccess.teamName ? <> בצוות <b>{inviteSuccess.teamName}</b></> : " (ללא צוות)"}</li>
+              <li>✓ נוצר חשבון כניסה עבור <b>{inviteSuccess.email}</b> עם תפקיד נציג</li>
+              <li>✓ החשבון קושר לנציג והצוות סונכרן לפרופיל</li>
+              <li>✓ נשלחה הזמנת התחברות במייל — הנציג יגדיר סיסמה בכניסה הראשונה</li>
+            </ul>
+            <p className="text-xs text-muted-foreground">
+              אם ההזמנה לא הגיעה, ניתן לשלוח שוב מרשימת הנציגים (פעולת "הזמנה להתחברות").
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => onClose()}>סגירה</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   if (inviteFailure) {
     return (
       <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -436,8 +477,46 @@ function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManage
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
-        <DialogHeader><DialogTitle>{rep ? "עריכת נציג" : "נציג חדש"}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>
+            {rep ? "עריכת נציג" : inviteMode ? "יצירת נציג עם חשבון כניסה" : "יצירת נציג ללא חשבון כניסה"}
+          </DialogTitle>
+        </DialogHeader>
         <div className="space-y-3">
+          {!rep && (isAdmin || isManager) && userId === NONE && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="אופן יצירת הנציג">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={inviteMode}
+                onClick={() => setInviteMode(true)}
+                className={cn(
+                  "rounded-xl border p-3 text-right transition-colors",
+                  inviteMode ? "border-primary bg-primary/5" : "hover:bg-accent/40",
+                )}
+              >
+                <div className="text-sm font-semibold">יצירת נציג עם חשבון כניסה</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  נציג + חשבון התחברות + שיוך לצוות + הזמנה במייל — בפעולה אחת
+                </div>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!inviteMode}
+                onClick={() => setInviteMode(false)}
+                className={cn(
+                  "rounded-xl border p-3 text-right transition-colors",
+                  !inviteMode ? "border-primary bg-primary/5" : "hover:bg-accent/40",
+                )}
+              >
+                <div className="text-sm font-semibold">יצירת נציג ללא חשבון כניסה</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  לנתוני ביצועים בלבד — ניתן להזמין או לקשר חשבון בהמשך
+                </div>
+              </button>
+            </div>
+          )}
           <div className="space-y-1"><Label>שם מלא</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1 sm:col-span-2">
@@ -475,15 +554,6 @@ function RepDialog({ rep, teams, people, eligibleLinkAccounts, isAdmin, isManage
                   אין חשבונות זמינים לקישור כרגע — ניתן להזמין חשבון חדש או לקשר חשבון קיים מרשימת הנציגים.
                 </p>
               )}
-            </div>
-          )}
-          {!rep && (isAdmin || isManager) && userId === NONE && (
-            <div className="flex items-center justify-between gap-3 rounded-xl border p-3">
-              <div>
-                <Label htmlFor="invite-toggle">הזמנה להתחברות למערכת</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">יצירת חשבון כניסה עבור הנציג ושליחת הזמנה במייל. ניתן לדלג וליצור נציג ללא גישת התחברות, ולהזמין או לקשר חשבון בהמשך מרשימת הנציגים.</p>
-              </div>
-              <Switch id="invite-toggle" checked={inviteMode} onCheckedChange={setInviteMode} />
             </div>
           )}
           {!rep && inviteMode && (

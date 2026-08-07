@@ -75,6 +75,29 @@ async function assertCanCreateRep(ctx: Ctx, teamId: string | null): Promise<{ is
  * independent of the DB read (assertLinkTargetRoleEligible below) that
  * gathers the account's roles.
  */
+/**
+ * PGRST202 means PostgREST could not find the database function the code
+ * called — i.e. the connected database is behind the repo's migrations. The
+ * raw message ("Could not find the function public.… in the schema cache")
+ * is meaningless to the admin who hits it mid-workflow; translate it to a
+ * clear Hebrew statement of what is actually wrong and what fixes it.
+ * Returns null for every other error so real business errors (P0002/P0004…)
+ * keep their own specific messages. See supabase/REPAIR_RUNBOOK.md.
+ */
+export function translateDbFunctionLookupError(
+  error: { code?: string; message?: string },
+  fnName: string,
+): string | null {
+  const missing =
+    error.code === "PGRST202" || /schema cache/i.test(error.message ?? "");
+  if (!missing) return null;
+  return (
+    "פעולת מסד הנתונים הדרושה אינה מותקנת בסביבת הנתונים המחוברת (" +
+    fnName +
+    "). מסד הנתונים מפגר אחרי גרסת המערכת — יש להריץ את המיגרציות לפי supabase/REPAIR_RUNBOOK.md ולנסות שוב."
+  );
+}
+
 export function checkLinkTargetRoleEligibility(targetRoles: string[]): { eligible: boolean; reason: "privileged" | "wrong_role" | null } {
   if (targetRoles.includes("admin") || targetRoles.includes("manager")) return { eligible: false, reason: "privileged" };
   if (!targetRoles.includes("representative")) return { eligible: false, reason: "wrong_role" };
@@ -680,6 +703,11 @@ export const setRepresentativeActive = createServerFn({ method: "POST" })
       .single();
     if (error) {
       if (error.code === "P0002") throw new Error("הנציג לא נמצא");
+      const drift = translateDbFunctionLookupError(
+        error,
+        "set_representative_active_with_profile_sync",
+      );
+      if (drift) throw new Error(drift);
       throw new Error(error.message);
     }
     const r = result as SetRepresentativeActiveResult;
@@ -791,6 +819,8 @@ export async function linkRepresentativeToUserCore(
     if (error.code === "P0002") throw new Error("הנציג לא נמצא");
     if (error.code === "P0003") throw new Error("שיוך הנציג השתנה בינתיים על ידי פעולה אחרת — יש לרענן ולנסות שוב");
     if (error.code === "P0004") throw new Error("חשבון המשתמש כבר מקושר לנציג אחר. יש לנתק אותו קודם.");
+    const drift = translateDbFunctionLookupError(error, "link_representative_to_user");
+    if (drift) throw new Error(drift);
     throw new Error(error.message);
   }
   const r = result as { rep_id: string; rep_name: string; rep_team_id: string | null; previous_user_id: string | null; new_user_id: string | null };
@@ -1123,6 +1153,11 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
       if (error.code === "P0002") throw new Error("הנציג לא נמצא");
       if (error.code === "P0005") throw new Error("לא ניתן לשייך נציג לצוות מושבת");
       if (error.code === "P0006") throw new Error("צוות היעד לא נמצא");
+      const drift = translateDbFunctionLookupError(
+        error,
+        "update_representative_metrics_with_team_sync",
+      );
+      if (drift) throw new Error(drift);
       throw new Error(error.message);
     }
     const r = result as UpdateRepMetricsResult;
@@ -1247,6 +1282,8 @@ export const toggleRepresentativeTask = createServerFn({ method: "POST" })
       .single();
     if (error) {
       if (error.code === "P0002") throw new Error("המשימה לא נמצאה — ייתכן שנמחקה");
+      const drift = translateDbFunctionLookupError(error, "toggle_rep_task_done");
+      if (drift) throw new Error(drift);
       throw new Error(error.message);
     }
     return result as ToggleTaskResult;

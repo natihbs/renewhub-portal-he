@@ -1,13 +1,28 @@
 export const formatILS = (n: number) =>
-  new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("he-IL", {
+    style: "currency",
+    currency: "ILS",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 export const formatNum = (n: number) =>
   new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 }).format(n);
 
 export const formatDateIL = (d: string | Date) => {
   const date = typeof d === "string" ? new Date(d) : d;
-  return new Intl.DateTimeFormat("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
 };
+
+/** "אוגוסט 2026" for a YYYY-MM-DD month-start date — the label every goal-month surface shares. */
+export function formatMonthIL(monthStart: string): string {
+  const d = new Date(`${monthStart.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return monthStart;
+  return new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(d);
+}
 
 export const formatPct = (n: number) => `${Math.round(n)}%`;
 

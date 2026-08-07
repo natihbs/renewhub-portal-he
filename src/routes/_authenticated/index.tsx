@@ -11,13 +11,26 @@ import { useApp, teamsFromReps } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
 import type { Rep } from "@/lib/seed";
-import { formatDateIL, formatNum, formatPct, workdaysRemaining, workdaysInMonth, workdaysPassed } from "@/lib/format";
+import {
+  formatDateIL,
+  formatMonthIL,
+  formatNum,
+  formatPct,
+  workdaysRemaining,
+  workdaysInMonth,
+  workdaysPassed,
+} from "@/lib/format";
 import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
 import { useWorkspace } from "@/lib/workspace-context";
-import { useTeamGoal, useRepresentativeGoal, useRepresentativeGoals } from "@/lib/goals-hooks";
+import {
+  useTeamGoal,
+  useRepresentativeGoal,
+  useRepresentativeGoals,
+  currentGoalMonth,
+} from "@/lib/goals-hooks";
 import { listUsers } from "@/lib/user-admin.functions";
 import { useRealAppRole, useResolvedRole } from "@/lib/use-resolved-role";
 import type { AppRole } from "@/lib/navigation-config";
@@ -525,7 +538,7 @@ function RepresentativeHome() {
             </CardContent></Card>
           ) : hasTarget ? (
             <>
-              <KPICard icon={Target} label="היעד שלי" value={formatNum(myGoal.targetValue as number)} sub="יחידות לחודש" />
+              <KPICard icon={Target} label="היעד שלי" value={formatNum(myGoal.targetValue as number)} sub={`יעד ${formatMonthIL(currentGoalMonth())}`} />
               <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(me.currentResult)} sub={pct !== null ? `${formatPct(pct)} מהיעד` : undefined} />
               <KPICard icon={TrendingUp} label="נותר ליעד" value={formatNum(remaining ?? 0)} sub={perDay !== null ? `~${perDay}/יום` : undefined} />
             </>
@@ -809,7 +822,7 @@ function TeamCard({ teamName, teamActive, reps, teamTarget, targetsLoading, targ
           <>
             <div className="grid grid-cols-3 gap-3 text-center">
               <div>
-                <div className="text-xs text-muted-foreground">יעד צוות</div>
+                <div className="text-xs text-muted-foreground">יעד {formatMonthIL(currentGoalMonth())}</div>
                 <div className="font-bold">{formatNum(teamTarget as number)}</div>
               </div>
               <div>
@@ -825,7 +838,7 @@ function TeamCard({ teamName, teamActive, reps, teamTarget, targetsLoading, targ
           </>
         ) : (
           <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
-            לא הוגדר יעד חודשי לצוות זה · ביצוע נוכחי: {formatNum(result)} יחידות
+            לא הוגדר יעד לצוות זה לחודש {formatMonthIL(currentGoalMonth())} · ביצוע נוכחי: {formatNum(result)} יחידות
           </div>
         )}
         {renewal && (
