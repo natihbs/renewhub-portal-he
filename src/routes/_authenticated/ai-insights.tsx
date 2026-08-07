@@ -269,7 +269,7 @@ function InsightPanel({
           <CardTitle className="text-base">סיכום</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
+          <div className="markdown-content text-sm text-foreground">
             <Markdown>{result.summary}</Markdown>
           </div>
         </CardContent>
