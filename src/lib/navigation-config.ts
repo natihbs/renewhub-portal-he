@@ -66,6 +66,10 @@ export type QuickAction = {
 export const NAV_ITEMS: NavItem[] = [
   { id: "home", to: "/", icon: Home, roles: ["admin", "manager", "representative"], label: "דף הבית", group: "primary" },
   {
+    id: "ai-insights", to: "/ai-insights", icon: Sparkles, roles: ["admin", "manager", "representative"],
+    label: "תובנות AI", group: "primary",
+  },
+  {
     id: "performance", to: "/performance", icon: BarChart3, roles: ["admin", "manager", "representative"],
     label: "ביצועים", roleLabel: { representative: "הביצועים שלי" }, group: "primary",
   },
