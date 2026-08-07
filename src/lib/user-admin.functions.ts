@@ -139,6 +139,14 @@ export const listUsers = createServerFn({ method: "GET" })
       repByUser.set(r.user_id, r);
     }
 
+    // Actual managerial ownership per user — teams.manager_id, the field every
+    // manager scope keys on, never profiles.team_id (which is mere membership).
+    const managedTeamsByUser = new Map<string, string[]>();
+    for (const t of (teams ?? []) as { id: string; manager_id: string | null }[]) {
+      if (!t.manager_id) continue;
+      managedTeamsByUser.set(t.manager_id, [...(managedTeamsByUser.get(t.manager_id) ?? []), t.id]);
+    }
+
     return {
       users: (profiles ?? []).map((p) => {
         const roles = rolesByUser.get(p.id) ?? [];
@@ -147,6 +155,7 @@ export const listUsers = createServerFn({ method: "GET" })
           roles,
           team_id: p.team_id,
           representative_link: rep ? { active: rep.active, team_id: rep.team_id } : null,
+          managed_team_ids: managedTeamsByUser.get(p.id) ?? [],
         });
         return {
           ...p,

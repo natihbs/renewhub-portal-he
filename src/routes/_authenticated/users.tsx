@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -274,8 +274,15 @@ function UsersPage() {
                           <TableHead className="text-right cursor-pointer" onClick={() => setSortBy("email")}>אימייל</TableHead>
                           <TableHead className="text-right cursor-pointer" onClick={() => setSortBy("health")}>בריאות</TableHead>
                           <TableHead className="text-right cursor-pointer" onClick={() => setSortBy("role")}>תפקיד</TableHead>
-                          <TableHead className="text-right hidden md:table-cell cursor-pointer" onClick={() => setSortBy("team")}>צוות</TableHead>
-                          <TableHead className="text-right hidden lg:table-cell">מנהל</TableHead>
+                          <TableHead
+                            className="text-right hidden md:table-cell cursor-pointer"
+                            onClick={() => setSortBy("team")}
+                          >
+                            צוות (פרופיל)
+                          </TableHead>
+                          <TableHead className="text-right hidden lg:table-cell">
+                            מנהל אחראי
+                          </TableHead>
                           <TableHead className="text-right cursor-pointer" onClick={() => setSortBy("status")}>סטטוס</TableHead>
                           <TableHead className="text-right hidden sm:table-cell cursor-pointer" onClick={() => setSortBy("last_login")}>כניסה אחרונה</TableHead>
                           <TableHead className="text-right hidden lg:table-cell cursor-pointer" onClick={() => setSortBy("created")}>נוצר</TableHead>
@@ -581,7 +588,7 @@ function UserDetailsDrawer({
             <div className="grid grid-cols-2 gap-3">
               <Stat label="תפקיד" value={d.user.roles.length ? d.user.roles.map((r: AppRole) => roleLabel[r]).join(", ") : "ללא"} />
               <Stat label="סטטוס חשבון" value={d.user.active ? "פעיל" : "מושבת"} />
-              <Stat label="צוות" value={d.user.team_name ?? "—"} />
+              <Stat label="צוות (שיוך פרופיל)" value={d.user.team_name ?? "—"} />
               <Stat label="נוצר בתאריך" value={formatDateIL(d.user.created_at)} />
             </div>
 
@@ -620,12 +627,32 @@ function UserDetailsDrawer({
               )}
             </div>
 
-            {d.manages_teams.length > 0 && (
+            {d.manages_teams.length > 0 ? (
               <div className="space-y-2">
-                <Label>מנהל את הצוותים</Label>
+                <Label>מנהל הצוות של</Label>
                 <div className="text-sm">{d.manages_teams.map((t: { name: string }) => t.name).join(", ")}</div>
               </div>
-            )}
+            ) : d.user.roles?.includes("manager") && !d.user.roles?.includes("admin") ? (
+              // The חן עטר state: role says manager, profile may even point at a
+              // team, but no teams.manager_id names this user — so every manager
+              // scope in the app resolves to nothing for them. Say it, and route
+              // the fix through the explicit Teams-page action (never silent).
+              <div className="space-y-2 rounded-lg border border-primary/25 bg-primary/5 p-3">
+                <div className="text-sm font-semibold text-primary">
+                  אינו מוגדר כמנהל של אף צוות
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  שיוך צוות בפרופיל אינו הופך משתמש למנהל הצוות. כדי שהמשתמש ינהל צוות בפועל יש
+                  לבחור אותו כ"מנהל הצוות" בעריכת הצוות.
+                </p>
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/teams">
+                    <UsersRound className="ms-1 h-4 w-4" />
+                    שיוך כמנהל צוות בעמוד הצוותים
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <Label>רשומות בבעלות המשתמש</Label>
@@ -672,8 +699,24 @@ function ChangeTeamDialog({
         <DialogHeader><DialogTitle>שינוי צוות</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="text-sm text-muted-foreground">משתמש: <span className="text-foreground font-medium">{user.full_name || user.email}</span></div>
+          {user.roles.includes("manager") && !user.roles.includes("admin") && (
+            <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 space-y-2">
+              <p className="text-xs">
+                למשתמש בתפקיד מנהל צוות, שיוך הצוות כאן הוא <b>שיוך פרופיל בלבד</b> ואינו קובע מי מנהל
+                את הצוות. כדי שהמשתמש ינהל צוות בפועל יש לבחור אותו כ"מנהל הצוות" בעריכת הצוות
+                בעמוד הצוותים.
+              </p>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/teams">מעבר לעמוד הצוותים</Link>
+              </Button>
+            </div>
+          )}
           <div className="space-y-1">
-            <Label>צוות</Label>
+            <Label>
+              {user.roles.includes("manager") && !user.roles.includes("admin")
+                ? "צוות (שיוך פרופיל בלבד)"
+                : "צוות"}
+            </Label>
             <Select value={teamId} onValueChange={setTeamId}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -1000,6 +1043,12 @@ function CreateUserDialog({ teams, managers, onDone }: { teams: Team[]; managers
                     {teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {role === "manager" && (
+                  <p className="text-xs text-muted-foreground">
+                    שיוך פרופיל בלבד — הגדרת המשתמש כמנהל הצוות בפועל מתבצעת בעמוד הצוותים ("מנהל
+                    הצוות").
+                  </p>
+                )}
               </div>
               {role !== "admin" && (
                 <div className="space-y-1 col-span-2">
@@ -1141,6 +1190,12 @@ function EditUserDialog({
                   {teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {role === "manager" && (
+                <p className="text-xs text-muted-foreground">
+                  שיוך פרופיל בלבד — הגדרת המשתמש כמנהל הצוות בפועל מתבצעת בעמוד הצוותים ("מנהל
+                  הצוות").
+                </p>
+              )}
             </div>
             {role !== "admin" && (
               <div className="space-y-1 col-span-2">

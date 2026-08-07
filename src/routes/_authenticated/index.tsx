@@ -35,7 +35,8 @@ import { listUsers } from "@/lib/user-admin.functions";
 import { useRealAppRole, useResolvedRole } from "@/lib/use-resolved-role";
 import type { AppRole } from "@/lib/navigation-config";
 import {
-  repsNeedingSupport, viewState, canAssertAbsence, type SupportInput, type ViewState,
+  repsNeedingSupport, viewState, canAssertAbsence, computeStructuralGaps,
+  type SupportInput, type ViewState,
 } from "@/lib/dashboard-domain";
 import { listDashboardActivity, type DashboardActivityItem } from "@/lib/dashboard.functions";
 import {
@@ -299,7 +300,7 @@ function AdminHome() {
  */
 function SystemGapsCard({ reps, teams, teamsLoading, teamsError }: {
   reps: Rep[];
-  teams: { id: string; name: string; active: boolean }[];
+  teams: { id: string; name: string; active: boolean; managerId: string | null }[];
   teamsLoading: boolean;
   teamsError: boolean;
 }) {
@@ -310,13 +311,10 @@ function SystemGapsCard({ reps, teams, teamsLoading, teamsError }: {
 
   const items = useMemo(() => {
     if (!ready) return [];
-    const activeTeams = teams.filter((t) => t.active);
-    const teamsWithoutReps = activeTeams.filter((t) => !reps.some((r) => r.teamId === t.id));
-    const repsWithoutTeam = reps.filter((r) => !r.teamId);
-    return [
-      { label: "צוותים פעילים ללא נציגים", count: teamsWithoutReps.length, href: "/teams" as const },
-      { label: "נציגים ללא צוות משויך", count: repsWithoutTeam.length, href: "/representatives" as const },
-    ].filter((x) => x.count > 0);
+    return computeStructuralGaps(
+      teams.map((t) => ({ id: t.id, name: t.name, active: t.active, managerId: t.managerId })),
+      reps.map((r) => ({ teamId: r.teamId })),
+    );
   }, [ready, teams, reps]);
 
   return (
@@ -336,7 +334,7 @@ function SystemGapsCard({ reps, teams, teamsLoading, teamsError }: {
         ) : isError ? (
           <ErrorState message="לא ניתן לבדוק את תקינות ההגדרות — חלק מהנתונים לא נטענו." />
         ) : items.length === 0 ? (
-          <EmptyState icon={ShieldCheck} title="אין פערים מבניים פתוחים" description="כל הצוותים הפעילים מאוישים וכל הנציגים משויכים לצוות." compact />
+          <EmptyState icon={ShieldCheck} title="אין פערים מבניים פתוחים" description="לכל צוות מאויש מוגדר מנהל צוות, כל הצוותים הפעילים מאוישים וכל הנציגים משויכים לצוות." compact />
         ) : (
           <ul className="space-y-2">
             {items.map((it) => (
