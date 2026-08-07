@@ -195,3 +195,38 @@ export function applyAdminView(realRole: AppRole, viewMode: AdminViewMode): AppR
   if (realRole !== "admin") return realRole;
   return viewMode;
 }
+
+/**
+ * How the top-bar workspace selector should behave for a given real role,
+ * view mode and route. One pure rule so the switcher and its tests cannot
+ * drift apart.
+ *
+ * - "existing":  render exactly as before this rule existed. This is the
+ *   unconditional answer for every non-admin — a real manager's or
+ *   representative's selector behavior never changes.
+ * - "hidden":    the selector is meaningless here, render nothing. Admin's
+ *   system console ("/") ignores workspace entirely — a visible selector
+ *   would imply the page changes by team when it does not. Representative
+ *   view has no scope concept at all (a real representative never has a
+ *   selector), so admin-as-representative hides it too.
+ * - "teams-only": admin-as-manager. A manager inspects one team; "כלל
+ *   הארגון" is not a scope any real manager has, and offering it would
+ *   render a fake manager view. Only team options are offered.
+ *
+ * Admin's OTHER system pages (e.g. /users, /representatives) keep the full
+ * selector — those pages genuinely narrow by workspace and that narrowing is
+ * a real filter, not an implication.
+ */
+export type WorkspaceSelectorBehavior = "existing" | "hidden" | "teams-only";
+
+export function workspaceSelectorBehavior(params: {
+  realRole: AppRole;
+  viewRole: AppRole;
+  pathname: string;
+}): WorkspaceSelectorBehavior {
+  const { realRole, viewRole, pathname } = params;
+  if (realRole !== "admin") return "existing";
+  if (viewRole === "representative") return "hidden";
+  if (viewRole === "manager") return "teams-only";
+  return pathname === "/" ? "hidden" : "existing";
+}

@@ -59,8 +59,25 @@ function HomePage() {
   const role = useResolvedRole();
   const realRole = useRealAppRole();
   const { state } = useApp();
+  const { workspace } = useWorkspace();
   if (role === "admin") return <AdminHome />;
-  if (role === "manager") return <ManagerHome />;
+  if (role === "manager") {
+    // An admin lands in manager view still carrying their org-wide workspace —
+    // a scope no real manager has. Rendering ManagerHome over the whole
+    // organization would present a fake manager view, so ask for a team
+    // instead. Only for real admins: a real manager's workspace is always one
+    // of their own teams and this branch never triggers for them.
+    if (realRole === "admin" && workspace.type !== "team") {
+      return (
+        <EmptyState
+          icon={UsersRound}
+          title="בחרו צוות לתצוגה"
+          description="תצוגת מנהל צוות מציגה צוות אחד. בחרו צוות בבורר שבסרגל העליון כדי לצפות בו כפי שמנהל הצוות רואה אותו."
+        />
+      );
+    }
+    return <ManagerHome />;
+  }
   // An admin viewing the representative presentation has no representative of
   // their own — RepresentativeHome would render a wall of per-rep cards each
   // explaining its own emptiness. Say the real situation once, honestly, and

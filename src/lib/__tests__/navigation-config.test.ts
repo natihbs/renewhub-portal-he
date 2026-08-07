@@ -10,6 +10,7 @@ import {
   applyAdminView,
   ADMIN_VIEW_OPTIONS,
   ADMIN_VIEW_BANNER,
+  workspaceSelectorBehavior,
 } from "@/lib/navigation-config";
 
 describe("resolveAppRole", () => {
@@ -232,5 +233,60 @@ describe("role labels in AppShell", () => {
     expect(src).toContain('manager: "ניהול הצוות"');
     expect(src).toContain('representative: "ניווט"');
     expect(src).not.toContain("ניהול ארגוני");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workspace selector by admin view mode — one pure rule (see its doc block).
+// The invariant that matters most: for every non-admin the answer is always
+// "existing", so a real manager's or representative's selector cannot change.
+// ---------------------------------------------------------------------------
+describe("workspaceSelectorBehavior", () => {
+  it("hides the selector on the admin system console — the page is not scoped by team", () => {
+    expect(workspaceSelectorBehavior({ realRole: "admin", viewRole: "admin", pathname: "/" })).toBe(
+      "hidden",
+    );
+  });
+
+  it("keeps the full selector on admin system pages that genuinely narrow by workspace", () => {
+    for (const pathname of ["/users", "/representatives", "/teams", "/performance"]) {
+      expect(workspaceSelectorBehavior({ realRole: "admin", viewRole: "admin", pathname })).toBe(
+        "existing",
+      );
+    }
+  });
+
+  it("offers teams only in admin-as-manager view — כלל הארגון is not a manager scope", () => {
+    for (const pathname of ["/", "/performance", "/targets"]) {
+      expect(workspaceSelectorBehavior({ realRole: "admin", viewRole: "manager", pathname })).toBe(
+        "teams-only",
+      );
+    }
+  });
+
+  it("hides the selector entirely in admin-as-representative view", () => {
+    for (const pathname of ["/", "/performance", "/feedback"]) {
+      expect(
+        workspaceSelectorBehavior({ realRole: "admin", viewRole: "representative", pathname }),
+      ).toBe("hidden");
+    }
+  });
+
+  it("never changes anything for a real manager, whatever the stored view mode claims", () => {
+    for (const viewRole of ["admin", "manager", "representative"] as const) {
+      for (const pathname of ["/", "/performance"]) {
+        expect(workspaceSelectorBehavior({ realRole: "manager", viewRole, pathname })).toBe(
+          "existing",
+        );
+      }
+    }
+  });
+
+  it("never changes anything for a real representative", () => {
+    for (const viewRole of ["admin", "manager", "representative"] as const) {
+      expect(
+        workspaceSelectorBehavior({ realRole: "representative", viewRole, pathname: "/" }),
+      ).toBe("existing");
+    }
   });
 });
