@@ -419,3 +419,120 @@ export const getUnworkedAtDeadline = createServerFn({ method: "GET" })
       computedAt: r.computed_at,
     }));
   });
+
+// ---------------------------------------------------------------------------
+// MVP runtime reads
+// ---------------------------------------------------------------------------
+
+/**
+ * Today's coverage for every scope the actor manages, plus the roll-up.
+ *
+ * The single figure a team manager opens the product for. "Today" means items
+ * DUE today — coverage is deadline-based, so this answers "can today's book be
+ * finished", not "what did we do today", and those are different questions
+ * with different answers.
+ *
+ * Computed live rather than read from facts, deliberately: today's facts are
+ * stale the moment an operator records anything, and a manager acting on a
+ * morning figure needs it to move when the team does.
+ */
+export const getTeamTodayCoverage = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { workTypeKey?: string; onDate?: string } | undefined) => ({
+    workTypeKey: data?.workTypeKey?.trim() || "renewals",
+    onDate:
+      data?.onDate && ISO_DATE.test(data.onDate)
+        ? data.onDate
+        : new Date().toISOString().slice(0, 10),
+  }))
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    const { admin } = await loadClient(ctx);
+    const orgScope: CoverageScopeRef = { scopeId: null, scopeKey: null, displayName: "סך הכול" };
+
+    const { id: workTypeId, freshness } = await resolveWorkType(admin, data.workTypeKey);
+    if (!workTypeId) {
+      return {
+        onDate: data.onDate,
+        scopes: [] as ScopeCoverage[],
+        rollup: unavailable(orgScope, data.onDate, data.onDate, "no_inventory"),
+        freshness: null,
+      };
+    }
+
+    const blocked = freshnessBlock(freshness);
+    if (blocked) {
+      return {
+        onDate: data.onDate,
+        scopes: [] as ScopeCoverage[],
+        rollup: unavailable(orgScope, data.onDate, data.onDate, blocked),
+        freshness,
+      };
+    }
+
+    const { data: rows, error } = await admin.rpc("coverage_for_actor", {
+      _person_id: ctx.userId,
+      _work_type_id: workTypeId,
+      _period_start: data.onDate,
+      _period_end: data.onDate,
+    });
+    if (error) throw new Error(error.message);
+
+    const computedAt = new Date().toISOString();
+    const scopes: ScopeCoverage[] = ((rows ?? []) as any[]).map((r) => ({
+      accountable: r.out_accountable,
+      coverage: fromComponents(
+        { scopeId: r.out_scope_id, scopeKey: r.out_scope_key, displayName: r.out_display_name },
+        data.onDate,
+        data.onDate,
+        componentsFromRow(r),
+        { computedAt, source: "live" },
+      ),
+    }));
+
+    const { result } = aggregateCoverage(
+      scopes.map((s) => s.coverage),
+      orgScope,
+      data.onDate,
+      data.onDate,
+      computedAt,
+    );
+
+    // Freshness travels WITH the figure rather than being fetched separately.
+    // A consumer that has to make a second call to learn when the book last
+    // arrived is a consumer that will forget to.
+    return { onDate: data.onDate, scopes, rollup: result, freshness };
+  });
+
+/**
+ * Recompute coverage facts for a date, by hand.
+ *
+ * Exposed under the name the UI will call, and identical in effect to
+ * `recomputeCoverageFacts` above — kept as a separate export because the MVP
+ * surfaces refer to it, and renaming a published API later costs more than
+ * carrying an alias now.
+ */
+export const refreshCoverageFacts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { asOf?: string } | undefined) => ({
+    asOf:
+      data?.asOf && ISO_DATE.test(data.asOf) ? data.asOf : new Date().toISOString().slice(0, 10),
+  }))
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    const { admin, actor } = await loadClient(ctx);
+    assertSystemCapability(actor, "system.import");
+
+    const { data: rows, error } = await admin.rpc("compute_coverage_facts_for_date", {
+      _as_of: data.asOf,
+    });
+    if (error) throw new Error(error.message);
+
+    const row = (rows ?? [])[0];
+    return {
+      asOf: data.asOf,
+      factsWritten: Number(row?.out_facts_written ?? 0),
+      scopes: Number(row?.out_scopes ?? 0),
+      durationMs: Number(row?.out_duration_ms ?? 0),
+    };
+  });

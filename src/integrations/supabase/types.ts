@@ -2013,6 +2013,56 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      record_work_item_outcome: {
+        Args: {
+          _actor_id: string | null
+          _actor_representative_id: string | null
+          _canonical_state: string
+          _correction_reason: string | null
+          _occurred_at?: string
+          _reason_code: string | null
+          _supersedes_id: string | null
+          _value_realized: number | null
+          _work_item_id: string
+        }
+        Returns: {
+          out_item_state: string
+          out_outcome_id: string
+          out_resolving: boolean
+          out_touch_count: number
+          out_work_item_id: string
+        }[]
+      }
+      next_work_items_for_representative: {
+        Args: {
+          _as_of?: string
+          _limit?: number
+          _representative_id: string
+          _work_type_id: string
+        }
+        Returns: {
+          out_business_value: number
+          out_due_at: string | null
+          out_eligible_from: string | null
+          out_external_ref: string
+          out_hours_to_due: number | null
+          out_overdue: boolean
+          out_position: number
+          out_subject_label: string | null
+          out_subject_ref: string | null
+          out_touch_count: number
+          out_work_item_id: string
+        }[]
+      }
+      refresh_coverage_for_work_item: {
+        Args: {
+          _work_item_id: string
+        }
+        Returns: {
+          out_on_date: string | null
+          out_scopes_refreshed: number
+        }[]
+      }
       compute_coverage_fact: {
         Args: {
           _as_of?: string

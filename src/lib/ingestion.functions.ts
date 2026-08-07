@@ -520,3 +520,153 @@ export const purgeIngestionStaging = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return (result ?? [])[0] ?? { out_batches_purged: 0, out_rows_purged: 0 };
   });
+
+// ---------------------------------------------------------------------------
+// Manual runner — the MVP loop
+// ---------------------------------------------------------------------------
+
+/**
+ * Run an import by hand and refresh coverage from it, in one call.
+ *
+ * This is the MVP's substitute for a scheduler, and it is deliberately a
+ * SUBSTITUTE rather than a shortcut: it drives exactly the same pipeline and
+ * the same coverage computation a worker will drive, so the thing being
+ * demonstrated next week is the thing that later runs on a timer, not a
+ * parallel path that will have to be re-proven.
+ *
+ * Two input modes, because the Menora source is not connected yet and waiting
+ * for it would leave the whole runtime loop untestable:
+ *
+ *   rows        supplied by the caller — the shape a real feed will take
+ *   synthetic   generated from the deterministic PR #2 fixture
+ *
+ * COVERAGE IS REFRESHED ONLY ON A PUBLISH. A rejected batch leaves the
+ * previous inventory in place, so recomputing coverage from it would be
+ * recomputing the same answer — and reporting a "refreshed" figure after a
+ * failed import is precisely the false reassurance the fail-closed design
+ * exists to prevent.
+ */
+export type ManualIngestionInput = {
+  sourceKey?: string;
+  rows?: IngestionRowInput[];
+  /** Generate a synthetic book instead of supplying rows. */
+  synthetic?: { itemCount: number; anchorDate?: string; seed?: number; refPrefix?: string };
+  externalBatchRef?: string | null;
+  /** Date whose coverage facts to recompute after a successful publish. */
+  coverageAsOf?: string | null;
+};
+
+export const runManualIngestion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: ManualIngestionInput | undefined) => {
+    const hasRows = Array.isArray(data?.rows) && data!.rows!.length > 0;
+    const hasSynthetic = Boolean(data?.synthetic?.itemCount);
+    if (!hasRows && !hasSynthetic) {
+      throw new Error("יש לספק שורות לקליטה או להגדיר יצירת נתונים סינתטיים");
+    }
+    if (hasRows && hasSynthetic) {
+      throw new Error("יש לבחור מקור אחד בלבד — שורות או נתונים סינתטיים");
+    }
+    return {
+      sourceKey: data?.sourceKey?.trim() || "renewals-core",
+      rows: data?.rows ?? null,
+      synthetic: hasSynthetic
+        ? {
+            itemCount: Math.min(Math.max(data!.synthetic!.itemCount, 1), 200_000),
+            anchorDate: data!.synthetic!.anchorDate ?? new Date().toISOString().slice(0, 10),
+            seed: data!.synthetic!.seed ?? 20260811,
+            refPrefix: data!.synthetic!.refPrefix ?? "POL",
+          }
+        : null,
+      externalBatchRef: data?.externalBatchRef?.trim() || null,
+      coverageAsOf: data?.coverageAsOf ?? null,
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    const admin = await requireImporter(ctx);
+
+    let rows: IngestionRowInput[];
+    if (data.rows) {
+      rows = data.rows;
+    } else {
+      // Generated from the live roster rather than from a fixed fixture org,
+      // so the synthetic book is owned by representatives that actually exist
+      // and the owner resolution in validation is exercised for real.
+      const { generateWorkItems } = await import("@/lib/ingestion-synthetic");
+      const { data: reps } = await admin
+        .from("representatives")
+        .select("external_ref, name, team_id")
+        .eq("active", true)
+        .not("external_ref", "is", null);
+
+      const roster = ((reps ?? []) as any[])
+        .filter((r) => r.external_ref)
+        .map((r) => ({
+          externalRef: r.external_ref as string,
+          name: r.name as string,
+          teamKey: r.team_id ?? "",
+        }));
+      if (roster.length === 0)
+        throw new Error("אין נציגים פעילים עם מזהה חיצוני — לא ניתן לייצר מלאי סינתטי");
+
+      rows = generateWorkItems({
+        count: data.synthetic!.itemCount,
+        org: { teams: [], representatives: roster },
+        anchorDate: data.synthetic!.anchorDate,
+        seed: data.synthetic!.seed,
+        refPrefix: data.synthetic!.refPrefix,
+      });
+    }
+
+    const run = await runIngestionPipeline(admin, {
+      sourceKey: data.sourceKey,
+      rows,
+      externalBatchRef: data.externalBatchRef,
+      triggeredBy: ctx.userId,
+      triggerKind: "manual",
+    });
+
+    if (!run.published) {
+      return {
+        ...run,
+        coverage: {
+          computed: false,
+          factsWritten: 0,
+          durationMs: 0,
+          skippedBecause: run.rejectionCode,
+        },
+      };
+    }
+
+    const asOf = data.coverageAsOf ?? new Date().toISOString().slice(0, 10);
+    const { data: covRows, error: covError } = await admin.rpc("compute_coverage_facts_for_date", {
+      _as_of: asOf,
+    });
+    if (covError) {
+      // The inventory published; only the derived figures did not. Reported
+      // rather than thrown, so the caller learns both facts instead of one.
+      return {
+        ...run,
+        coverage: {
+          computed: false,
+          factsWritten: 0,
+          durationMs: 0,
+          skippedBecause: covError.message,
+        },
+      };
+    }
+
+    const cov = (covRows ?? [])[0];
+    return {
+      ...run,
+      coverage: {
+        computed: true,
+        asOf,
+        factsWritten: Number(cov?.out_facts_written ?? 0),
+        scopes: Number(cov?.out_scopes ?? 0),
+        durationMs: Number(cov?.out_duration_ms ?? 0),
+        skippedBecause: null,
+      },
+    };
+  });
