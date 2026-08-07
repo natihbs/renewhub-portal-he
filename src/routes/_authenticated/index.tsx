@@ -45,6 +45,8 @@ import {
   UsersRound, AlertTriangle, ShieldCheck, RefreshCw, ArrowLeft, Database, Upload, Settings,
 } from "lucide-react";
 import { MorningRoutine } from "@/components/MorningRoutine";
+import { ManualPerformanceDialog } from "@/components/ManualPerformanceDialog";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import {
   DataFreshnessBar, TeamPaceCard, TeamFeedbackCard, TeamCompetitionsCard,
   MyFeedbackCard, MyCompetitionsCard, MyTasksCard,
@@ -424,9 +426,15 @@ function ManagerHome() {
         role="manager"
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link to="/performance"><TrendingUp className="ms-1 h-4 w-4" />עדכון ביצועים</Link>
-            </Button>
+            <ManualPerformanceDialog
+              sourceScreen="manager-home"
+              trigger={
+                <Button variant="outline" size="sm">
+                  <TrendingUp className="ms-1 h-4 w-4" />
+                  עדכון ביצועים ידני
+                </Button>
+              }
+            />
             <Button asChild variant="outline" size="sm">
               <Link to="/feedback"><Headphones className="ms-1 h-4 w-4" />הוספת האזנה</Link>
             </Button>
@@ -440,9 +448,13 @@ function ManagerHome() {
         }
       />
 
+      {/* §Simplification (progressive disclosure): the first screen answers
+          only the manager's four operating questions — how fresh is the data,
+          where does the team stand against this month's target, who is off
+          pace, and what do I do next (header quick actions). Everything else
+          stays one click away in collapsed sections below; nothing was
+          removed. */}
       <DataFreshnessBar teamId={workspaceTeamId} />
-
-      <MorningRoutine />
 
       {workspace.type === "team" && (
         <TeamCard
@@ -457,39 +469,44 @@ function ManagerHome() {
         />
       )}
 
-      <InsightsCard
-        reps={scopedReps}
-        repGoalsByRepId={repGoals.goalsByRepId}
-        isLoading={state.repsLoading || repGoals.isLoading}
-        isError={!!state.repsError || repGoals.isError}
-      />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TeamPaceCard
-          reps={scopedReps}
-          goalsByRepId={repGoals.goalsByRepId}
-          isLoading={state.repsLoading || repGoals.isLoading}
-          isError={!!state.repsError || repGoals.isError}
-          className="lg:col-span-2"
-        />
-        <TeamCompetitionsCard reps={scopedReps} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TeamFeedbackCard repIds={scopedRepIds} reps={scopedReps} className="lg:col-span-2" />
-        <AnnouncementsCard announcements={announcements} isStaff />
-      </div>
-
-      <TopPerformersCard
+      <TeamPaceCard
         reps={scopedReps}
         goalsByRepId={repGoals.goalsByRepId}
         isLoading={state.repsLoading || repGoals.isLoading}
         isError={!!state.repsError || repGoals.isError}
       />
 
-      <RecentActivityCard />
+      <CollapsibleSection title="שגרת בוקר מלאה">
+        <MorningRoutine />
+      </CollapsibleSection>
 
-      <ContentShortcutsRow articleCount={state.articles.length} activeCompetition={competitions.find((c) => c.active)?.name ?? null} />
+      <CollapsibleSection title="תובנות ומצטיינים">
+        <InsightsCard
+          reps={scopedReps}
+          repGoalsByRepId={repGoals.goalsByRepId}
+          isLoading={state.repsLoading || repGoals.isLoading}
+          isError={!!state.repsError || repGoals.isError}
+        />
+        <TopPerformersCard
+          reps={scopedReps}
+          goalsByRepId={repGoals.goalsByRepId}
+          isLoading={state.repsLoading || repGoals.isLoading}
+          isError={!!state.repsError || repGoals.isError}
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="משוב, תחרויות והודעות">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <TeamFeedbackCard repIds={scopedRepIds} reps={scopedReps} className="lg:col-span-2" />
+          <TeamCompetitionsCard reps={scopedReps} />
+        </div>
+        <AnnouncementsCard announcements={announcements} isStaff />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="פעילות אחרונה וקיצורי תוכן">
+        <RecentActivityCard />
+        <ContentShortcutsRow articleCount={state.articles.length} activeCompetition={competitions.find((c) => c.active)?.name ?? null} />
+      </CollapsibleSection>
     </div>
   );
 }

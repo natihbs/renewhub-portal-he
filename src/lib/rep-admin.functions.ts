@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { MANUAL_UPDATE_REASONS } from "@/lib/performance-domain";
 import { assertTeamIsActiveForNewAssignment } from "@/lib/team-assignment-guards";
 
 type Ctx = { supabase: any; userId: string; claims: any };
@@ -1008,6 +1009,9 @@ export type RepMetricsInput = {
   source?: RepMetricsEditSource;
   /** Which screen issued the edit — recorded in the audit entry. */
   source_screen?: string;
+  /** Manual-entry metadata — audited verbatim; never stored on the row. */
+  manual_reason?: string;
+  manual_note?: string;
 };
 
 /**
@@ -1093,6 +1097,15 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
       out.source = data.source;
     }
     if (data.source_screen !== undefined) out.source_screen = String(data.source_screen).slice(0, 60);
+    if (data.manual_reason !== undefined) {
+      if (!MANUAL_UPDATE_REASONS.some((r) => r.value === data.manual_reason)) {
+        throw new Error("סיבת עדכון לא חוקית");
+      }
+      out.manual_reason = data.manual_reason;
+    }
+    if (data.manual_note !== undefined) {
+      out.manual_note = String(data.manual_note).trim().slice(0, 300) || undefined;
+    }
     return out;
   })
   .handler(async ({ data, context }) => {
@@ -1166,6 +1179,12 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
       rep_id: data.rep_id,
       source,
       source_screen: data.source_screen ?? null,
+      // Manual-entry context (עדכון ביצועים ידני): why the imported figure was
+      // overridden, in the manager's words, plus the exact numeric delta.
+      manual_reason: data.manual_reason ?? null,
+      manual_note: data.manual_note ?? null,
+      current_result_delta:
+        data.current_result !== undefined ? data.current_result - before.current_result : null,
       representative_was_active: before.active,
       before: {
         name: before.name, team_id: before.team_id,

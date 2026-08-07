@@ -8,6 +8,8 @@ import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
 import { downloadCsv } from "@/lib/csv-export";
 import { createRepresentative, updateRepresentativeMetrics } from "@/lib/rep-admin.functions";
+import { ManualPerformanceDialog } from "@/components/ManualPerformanceDialog";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import type { Rep } from "@/lib/seed";
 import type { Feedback } from "@/lib/feedback-domain";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
+  PenLine,
   Pencil, Plus, Search,
   Users, CheckCircle2, AlertTriangle, Target, Gauge, LineChart as LineChartIcon,
   FileSpreadsheet, Printer, Headphones, StickyNote, Lightbulb,
@@ -29,6 +32,7 @@ import {
 } from "lucide-react";
 import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
 import {
+  STALE_DATA_HINT,
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
   PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL,
   type KpiProfile, type Tone, type PaceInfo,
@@ -317,7 +321,18 @@ function PerformancePage() {
               <Printer className="ms-1 h-4 w-4" />הדפסה / שמירה כ-PDF
             </Button>
             <ManagerOnly>
-              <RepFormDialog trigger={<Button size="sm"><Plus className="ms-1 h-4 w-4" />הוספת נציג</Button>} />
+              <RepFormDialog trigger={<Button variant="outline" size="sm"><Plus className="ms-1 h-4 w-4" />הוספת נציג</Button>} />
+            </ManagerOnly>
+            <ManagerOnly>
+              <ManualPerformanceDialog
+                sourceScreen="performance-header"
+                trigger={
+                  <Button size="sm">
+                    <PenLine className="ms-1 h-4 w-4" />
+                    עדכון ביצועים ידני
+                  </Button>
+                }
+              />
             </ManagerOnly>
           </div>
         }
@@ -362,110 +377,123 @@ function PerformancePage() {
         </div>
       )}
 
-      {/* Renewal-specific KPIs — only for a renewals-profile team, never mixed into
-          the universal table. Team-level aggregates, so manager/admin only —
-          a rep never has a workspace team scope (always "all"), and the
-          per-team breakdown below is explicitly cross-team data. */}
-      {isManager && selectedRenewal && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              מדדי חידושים · {teamOptions.find((t) => t.teamId === teamFilter)?.teamName}
-              <Badge variant="secondary" className="bg-primary/10 text-primary">{KPI_PROFILE_LABEL.renewals}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <RenewalStatRow totals={selectedRenewal.totals} rate={selectedRenewal.rate} />
-          </CardContent>
-        </Card>
-      )}
-      {isManager && teamFilter === "all" && renewalsByTeam.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">חידושים לפי צוות</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              מוצג בנפרד מהטבלה הכללית — אחוז חידוש קיים רק לצוותים עם פרופיל "{KPI_PROFILE_LABEL.renewals}" ונתוני חידוש אמיתיים.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {renewalsByTeam.map((t) => (
-              <div key={t.teamId} className="rounded-xl border p-3">
-                <div className="font-semibold text-sm mb-2">{t.teamName}</div>
-                <RenewalStatRow totals={t.totals} rate={t.rate} />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Insights + Coaching — comparative/aggregate by nature (who leads, who
-          needs coaching relative to the rest), so manager/admin only. */}
+      {/* §Simplification: the table is the work area. The renewal context
+          cards and management insights are real but secondary — collapsed by
+          default so the first screen reads: summary chips, then the table. */}
       {isManager && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2 card-interactive">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="h-4 w-4 text-primary" />תובנות ניהול
-            </CardTitle>
-            <Badge variant="outline" className="text-xs">מבוסס נתונים נוכחיים</Badge>
-          </CardHeader>
-          <CardContent>
-            {insights.length === 0 ? (
-              <EmptyState icon={Lightbulb} title="עדיין אין תובנות" description="ברגע שיהיו נתוני ביצוע יופיעו כאן תובנות אוטומטיות." compact />
-            ) : (
-              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {insights.map((t, i) => (
-                  <li key={i} className="flex items-start gap-2 rounded-xl border bg-card p-3 text-sm">
-                    <Lightbulb className="h-4 w-4 mt-0.5 text-primary shrink-0" />
-                    <span className="leading-relaxed">{t}</span>
-                  </li>
+        <CollapsibleSection title="הקשר ותובנות ניהול">
+          {/* Renewal-specific KPIs — only for a renewals-profile team, never mixed into
+              the universal table. Team-level aggregates, so manager/admin only —
+              a rep never has a workspace team scope (always "all"), and the
+              per-team breakdown below is explicitly cross-team data. */}
+          {isManager && selectedRenewal && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  מדדי חידושים · {teamOptions.find((t) => t.teamId === teamFilter)?.teamName}
+                  <Badge variant="secondary" className="bg-primary/10 text-primary">{KPI_PROFILE_LABEL.renewals}</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RenewalStatRow totals={selectedRenewal.totals} rate={selectedRenewal.rate} />
+              </CardContent>
+            </Card>
+          )}
+          {isManager && teamFilter === "all" && renewalsByTeam.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">חידושים לפי צוות</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  מוצג בנפרד מהטבלה הכללית — אחוז חידוש קיים רק לצוותים עם פרופיל "{KPI_PROFILE_LABEL.renewals}" ונתוני חידוש אמיתיים.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {renewalsByTeam.map((t) => (
+                  <div key={t.teamId} className="rounded-xl border p-3">
+                    <div className="font-semibold text-sm mb-2">{t.teamName}</div>
+                    <RenewalStatRow totals={t.totals} rate={t.rate} />
+                  </div>
                 ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          )}
 
-        <Card className="card-interactive">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="h-4 w-4 text-primary" />סדר עדיפות לליווי
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {coaching.length === 0 ? (
-              <EmptyState icon={CheckCircle2} title="כל הנציגים בקצב או מעליו" description="אין כרגע נציגים הזקוקים לליווי מיוחד." compact />
-            ) : (
-              coaching.map((e, i) => {
-                const priority = i < 2 ? "high" : i < 4 ? "medium" : "low";
-                return (
-                  <button
-                    key={e.rep.id}
-                    onClick={() => openWorkspace(e.rep.id)}
-                    className="w-full flex items-center gap-3 rounded-xl border p-2.5 text-start hover:bg-accent/40 transition-colors"
-                  >
-                    <span className={cn(
-                      "grid h-8 w-8 place-items-center rounded-lg text-xs font-bold shrink-0",
-                      priority === "high" ? "bg-primary/15 text-primary"
-                        : priority === "medium" ? "bg-[color:var(--warning)]/20 text-warning-foreground"
-                        : "bg-muted text-muted-foreground"
-                    )}>{i + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-semibold text-sm truncate">{e.rep.name}</div>
-                        <span className="text-xs text-muted-foreground">{formatPct(e.pct)}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {e.rep.teamName} · פער {e.gap > 0 ? "+" : ""}{formatNum(e.gap)}
-                      </div>
-                    </div>
-                    <PriorityBadge level={priority} />
-                  </button>
-                );
-              })
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          {/* Insights + Coaching — comparative/aggregate by nature (who leads, who
+              needs coaching relative to the rest), so manager/admin only. */}
+          {isManager && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <Card className="lg:col-span-2 card-interactive">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkles className="h-4 w-4 text-primary" />תובנות ניהול
+                </CardTitle>
+                <Badge variant="outline" className="text-xs">מבוסס נתונים נוכחיים</Badge>
+              </CardHeader>
+              <CardContent>
+                {insights.length === 0 ? (
+                  <EmptyState icon={Lightbulb} title="עדיין אין תובנות" description="ברגע שיהיו נתוני ביצוע יופיעו כאן תובנות אוטומטיות." compact />
+                ) : (
+                  <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {insights.map((t, i) => (
+                      <li key={i} className="flex items-start gap-2 rounded-xl border bg-card p-3 text-sm">
+                        <Lightbulb className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                        <span className="leading-relaxed">{t}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="card-interactive">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <AlertTriangle className="h-4 w-4 text-primary" />סדר עדיפות לליווי
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {coaching.length === 0 ? (
+                  <EmptyState icon={CheckCircle2} title="כל הנציגים בקצב או מעליו" description="אין כרגע נציגים הזקוקים לליווי מיוחד." compact />
+                ) : (
+                  coaching.map((e, i) => {
+                    const priority = i < 2 ? "high" : i < 4 ? "medium" : "low";
+                    return (
+                      <button
+                        key={e.rep.id}
+                        onClick={() => openWorkspace(e.rep.id)}
+                        className="w-full flex items-center gap-3 rounded-xl border p-2.5 text-start hover:bg-accent/40 transition-colors"
+                      >
+                        <span className={cn(
+                          "grid h-8 w-8 place-items-center rounded-lg text-xs font-bold shrink-0",
+                          priority === "high" ? "bg-primary/15 text-primary"
+                            : priority === "medium" ? "bg-[color:var(--warning)]/20 text-warning-foreground"
+                            : "bg-muted text-muted-foreground"
+                        )}>{i + 1}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-semibold text-sm truncate">{e.rep.name}</div>
+                            <span className="text-xs text-muted-foreground">{formatPct(e.pct)}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {e.rep.teamName} · פער {e.gap > 0 ? "+" : ""}{formatNum(e.gap)}
+                          </div>
+                        </div>
+                        <PriorityBadge level={priority} />
+                      </button>
+                    );
+                  })
+                )}
+              </CardContent>
+            </Card>
+          </div>
+          )}
+        </CollapsibleSection>
+      )}
+
+      {isManager && (
+        <p className="text-xs text-muted-foreground" dir="rtl">
+          {STALE_DATA_HINT}
+        </p>
       )}
 
       {/* Filters + table — the filter/search/sort controls only make sense across
@@ -754,8 +782,19 @@ function RowQuickActions({ rep, onOpen }: { rep: Rep; onOpen: () => void }) {
   return (
     <div className="inline-flex items-center gap-0.5">
       <ManagerOnly>
+        <ManualPerformanceDialog
+          rep={rep}
+          sourceScreen="performance-row"
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="עדכון ביצועים ידני" title="עדכון ביצועים ידני">
+              <PenLine className="h-4 w-4" />
+            </Button>
+          }
+        />
+      </ManagerOnly>
+      <ManagerOnly>
         <RepFormDialog rep={rep} trigger={
-          <Button variant="ghost" size="icon" aria-label="עריכה" title="עריכה"><Pencil className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" aria-label="עריכה" title="עריכת פרטי נציג"><Pencil className="h-4 w-4" /></Button>
         } />
       </ManagerOnly>
       {/* §P0-6 hardening: these used to fire a fake-success toast and record

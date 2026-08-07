@@ -192,3 +192,26 @@ export const KPI_PROFILE_BADGE_CLASS: Record<KpiProfile, string> = {
   generic_sales: "bg-accent text-foreground",
   renewals: "bg-primary/10 text-primary",
 };
+
+// ---------------------------------------------------------------------------
+// Manual performance entry — "עדכון ביצועים ידני"
+//
+// The manager fallback for when imported (Qlik) data is stale, delayed or
+// wrong. This is a performance NUMBER correction only: it never touches
+// targets (those live on /targets), and it is not call capture, customer
+// handling or a work queue of any kind.
+// ---------------------------------------------------------------------------
+
+/** Why the manager is overriding the imported figure. Audited verbatim. */
+export const MANUAL_UPDATE_REASONS: { value: string; label: string }[] = [
+  { value: "import_stale", label: "ייבוא / Qlik לא התעדכן" },
+  { value: "data_correction", label: "תיקון נתון שגוי" },
+  { value: "temporary_control", label: "עדכון זמני לבקרה" },
+  { value: "other", label: "אחר" },
+];
+
+export const MANUAL_UPDATE_SUCCESS_MESSAGE = "הביצוע עודכן ידנית";
+
+/** Shown near the performance table so the fallback is discoverable exactly when it is needed. */
+export const STALE_DATA_HINT =
+  "הנתונים מבוססים על הייבוא האחרון. אם הנתונים לא התעדכנו, ניתן להשתמש בעדכון ביצועים ידני.";
