@@ -1,7 +1,17 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Upload, MessageSquare,
-  Users2, UsersRound, Target,
+  Home,
+  BarChart3,
+  Trophy,
+  BookOpen,
+  Headphones,
+  Settings,
+  Upload,
+  MessageSquare,
+  Users2,
+  UsersRound,
+  Target,
+  ListChecks,
 } from "lucide-react";
 
 // Single source of truth for role-aware navigation. AppShell (sidebar +
@@ -64,37 +74,119 @@ export type QuickAction = {
  * palette's navigation group.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { id: "home", to: "/", icon: Home, roles: ["admin", "manager", "representative"], label: "דף הבית", group: "primary" },
   {
-    id: "performance", to: "/performance", icon: BarChart3, roles: ["admin", "manager", "representative"],
-    label: "ביצועים", roleLabel: { representative: "הביצועים שלי" }, group: "primary",
+    id: "home",
+    to: "/",
+    icon: Home,
+    roles: ["admin", "manager", "representative"],
+    label: "דף הבית",
+    group: "primary",
   },
   {
-    id: "targets", to: "/targets", icon: Target, roles: ["admin", "manager", "representative"],
-    label: "יעדים", roleLabel: { representative: "היעד שלי" }, group: "primary",
+    // The operator's working surface. Placed second, immediately after home,
+    // because for a representative it is the only screen that answers "what
+    // do I do now" — everything below it is reference.
+    //
+    // Admins see it so the flow can be demonstrated and QA'd without a
+    // representative account; managers do not, because they have no work
+    // list of their own and an empty screen in their nav is worse than no
+    // entry at all. A manager's own surface is a later PR.
+    id: "worklist",
+    to: "/worklist",
+    icon: ListChecks,
+    roles: ["admin", "representative"],
+    label: "רשימת העבודה",
+    group: "primary",
   },
   {
-    id: "feedback", to: "/feedback", icon: Headphones, roles: ["admin", "manager", "representative"],
-    label: "האזנות ומשוב", roleLabel: { representative: "המשוב שלי" }, group: "primary",
+    id: "performance",
+    to: "/performance",
+    icon: BarChart3,
+    roles: ["admin", "manager", "representative"],
+    label: "ביצועים",
+    roleLabel: { representative: "הביצועים שלי" },
+    group: "primary",
   },
-  { id: "competitions", to: "/competitions", icon: Trophy, roles: ["admin", "manager", "representative"], label: "תחרויות", group: "primary" },
-  { id: "knowledge", to: "/knowledge", icon: BookOpen, roles: ["admin", "manager", "representative"], label: "מרכז ידע", group: "primary" },
+  {
+    id: "targets",
+    to: "/targets",
+    icon: Target,
+    roles: ["admin", "manager", "representative"],
+    label: "יעדים",
+    roleLabel: { representative: "היעד שלי" },
+    group: "primary",
+  },
+  {
+    id: "feedback",
+    to: "/feedback",
+    icon: Headphones,
+    roles: ["admin", "manager", "representative"],
+    label: "האזנות ומשוב",
+    roleLabel: { representative: "המשוב שלי" },
+    group: "primary",
+  },
+  {
+    id: "competitions",
+    to: "/competitions",
+    icon: Trophy,
+    roles: ["admin", "manager", "representative"],
+    label: "תחרויות",
+    group: "primary",
+  },
+  {
+    id: "knowledge",
+    to: "/knowledge",
+    icon: BookOpen,
+    roles: ["admin", "manager", "representative"],
+    label: "מרכז ידע",
+    group: "primary",
+  },
 
-  { id: "representatives", to: "/representatives", icon: Users2, roles: ["admin", "manager"], label: "ניהול נציגים", group: "management" },
-  { id: "communications", to: "/communications", icon: MessageSquare, roles: ["admin", "manager"], label: "מרכז תקשורת", group: "management" },
   {
-    id: "teams", to: "/teams", icon: UsersRound, roles: ["admin", "manager"], label: "ניהול צוותים",
+    id: "representatives",
+    to: "/representatives",
+    icon: Users2,
+    roles: ["admin", "manager"],
+    label: "ניהול נציגים",
+    group: "management",
+  },
+  {
+    id: "communications",
+    to: "/communications",
+    icon: MessageSquare,
+    roles: ["admin", "manager"],
+    label: "מרכז תקשורת",
+    group: "management",
+  },
+  {
+    id: "teams",
+    to: "/teams",
+    icon: UsersRound,
+    roles: ["admin", "manager"],
+    label: "ניהול צוותים",
     // A manager only ever sees their own team(s) here (RLS-scoped read on
     // teams; getTeamDetails re-checks per team_id too) and the page itself
     // renders every write control read-only for them (canManage === isAdmin
     // server-side) — so this is a real, safe destination for a manager, not
     // just a label change. "Their own team" per the correction, not the
     // generic admin label.
-    roleLabel: { manager: "הצוות שלי" }, group: "management",
+    roleLabel: { manager: "הצוות שלי" },
+    group: "management",
   },
-  { id: "users", to: "/users", icon: Users2, roles: ["admin"], label: "ניהול משתמשים", group: "management" },
   {
-    id: "data-import", to: "/data-import", icon: Upload, roles: ["admin", "manager"], label: "ייבוא נתונים",
+    id: "users",
+    to: "/users",
+    icon: Users2,
+    roles: ["admin"],
+    label: "ניהול משתמשים",
+    group: "management",
+  },
+  {
+    id: "data-import",
+    to: "/data-import",
+    icon: Upload,
+    roles: ["admin", "manager"],
+    label: "ייבוא נתונים",
     // The route (requireRole(["admin","manager"])) and every server function
     // it calls already allow a manager — hiding the nav entry while still
     // allowing the route was the bug; a manager relying on nav-only
@@ -102,7 +194,14 @@ export const NAV_ITEMS: NavItem[] = [
     // use.
     group: "management",
   },
-  { id: "admin", to: "/admin", icon: Settings, roles: ["admin"], label: "ניהול המערכת", group: "management" },
+  {
+    id: "admin",
+    to: "/admin",
+    icon: Settings,
+    roles: ["admin"],
+    label: "ניהול המערכת",
+    group: "management",
+  },
 ];
 
 /** Nav items visible to this role, in display order. */
@@ -129,13 +228,55 @@ export function navItemsByGroup(role: AppRole): { primary: NavItem[]; management
  * make sense for the team(s) they manage, an admin sees everything.
  */
 export const QUICK_ACTIONS: QuickAction[] = [
-  { id: "add-representative", to: "/representatives", icon: Users2, roles: ["admin", "manager"], label: "הוספת נציג" },
-  { id: "manage-targets", to: "/targets", icon: Target, roles: ["admin", "manager"], label: "עדכון יעדים" },
-  { id: "add-feedback", to: "/feedback", icon: Headphones, roles: ["admin", "manager"], label: "הוספת האזנה / משוב" },
-  { id: "create-competition", to: "/competitions", icon: Trophy, roles: ["admin", "manager"], label: "יצירת תחרות" },
-  { id: "open-knowledge", to: "/knowledge", icon: BookOpen, roles: ["admin", "manager", "representative"], label: "פתיחת מרכז הידע" },
-  { id: "add-announcement", to: "/admin", icon: MessageSquare, roles: ["admin"], label: "הוספת הודעה" },
-  { id: "import-data", to: "/data-import", icon: Upload, roles: ["admin", "manager"], label: "ייבוא נתונים" },
+  {
+    id: "add-representative",
+    to: "/representatives",
+    icon: Users2,
+    roles: ["admin", "manager"],
+    label: "הוספת נציג",
+  },
+  {
+    id: "manage-targets",
+    to: "/targets",
+    icon: Target,
+    roles: ["admin", "manager"],
+    label: "עדכון יעדים",
+  },
+  {
+    id: "add-feedback",
+    to: "/feedback",
+    icon: Headphones,
+    roles: ["admin", "manager"],
+    label: "הוספת האזנה / משוב",
+  },
+  {
+    id: "create-competition",
+    to: "/competitions",
+    icon: Trophy,
+    roles: ["admin", "manager"],
+    label: "יצירת תחרות",
+  },
+  {
+    id: "open-knowledge",
+    to: "/knowledge",
+    icon: BookOpen,
+    roles: ["admin", "manager", "representative"],
+    label: "פתיחת מרכז הידע",
+  },
+  {
+    id: "add-announcement",
+    to: "/admin",
+    icon: MessageSquare,
+    roles: ["admin"],
+    label: "הוספת הודעה",
+  },
+  {
+    id: "import-data",
+    to: "/data-import",
+    icon: Upload,
+    roles: ["admin", "manager"],
+    label: "ייבוא נתונים",
+  },
 ];
 
 export function quickActionsForRole(role: AppRole): QuickAction[] {

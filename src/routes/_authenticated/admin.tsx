@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 
 import { requireRole } from "@/lib/require-role";
+import { DemoSeedCard } from "@/components/DemoSeedCard";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   beforeLoad: () => requireRole(["admin"]),
@@ -105,6 +106,11 @@ function AdminPage() {
           );
         })}
       </div>
+
+      {/* MVP demo seeding. Live Mode only — Demo Mode has no Supabase behind
+          it, so the ingestion pipeline has nothing to write to and the card
+          would offer an action that cannot work. */}
+      {!isDemo && <DemoSeedCard />}
 
       {/* Scoring settings shortcut */}
       <Card>

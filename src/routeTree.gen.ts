@@ -16,6 +16,7 @@ import { Route as AccessDeniedRouteImport } from './routes/access-denied'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as AuthenticatedWorklistRouteImport } from './routes/_authenticated/worklist'
 import { Route as AuthenticatedTeamsRouteImport } from './routes/_authenticated/teams'
 import { Route as AuthenticatedTargetsRouteImport } from './routes/_authenticated/targets'
 import { Route as AuthenticatedRepresentativesRouteImport } from './routes/_authenticated/representatives'
@@ -64,6 +65,11 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
 const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedWorklistRoute = AuthenticatedWorklistRouteImport.update({
+  id: '/worklist',
+  path: '/worklist',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedTeamsRoute = AuthenticatedTeamsRouteImport.update({
@@ -167,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/performance': typeof AuthenticatedPerformanceRoute
   '/representatives': typeof AuthenticatedRepresentativesRoute
   '/targets': typeof AuthenticatedTargetsRoute
+  '/worklist': typeof AuthenticatedWorklistRoute
   '/teams': typeof AuthenticatedTeamsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
@@ -189,6 +196,7 @@ export interface FileRoutesByTo {
   '/performance': typeof AuthenticatedPerformanceRoute
   '/representatives': typeof AuthenticatedRepresentativesRoute
   '/targets': typeof AuthenticatedTargetsRoute
+  '/worklist': typeof AuthenticatedWorklistRoute
   '/teams': typeof AuthenticatedTeamsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
@@ -214,6 +222,7 @@ export interface FileRoutesById {
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
   '/_authenticated/representatives': typeof AuthenticatedRepresentativesRoute
   '/_authenticated/targets': typeof AuthenticatedTargetsRoute
+  '/_authenticated/worklist': typeof AuthenticatedWorklistRoute
   '/_authenticated/teams': typeof AuthenticatedTeamsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
@@ -240,6 +249,7 @@ export interface FileRouteTypes {
     | '/performance'
     | '/representatives'
     | '/targets'
+    | '/worklist'
     | '/teams'
     | '/users'
     | '/.lovable/oauth/consent'
@@ -262,6 +272,7 @@ export interface FileRouteTypes {
     | '/performance'
     | '/representatives'
     | '/targets'
+    | '/worklist'
     | '/teams'
     | '/users'
     | '/'
@@ -286,6 +297,7 @@ export interface FileRouteTypes {
     | '/_authenticated/performance'
     | '/_authenticated/representatives'
     | '/_authenticated/targets'
+    | '/_authenticated/worklist'
     | '/_authenticated/teams'
     | '/_authenticated/users'
     | '/_authenticated/'
@@ -354,6 +366,13 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/users'
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/worklist': {
+      id: '/_authenticated/worklist'
+      path: '/worklist'
+      fullPath: '/worklist'
+      preLoaderRoute: typeof AuthenticatedWorklistRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/teams': {
@@ -475,6 +494,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPerformanceRoute: typeof AuthenticatedPerformanceRoute
   AuthenticatedRepresentativesRoute: typeof AuthenticatedRepresentativesRoute
   AuthenticatedTargetsRoute: typeof AuthenticatedTargetsRoute
+  AuthenticatedWorklistRoute: typeof AuthenticatedWorklistRoute
   AuthenticatedTeamsRoute: typeof AuthenticatedTeamsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
@@ -491,6 +511,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPerformanceRoute: AuthenticatedPerformanceRoute,
   AuthenticatedRepresentativesRoute: AuthenticatedRepresentativesRoute,
   AuthenticatedTargetsRoute: AuthenticatedTargetsRoute,
+  AuthenticatedWorklistRoute: AuthenticatedWorklistRoute,
   AuthenticatedTeamsRoute: AuthenticatedTeamsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
