@@ -26,6 +26,7 @@ import { Route as AuthenticatedDataImportRouteImport } from './routes/_authentic
 import { Route as AuthenticatedCompetitionsRouteImport } from './routes/_authenticated/competitions'
 import { Route as AuthenticatedCommunicationsRouteImport } from './routes/_authenticated/communications'
 import { Route as AuthenticatedChangelogRouteImport } from './routes/_authenticated/changelog'
+import { Route as AuthenticatedAiInsightsRouteImport } from './routes/_authenticated/ai-insights'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as Char91DotmcpChar93ListToolsRouteImport } from './routes/[.mcp]/list-tools'
@@ -120,6 +121,11 @@ const AuthenticatedChangelogRoute = AuthenticatedChangelogRouteImport.update({
   path: '/changelog',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedAiInsightsRoute = AuthenticatedAiInsightsRouteImport.update({
+  id: '/ai-insights',
+  path: '/ai-insights',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -158,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/.mcp/list-tools': typeof Char91DotmcpChar93ListToolsRoute
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/ai-insights': typeof AuthenticatedAiInsightsRoute
   '/changelog': typeof AuthenticatedChangelogRoute
   '/communications': typeof AuthenticatedCommunicationsRoute
   '/competitions': typeof AuthenticatedCompetitionsRoute
@@ -180,6 +187,7 @@ export interface FileRoutesByTo {
   '/.mcp/list-tools': typeof Char91DotmcpChar93ListToolsRoute
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/ai-insights': typeof AuthenticatedAiInsightsRoute
   '/changelog': typeof AuthenticatedChangelogRoute
   '/communications': typeof AuthenticatedCommunicationsRoute
   '/competitions': typeof AuthenticatedCompetitionsRoute
@@ -205,6 +213,7 @@ export interface FileRoutesById {
   '/.mcp/list-tools': typeof Char91DotmcpChar93ListToolsRoute
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/_authenticated/ai-insights': typeof AuthenticatedAiInsightsRoute
   '/_authenticated/changelog': typeof AuthenticatedChangelogRoute
   '/_authenticated/communications': typeof AuthenticatedCommunicationsRoute
   '/_authenticated/competitions': typeof AuthenticatedCompetitionsRoute
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
     | '/.mcp/list-tools'
     | '/.well-known/oauth-protected-resource'
     | '/admin'
+    | '/ai-insights'
     | '/changelog'
     | '/communications'
     | '/competitions'
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | '/.mcp/list-tools'
     | '/.well-known/oauth-protected-resource'
     | '/admin'
+    | '/ai-insights'
     | '/changelog'
     | '/communications'
     | '/competitions'
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | '/.mcp/list-tools'
     | '/.well-known/oauth-protected-resource'
     | '/_authenticated/admin'
+    | '/_authenticated/ai-insights'
     | '/_authenticated/changelog'
     | '/_authenticated/communications'
     | '/_authenticated/competitions'
@@ -426,6 +438,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChangelogRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/ai-insights': {
+      id: '/_authenticated/ai-insights'
+      path: '/ai-insights'
+      fullPath: '/ai-insights'
+      preLoaderRoute: typeof AuthenticatedAiInsightsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
       path: '/admin'
@@ -466,6 +485,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
+  AuthenticatedAiInsightsRoute: typeof AuthenticatedAiInsightsRoute
   AuthenticatedChangelogRoute: typeof AuthenticatedChangelogRoute
   AuthenticatedCommunicationsRoute: typeof AuthenticatedCommunicationsRoute
   AuthenticatedCompetitionsRoute: typeof AuthenticatedCompetitionsRoute
@@ -482,6 +502,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
+  AuthenticatedAiInsightsRoute: AuthenticatedAiInsightsRoute,
   AuthenticatedChangelogRoute: AuthenticatedChangelogRoute,
   AuthenticatedCommunicationsRoute: AuthenticatedCommunicationsRoute,
   AuthenticatedCompetitionsRoute: AuthenticatedCompetitionsRoute,

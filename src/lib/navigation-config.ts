@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Upload, MessageSquare,
-  Users2, UsersRound, Target,
+  Users2, UsersRound, Target, Sparkles,
 } from "lucide-react";
 
 // Single source of truth for role-aware navigation. AppShell (sidebar +
@@ -65,6 +65,10 @@ export type QuickAction = {
  */
 export const NAV_ITEMS: NavItem[] = [
   { id: "home", to: "/", icon: Home, roles: ["admin", "manager", "representative"], label: "דף הבית", group: "primary" },
+  {
+    id: "ai-insights", to: "/ai-insights", icon: Sparkles, roles: ["admin", "manager", "representative"],
+    label: "תובנות AI", group: "primary",
+  },
   {
     id: "performance", to: "/performance", icon: BarChart3, roles: ["admin", "manager", "representative"],
     label: "ביצועים", roleLabel: { representative: "הביצועים שלי" }, group: "primary",
