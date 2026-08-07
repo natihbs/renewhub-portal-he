@@ -11,7 +11,6 @@ import {
   Users2,
   UsersRound,
   Target,
-  ListChecks,
 } from "lucide-react";
 
 // Single source of truth for role-aware navigation. AppShell (sidebar +
@@ -80,22 +79,6 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Home,
     roles: ["admin", "manager", "representative"],
     label: "דף הבית",
-    group: "primary",
-  },
-  {
-    // The operator's working surface. Placed second, immediately after home,
-    // because for a representative it is the only screen that answers "what
-    // do I do now" — everything below it is reference.
-    //
-    // Admins see it so the flow can be demonstrated and QA'd without a
-    // representative account; managers do not, because they have no work
-    // list of their own and an empty screen in their nav is worse than no
-    // entry at all. A manager's own surface is a later PR.
-    id: "worklist",
-    to: "/worklist",
-    icon: ListChecks,
-    roles: ["admin", "representative"],
-    label: "רשימת העבודה",
     group: "primary",
   },
   {

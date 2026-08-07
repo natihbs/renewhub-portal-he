@@ -284,6 +284,15 @@ describe("operator screen source", () => {
     "utf8",
   );
 
+  it("is withdrawn from the product — admin-only and absent from navigation", () => {
+    // Pulse is a sales team management and performance system, not a queue or
+    // a call-disposition tool. No representative may reach this screen, by
+    // menu or by URL.
+    expect(source).toContain('requireRole(["admin"])');
+    const nav = readFileSync(path.resolve(import.meta.dirname, "../navigation-config.ts"), "utf8");
+    expect(nav).not.toContain("worklist");
+  });
+
   it("renders one item at a time, never a list of customers", () => {
     // The look-ahead is reasons only — no names, no values, no buttons — so a
     // representative cannot pick out of order.

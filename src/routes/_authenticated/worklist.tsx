@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { requireRole } from "@/lib/require-role";
 import { toast } from "sonner";
 import { getMyNextWorkItem, recordWorkItemOutcome } from "@/lib/worklist.functions";
 import { getMyCoverage } from "@/lib/coverage.functions";
@@ -25,21 +26,23 @@ import {
 import type { CanonicalOutcomeState } from "@/lib/domain-types";
 
 /**
- * The operator's screen: one customer at a time, why they are next, and five
- * buttons.
+ * WITHDRAWN FROM THE PRODUCT — admin-only, and not in navigation.
  *
- * ONE ITEM, NOT A LIST. Handing over the whole queue invites working the easy
- * ones first, which produces good conversion and terrible coverage — the exact
- * failure this product exists to expose. The look-ahead below the fold is
- * three reasons with no names and no actions: enough to see the shape of the
- * next few minutes, not enough to shop in.
+ * Pulse is a sales team management and performance system, not a queue or a
+ * call-disposition tool. This screen was built on the opposite premise and no
+ * representative should ever see it: it is unreachable from the menu for every
+ * role, and the guard below closes the direct URL for everyone but an
+ * administrator.
  *
- * The whole surface is budgeted at well under a minute a day of reading, plus
- * one tap per customer. Anything that makes it longer is making the
- * representative worse at their job, not better.
+ * Kept rather than deleted so the removal is one reversible decision rather
+ * than a rewrite, and so the v2 server functions underneath it stay exercised.
+ * Delete this file, its view module and its test when the team is ready to
+ * retire the queue work entirely.
  */
 
 export const Route = createFileRoute("/_authenticated/worklist")({
+  // Not merely hidden — a hidden route is still a reachable one.
+  beforeLoad: () => requireRole(["admin"]),
   head: () => ({
     meta: [
       { title: "רשימת העבודה · Pulse" },
