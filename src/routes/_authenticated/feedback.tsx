@@ -1723,7 +1723,43 @@ function HistoryTable({
         )}
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
+        {/* Representative mode (showViewLabel): below the desktop breakpoint
+            the wide table is replaced by cards, so "צפייה במשוב" is always in
+            view instead of hiding behind horizontal scroll. The manager table
+            keeps its existing markup untouched. */}
+        {showViewLabel && (
+          <div className="space-y-3 lg:hidden">
+            {list.map((f) => (
+              <div key={f.id} className="rounded-xl border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold">{formatDateIL(f.date)}</div>
+                  <span className={cn("font-bold", SCORE_TEXT_CLASS[scoreTone(f.score)])}>
+                    ציון {f.score}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground break-words">
+                  {f.callType || "האזנה"}
+                  {f.listener ? ` · מאזין/ה: ${f.listener}` : ""}
+                </div>
+                {(f.keep || f.improve) && (
+                  <p className="mt-2 text-xs text-muted-foreground break-words">
+                    {f.keep || f.improve}
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3 w-full"
+                  onClick={() => onView(f.id)}
+                >
+                  <Eye className="ms-1 h-3.5 w-3.5" />
+                  צפייה במשוב
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className={cn("overflow-x-auto", showViewLabel && "hidden lg:block")}>
           <Table>
             <TableHeader>
               <TableRow>

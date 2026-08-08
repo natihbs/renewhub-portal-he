@@ -16,6 +16,7 @@ import {
 import { BarChart3, Headphones, Target, Sparkles, AlertTriangle, RefreshCw, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsManager } from "@/lib/store";
+import { friendlyAiInsightError } from "@/lib/ai-insights-domain";
 import Markdown from "react-markdown";
 
 export const Route = createFileRoute("/_authenticated/ai-insights")({
@@ -142,8 +143,10 @@ function AiInsightsPage() {
             : await goalsFn({ data: undefined });
       setResults((prev) => ({ ...prev, [type]: result as InsightResult }));
     } catch (e) {
-      const message = e instanceof Error ? e.message : "שגיאה לא צפויה ביצירת התובנה";
-      setErrors((prev) => ({ ...prev, [type]: message }));
+      // Raw provider/SDK text (English) goes to the console only; the user
+      // sees our Hebrew messages, or the calm generic line.
+      console.error("[ai-insights] generation failed", e);
+      setErrors((prev) => ({ ...prev, [type]: friendlyAiInsightError(e) }));
     } finally {
       setLoading((prev) => ({ ...prev, [type]: false }));
     }
@@ -185,16 +188,25 @@ function AiInsightsPage() {
               onClick={() => setActiveTab(insight.id)}
             >
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-lg bg-primary/10 p-2">
+                {/* Mobile/RTL safety: long Hebrew labels must wrap, never
+                    overlap the badge or clip — min-w-0 lets the flex child
+                    shrink, break-words wraps the label, the badge never
+                    shrinks. Desktop rendering is unchanged (wrapping only
+                    engages when there is no room). */}
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="shrink-0 rounded-lg bg-primary/10 p-2">
                       <Icon className="h-5 w-5 text-primary" />
                     </div>
-                    <CardTitle className="text-base">{insight.label}</CardTitle>
+                    <CardTitle className="min-w-0 break-words text-base">{insight.label}</CardTitle>
                   </div>
-                  <Badge variant="outline">{insight.badge}</Badge>
+                  <Badge variant="outline" className="shrink-0">
+                    {insight.badge}
+                  </Badge>
                 </div>
-                <CardDescription className="text-xs leading-5 pt-1">{insight.description}</CardDescription>
+                <CardDescription className="text-xs leading-5 pt-1 break-words">
+                  {insight.description}
+                </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
                 <Button
@@ -230,9 +242,12 @@ function AiInsightsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as InsightType)} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 md:w-auto">
+        {/* A fixed 3-column grid clipped/overlapped the long Hebrew tab
+            labels on narrow screens — same wrap-instead-of-clip pattern as
+            the feedback page's tab bar. */}
+        <TabsList className="flex h-auto w-full flex-wrap justify-start md:w-auto">
           {insightDefs.map((i) => (
-            <TabsTrigger key={i.id} value={i.id}>
+            <TabsTrigger key={i.id} value={i.id} className="whitespace-normal">
               {i.label}
             </TabsTrigger>
           ))}

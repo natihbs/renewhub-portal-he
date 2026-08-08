@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateText, Output, NoObjectGeneratedError } from "ai";
+import { AI_INSIGHT_FRIENDLY_ERROR } from "@/lib/ai-insights-domain";
 import { z } from "zod";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 import { currentMonthStart } from "@/lib/kpi-values";
@@ -126,12 +127,13 @@ const InsightSchema = z.object({
 
 type InsightOutput = z.infer<typeof InsightSchema>;
 
-async function generateInsight(
-  prompt: string,
-  system: string,
-): Promise<InsightOutput> {
+async function generateInsight(prompt: string, instructions: string): Promise<InsightOutput> {
   const key = process.env["LOVABLE_API_KEY"];
-  if (!key) throw new Error("Missing LOVABLE_API_KEY");
+  if (!key) {
+    // Configuration detail stays in server logs; the user gets the calm line.
+    console.error("[ai-insights] LOVABLE_API_KEY is not configured");
+    throw new Error(AI_INSIGHT_FRIENDLY_ERROR);
+  }
 
   const gateway = createLovableAiGatewayProvider(key);
   const model = gateway("google/gemini-3.6-flash");
@@ -139,10 +141,16 @@ async function generateInsight(
   try {
     const { output } = await generateText({
       model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
+      // USER content only. The Lovable gateway rejects a system-role entry
+      // inside prompt/messages ("Invalid prompt: System messages are not
+      // allowed in the prompt or messages fields. Use the instructions
+      // option instead."), so nothing here ever carries a system message.
+      prompt,
+      // System-level guidance travels as the gateway's `instructions` body
+      // field: the openai-compatible provider (name: "lovable" in
+      // ai-gateway.server.ts) merges its per-provider options straight into
+      // the request body.
+      providerOptions: { lovable: { instructions } },
       output: Output.object({ schema: InsightSchema }),
     });
     return output;
@@ -151,7 +159,10 @@ async function generateInsight(
       const fallback = parseFallback(error.text);
       if (fallback) return fallback;
     }
-    throw error;
+    // Full technical detail server-side only — the user never sees raw
+    // English provider text as their main message.
+    console.error("[ai-insights] generation failed", error);
+    throw new Error(AI_INSIGHT_FRIENDLY_ERROR);
   }
 }
 
