@@ -45,9 +45,16 @@ import {
   PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL,
   type KpiProfile, type Tone, type PaceInfo,
 } from "@/lib/performance-domain";
-import { renewalTotalsForTeamHistorical, type RenewalTotals } from "@/lib/kpi-values";
-import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone, type RenewalRateResult } from "@/lib/renewal-rate";
-import { useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
+import {
+  calculateAssignedRenewalRate,
+  ASSIGNED_RENEWAL_RATE_UNAVAILABLE_LABEL,
+  ASSIGNED_RENEWALS_LABEL,
+  CLOSED_RENEWALS_LABEL,
+  PERSONAL_RENEWAL_RATE_LABEL,
+  renewalRateTone,
+  type AssignedRenewalRateResult,
+} from "@/lib/renewal-rate";
+import { useRepresentativeGoals, useTeamGoals, currentGoalMonth } from "@/lib/goals-hooks";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -169,6 +176,13 @@ function PerformancePage() {
 function RepresentativePerformancePage() {
   const { state } = useApp();
   const me = state.reps.find((r) => r.id === state.currentRepId) ?? null;
+  // Renewals wording: for a renewals-profile team the personal goal IS the
+  // assigned renewal book (מיועדות חודשיות), and current_result is closed
+  // renewals — same numbers, business language.
+  const { teams: repTeams } = useVisibleTeams();
+  const isRenewals =
+    !!me?.teamId &&
+    (repTeams.find((t) => t.id === me.teamId)?.kpiProfile ?? DEFAULT_KPI_PROFILE) === "renewals";
   const repIds = useMemo(() => (me ? [me.id] : []), [me]);
   const myGoals = useRepresentativeGoals(repIds, currentGoalMonth());
   const wdTotal = workdaysInMonth();
@@ -262,16 +276,16 @@ function RepresentativePerformancePage() {
             <SummaryCard
               tone="neutral"
               icon={Target}
-              label="יעד אישי"
+              label={isRenewals ? ASSIGNED_RENEWALS_LABEL : "יעד אישי"}
               value={formatNum(target as number)}
               sub={`יעד ${formatMonthIL(currentGoalMonth())}`}
             />
             <SummaryCard
               tone="neutral"
               icon={Gauge}
-              label="ביצוע נוכחי"
+              label={isRenewals ? CLOSED_RENEWALS_LABEL : "ביצוע נוכחי"}
               value={formatNum(me.currentResult)}
-              sub={`${formatPct(pct as number)} אחוז עמידה`}
+              sub={`${formatPct(pct as number)} ${isRenewals ? PERSONAL_RENEWAL_RATE_LABEL : "אחוז עמידה"}`}
             />
             <SummaryCard
               tone={(remaining as number) <= 0 ? "success" : "neutral"}
@@ -445,21 +459,36 @@ function ManagerPerformancePage() {
   // so transferring a representative no longer moves their past renewal
   // contribution onto their new team's card. See the semantics block in
   // kpi-values.ts.
+  // Renewals business model: team_goals.target_value IS the team's assigned
+  // renewal book (מיועדות חודשיות) and the reps' summed current_result is the
+  // closed count — the rate needs no kpi_values row to exist.
+  const renewalTeamGoals = useTeamGoals(renewalTeams.map((t) => t.teamId));
+
   const selectedRenewal = useMemo(() => {
     if (selectedTeamProfile !== "renewals" || teamFilter === "all") return null;
-    const totals = renewalTotalsForTeamHistorical(teamFilter, state.kpiValues);
-    const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
-    return { totals, rate };
-  }, [selectedTeamProfile, teamFilter, state.kpiValues]);
+    const completed = state.reps
+      .filter((r) => r.teamId === teamFilter)
+      .reduce((a, r) => a + r.currentResult, 0);
+    const assigned = renewalTeamGoals.goalsByTeamId.get(teamFilter) ?? null;
+    return { assigned, completed, rate: calculateAssignedRenewalRate("renewals", completed, assigned) };
+  }, [selectedTeamProfile, teamFilter, state.reps, renewalTeamGoals.goalsByTeamId]);
 
   const renewalsByTeam = useMemo(() => {
     if (teamFilter !== "all") return [];
     return renewalTeams.map((t) => {
-      const totals = renewalTotalsForTeamHistorical(t.teamId, state.kpiValues);
-      const rate = calculateRenewalRate("renewals", totals.completed, totals.opportunities);
-      return { teamId: t.teamId, teamName: t.teamName, totals, rate };
+      const completed = state.reps
+        .filter((r) => r.teamId === t.teamId)
+        .reduce((a, r) => a + r.currentResult, 0);
+      const assigned = renewalTeamGoals.goalsByTeamId.get(t.teamId) ?? null;
+      return {
+        teamId: t.teamId,
+        teamName: t.teamName,
+        assigned,
+        completed,
+        rate: calculateAssignedRenewalRate("renewals", completed, assigned),
+      };
     });
-  }, [teamFilter, renewalTeams, state.kpiValues]);
+  }, [teamFilter, renewalTeams, state.reps, renewalTeamGoals.goalsByTeamId]);
 
 
 
@@ -590,7 +619,7 @@ function ManagerPerformancePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <RenewalStatRow totals={selectedRenewal.totals} rate={selectedRenewal.rate} />
+                <RenewalStatRow assigned={selectedRenewal.assigned} completed={selectedRenewal.completed} rate={selectedRenewal.rate} />
               </CardContent>
             </Card>
           )}
@@ -606,7 +635,7 @@ function ManagerPerformancePage() {
                 {renewalsByTeam.map((t) => (
                   <div key={t.teamId} className="rounded-xl border p-3">
                     <div className="font-semibold text-sm mb-2">{t.teamName}</div>
-                    <RenewalStatRow totals={t.totals} rate={t.rate} />
+                    <RenewalStatRow assigned={t.assigned} completed={t.completed} rate={t.rate} />
                   </div>
                 ))}
               </CardContent>
@@ -924,18 +953,28 @@ function SummaryCard({
   );
 }
 
-function RenewalStatRow({ totals, rate }: { totals: RenewalTotals; rate: RenewalRateResult }) {
+function RenewalStatRow({
+  assigned,
+  completed,
+  rate,
+}: {
+  assigned: number | null;
+  completed: number;
+  rate: AssignedRenewalRateResult;
+}) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      <MobileStat label="הזדמנויות חידוש" value={totals.opportunities == null ? "אין נתונים" : formatNum(totals.opportunities)} />
-      <MobileStat label="חידושים שבוצעו" value={totals.completed == null ? "אין נתונים" : formatNum(totals.completed)} />
+      <MobileStat label={ASSIGNED_RENEWALS_LABEL} value={assigned == null ? "לא הוגדר" : formatNum(assigned)} />
+      <MobileStat label={CLOSED_RENEWALS_LABEL} value={formatNum(completed)} />
       <MobileStat
         label="אחוז חידוש"
         value={rate.available ? formatPct(rate.pct) : "לא זמין"}
         tone={renewalRateTone(rate)}
       />
       {!rate.available && (
-        <div className="sm:col-span-3 text-xs text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[rate.reason]}</div>
+        <div className="sm:col-span-3 text-xs text-muted-foreground">
+          {ASSIGNED_RENEWAL_RATE_UNAVAILABLE_LABEL[rate.reason]}
+        </div>
       )}
     </div>
   );

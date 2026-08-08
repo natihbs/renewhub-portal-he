@@ -105,8 +105,8 @@ function downloadTemplate(kind: "xlsx" | "csv") {
     "יעד חודשי",
     "ביצוע נוכחי",
     "תאריך עדכון",
-    "הזדמנויות חידוש",
-    "חידושים שבוצעו",
+    "מיועדות חודשיות",
+    "חידושים שנסגרו",
   ];
   const today = formatDateIL(new Date());
   const rows = [

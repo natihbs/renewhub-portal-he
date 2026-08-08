@@ -92,8 +92,8 @@ export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   monthlyTarget: "יעד חודשי (אופציונלי — עדכון יעדים רשמיים דורש אישור נפרד)",
   currentResult: "ביצוע נוכחי",
   updatedAt: "תאריך עדכון",
-  renewalOpportunities: "הזדמנויות חידוש (רק לצוותי חידושים)",
-  completedRenewals: "חידושים שבוצעו (רק לצוותי חידושים)",
+  renewalOpportunities: "מיועדות חודשיות (רק לצוותי חידושים)",
+  completedRenewals: "חידושים שנסגרו (רק לצוותי חידושים)",
   prevMonthResult: "ביצוע חודש קודם (לא נשמר כרגע)",
   listeningCount: "מספר האזנות (לא נשמר כרגע)",
   lastListeningScore: "ציון האזנה אחרון (לא נשמר כרגע)",
@@ -320,12 +320,36 @@ const AUTO_MAP: { field: ImportFieldKey; keywords: string[] }[] = [
   { field: "team", keywords: ["צוות", "team", "מחלקה"] },
   { field: "monthlyTarget", keywords: ["יעד חודשי", "יעד", "target"] },
   { field: "currentResult", keywords: ["ביצוע נוכחי", "ביצוע", "תוצאה", "result", "actual"] },
+  // Renewal fields are matched BEFORE updatedAt on purpose: matching is by
+  // substring, and "מיועדות חודשיות" contains "חודש" — checked later it would
+  // be swallowed by the month/date field.
+  {
+    field: "renewalOpportunities",
+    keywords: [
+      "מיועדות חודשיות",
+      "כמות מיועדות",
+      "מיועדות",
+      "הזדמנויות חידוש",
+      "הזדמנויות",
+      "renewal_opportunities",
+      "opportunities",
+    ],
+  },
+  {
+    field: "completedRenewals",
+    keywords: [
+      "חידושים שנסגרו",
+      "חידושים שבוצעו",
+      "חידושים בפועל",
+      "completed_renewals",
+      "completed renewals",
+      "completedrenewals",
+    ],
+  },
   {
     field: "updatedAt",
     keywords: ["תאריך עדכון", "תאריך", "חודש", "תקופה", "date", "month", "updated", "period"],
   },
-  { field: "renewalOpportunities", keywords: ["הזדמנויות חידוש", "הזדמנויות", "opportunities"] },
-  { field: "completedRenewals", keywords: ["חידושים שבוצעו", "חידושים בפועל", "completed renewals", "completedrenewals"] },
 ];
 
 export function autoMap(headers: string[]): Record<string, ImportFieldKey> {

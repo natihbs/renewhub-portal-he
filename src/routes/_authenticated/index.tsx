@@ -22,8 +22,14 @@ import {
 } from "@/lib/format";
 import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS, type KpiProfile } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
-import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
-import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
+import {
+  calculateAssignedRenewalRate,
+  ASSIGNED_RENEWAL_RATE_UNAVAILABLE_LABEL,
+  ASSIGNED_RENEWALS_LABEL,
+  CLOSED_RENEWALS_LABEL,
+  PERSONAL_RENEWAL_RATE_LABEL,
+  type AssignedRenewalRateResult,
+} from "@/lib/renewal-rate";
 import { useWorkspace, managerScopeLabel } from "@/lib/workspace-context";
 import {
   useTeamGoal,
@@ -424,10 +430,15 @@ function ManagerHome() {
   const scopedRepIds = useMemo(() => scopedReps.map((r) => r.id), [scopedReps]);
   const repGoals = useRepresentativeGoals(scopedRepIds);
 
+  // Renewals business model: the team's official monthly goal IS the assigned
+  // renewal book (מיועדות חודשיות) and current_result is closed renewals — so
+  // the rate is computable from data this screen already has, with or without
+  // imported kpi_values.
   const renewal = workspaceTeamId && (profileByTeamId.get(workspaceTeamId) ?? DEFAULT_KPI_PROFILE) === "renewals"
     ? (() => {
-        const totals = renewalTotalsForTeamHistorical(workspaceTeamId, state.kpiValues);
-        return { totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
+        const completed = scopedReps.reduce((a, r) => a + r.currentResult, 0);
+        const assigned = teamGoal.targetValue ?? null;
+        return { assigned, completed, rate: calculateAssignedRenewalRate("renewals", completed, assigned) };
       })()
     : null;
 
@@ -530,6 +541,13 @@ function RepresentativeHome() {
   const { reps, announcements, competitions, currentRepId } = state;
   const me = reps.find((r) => r.id === currentRepId);
   const myGoal = useRepresentativeGoal(me?.id ?? null);
+  // Renewals wording: for a renewals-profile team the personal goal IS the
+  // assigned renewal book, so the cards speak the business language.
+  const { teams: repHomeTeams } = useVisibleTeams();
+  const isRenewals =
+    !!me?.teamId &&
+    (repHomeTeams.find((t) => t.id === me.teamId)?.kpiProfile ?? DEFAULT_KPI_PROFILE) ===
+      "renewals";
   const wdRemaining = workdaysRemaining();
   const wdTotal = workdaysInMonth();
 
@@ -568,8 +586,24 @@ function RepresentativeHome() {
             </CardContent></Card>
           ) : hasTarget ? (
             <>
-              <KPICard icon={Target} label="היעד שלי" value={formatNum(myGoal.targetValue as number)} sub={`יעד ${formatMonthIL(currentGoalMonth())}`} />
-              <KPICard icon={Gauge} label="ביצוע נוכחי" value={formatNum(me.currentResult)} sub={pct !== null ? `${formatPct(pct)} מהיעד` : undefined} />
+              <KPICard
+                icon={Target}
+                label={isRenewals ? ASSIGNED_RENEWALS_LABEL : "היעד שלי"}
+                value={formatNum(myGoal.targetValue as number)}
+                sub={`יעד ${formatMonthIL(currentGoalMonth())}`}
+              />
+              <KPICard
+                icon={Gauge}
+                label={isRenewals ? CLOSED_RENEWALS_LABEL : "ביצוע נוכחי"}
+                value={formatNum(me.currentResult)}
+                sub={
+                  pct !== null
+                    ? isRenewals
+                      ? `${formatPct(pct)} ${PERSONAL_RENEWAL_RATE_LABEL}`
+                      : `${formatPct(pct)} מהיעד`
+                    : undefined
+                }
+              />
               <KPICard icon={TrendingUp} label="נותר ליעד" value={formatNum(remaining ?? 0)} sub={perDay !== null ? `~${perDay}/יום` : undefined} />
             </>
           ) : (
@@ -789,7 +823,7 @@ function KPICard({
   return <Card className="card-interactive">{body}</Card>;
 }
 
-type TeamCardRenewal = { totals: { opportunities: number | null; completed: number | null }; rate: ReturnType<typeof calculateRenewalRate> };
+type TeamCardRenewal = { assigned: number | null; completed: number; rate: AssignedRenewalRateResult };
 
 /**
  * teamTarget is the official monthly team target (team_goals), never a sum of
@@ -880,12 +914,12 @@ function TeamCard({ teamName, teamActive, reps, teamTarget, targetsLoading, targ
             <div className="font-semibold mb-1.5">מדדי חידושים · החודש</div>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div>
-                <div className="text-muted-foreground">הזדמנויות</div>
-                <div className="font-bold">{renewal.totals.opportunities == null ? "—" : formatNum(renewal.totals.opportunities)}</div>
+                <div className="text-muted-foreground">{ASSIGNED_RENEWALS_LABEL}</div>
+                <div className="font-bold">{renewal.assigned == null ? "—" : formatNum(renewal.assigned)}</div>
               </div>
               <div>
-                <div className="text-muted-foreground">חידושים</div>
-                <div className="font-bold">{renewal.totals.completed == null ? "—" : formatNum(renewal.totals.completed)}</div>
+                <div className="text-muted-foreground">{CLOSED_RENEWALS_LABEL}</div>
+                <div className="font-bold">{formatNum(renewal.completed)}</div>
               </div>
               <div>
                 <div className="text-muted-foreground">אחוז חידוש</div>
@@ -893,7 +927,9 @@ function TeamCard({ teamName, teamActive, reps, teamTarget, targetsLoading, targ
               </div>
             </div>
             {!renewal.rate.available && (
-              <div className="mt-1.5 text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[renewal.rate.reason]}</div>
+              <div className="mt-1.5 text-muted-foreground">
+                {ASSIGNED_RENEWAL_RATE_UNAVAILABLE_LABEL[renewal.rate.reason]}
+              </div>
             )}
           </div>
         )}

@@ -569,7 +569,7 @@ function TeamDialog({ open, onOpenChange, managers, team, onSaved }: {
             </Select>
             <p className="text-xs text-muted-foreground">
               {kpiProfile === "renewals"
-                ? "הצוות יציג גם הזדמנויות חידוש, חידושים שבוצעו ואחוז חידוש בנוסף למדדים הכלליים."
+                ? "הצוות יציג גם מיועדות חודשיות, חידושים שנסגרו ואחוז חידוש בנוסף למדדים הכלליים."
                 : "הצוות יציג יעד, ביצוע ואחוז עמידה ביעד בלבד."}
             </p>
           </div>

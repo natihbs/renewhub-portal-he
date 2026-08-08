@@ -19,8 +19,13 @@ import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, wo
 import { calculateAchievement, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useRepresentativeGoal, currentGoalMonth } from "@/lib/goals-hooks";
-import { renewalTotalsForMonth } from "@/lib/kpi-values";
-import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL, renewalRateTone } from "@/lib/renewal-rate";
+import {
+  calculateAssignedRenewalRate,
+  ASSIGNED_RENEWAL_RATE_UNAVAILABLE_LABEL,
+  ASSIGNED_RENEWALS_LABEL,
+  CLOSED_RENEWALS_LABEL,
+  renewalRateTone,
+} from "@/lib/renewal-rate";
 import { toast } from "sonner";
 import {
   Headphones, Pencil, StickyNote, Plus,
@@ -189,16 +194,17 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
   const risk = riskOf(rep, target, repFeedback.length ? avgListen : null, daysSinceLast);
 
   // Renewal-specific section: only ever shown for a team whose KPI profile is
-  // explicitly "renewals" — never inferred from the team's name — and only when
-  // real dated values exist. calculateRenewalRate never derives from target/result.
+  // explicitly "renewals" — never inferred from the team's name. Business
+  // model: the rep's official monthly goal IS their assigned renewal book
+  // (מיועדות חודשיות) and current_result is their closed renewals, so the
+  // personal rate comes from data already on this screen.
   // Visible teams — this workspace is opened for a specific rep's own record,
   // including one whose team has since been deactivated (history must remain viewable).
   const { teams: cloudTeams } = useVisibleTeams();
   const kpiProfile = rep.teamId
     ? cloudTeams.find((t) => t.id === rep.teamId)?.kpiProfile ?? DEFAULT_KPI_PROFILE
     : DEFAULT_KPI_PROFILE;
-  const renewalTotals = renewalTotalsForMonth(rep.id, state.kpiValues);
-  const renewalRate = calculateRenewalRate(kpiProfile, renewalTotals.completed, renewalTotals.opportunities);
+  const renewalRate = calculateAssignedRenewalRate(kpiProfile, rep.currentResult, target ?? null);
 
   const notes = getNotes(rep.id);
   const tasks = getTasks(rep.id);
@@ -337,8 +343,8 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
           {kpiProfile === "renewals" && (
             <Section icon={LineChartIcon} title="מדדי חידושים">
               <div className="grid grid-cols-3 gap-3">
-                <AnalyticStat label="הזדמנויות חידוש" value={renewalTotals.opportunities == null ? "אין נתונים" : formatNum(renewalTotals.opportunities)} />
-                <AnalyticStat label="חידושים שבוצעו" value={renewalTotals.completed == null ? "אין נתונים" : formatNum(renewalTotals.completed)} />
+                <AnalyticStat label={ASSIGNED_RENEWALS_LABEL} value={target == null ? "לא הוגדר" : formatNum(target)} />
+                <AnalyticStat label={CLOSED_RENEWALS_LABEL} value={formatNum(rep.currentResult)} />
                 <AnalyticStat
                   label="אחוז חידוש"
                   value={renewalRate.available ? formatPct(renewalRate.pct) : "לא זמין"}
@@ -346,7 +352,9 @@ function WorkspaceBody({ rep, onClose }: { rep: Rep; onClose: () => void }) {
                 />
               </div>
               {!renewalRate.available && (
-                <p className="mt-2 text-xs text-muted-foreground">{RENEWAL_RATE_UNAVAILABLE_LABEL[renewalRate.reason]}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {ASSIGNED_RENEWAL_RATE_UNAVAILABLE_LABEL[renewalRate.reason]}
+                </p>
               )}
             </Section>
           )}

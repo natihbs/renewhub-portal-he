@@ -29,17 +29,20 @@ describe("KPI profile labels", () => {
 describe("communications renewalSectionLines — only ever real, available data", () => {
   it("produces nothing when no renewals team has an available rate", () => {
     const lines = renewalSectionLines([
-      { teamId: "t1", teamName: "Team A", totals: { opportunities: null, completed: null }, rate: { available: false, reason: "no_opportunities" } },
+      { teamId: "t1", teamName: "Team A", assigned: null, completed: 0, rate: { available: false, reason: "no_assigned" } },
     ]);
     expect(lines).toEqual([]);
   });
 
-  it("produces a renewals section only for teams with a real available rate", () => {
+  it("produces a renewals section only for teams with a real available rate — in the assigned-book language", () => {
     const lines = renewalSectionLines([
-      { teamId: "t1", teamName: "Team A", totals: { opportunities: null, completed: null }, rate: { available: false, reason: "no_opportunities" } },
-      { teamId: "t2", teamName: "Team B", totals: { opportunities: 20, completed: 15 }, rate: { available: true, pct: 75 } },
+      { teamId: "t1", teamName: "Team A", assigned: null, completed: 0, rate: { available: false, reason: "no_assigned" } },
+      { teamId: "t2", teamName: "Team B", assigned: 20, completed: 15, rate: { available: true, pct: 75, assigned: 20, completed: 15 } },
     ]);
-    expect(lines.join("\n")).toContain("Team B");
-    expect(lines.join("\n")).not.toContain("Team A");
+    const text = lines.join("\n");
+    expect(text).toContain("Team B");
+    expect(text).not.toContain("Team A");
+    expect(text).toContain("מיועדות חודשיות");
+    expect(text).toContain("חידושים שנסגרו");
   });
 });
