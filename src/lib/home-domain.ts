@@ -15,7 +15,13 @@
 //     the pace denominator rather than dragging it down.
 
 import { calculateAchievement, paceStatus, type AchievementStatus } from "@/lib/performance-domain";
-import { FRESHNESS_STATE_LABEL, type FreshnessModel } from "@/lib/dashboard-domain";
+import {
+  FRESHNESS_STATE_LABEL,
+  STALE_AFTER_DAYS,
+  daysBetweenIso,
+  type FreshnessModel,
+} from "@/lib/dashboard-domain";
+import { formatDateIL, formatMonthIL } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Pace split — "נציגים מעל / מתחת לקצב"
@@ -404,4 +410,132 @@ export function summariseFreshness(freshness: FreshnessModel): FreshnessSummary 
   const tone =
     freshness.state === "current" ? "success" : freshness.state === "aging" ? "warning" : "danger";
   return { stateLabel, ageLabel, tone, unknown: false };
+}
+
+// ---------------------------------------------------------------------------
+// Monthly import freshness — "תקופת נתונים / ייבוא אחרון"
+// ---------------------------------------------------------------------------
+
+/**
+ * Three genuinely different facts about monthly imported data, which the bar
+ * previously conflated into one day-counting claim:
+ *   the reporting PERIOD    which calendar month the figures describe. Stored
+ *                           as import_history.period ("YYYY-MM"), with
+ *                           kpi_values.metric_date (always the first of the
+ *                           month) as a period MARKER fallback — it is not an
+ *                           update timestamp and must never be shown as one.
+ *   the last IMPORT         when data actually arrived (import_history
+ *                           created_at). This is the real "עודכן" moment.
+ *   the freshness STATE     whether the period on screen is the current month.
+ *
+ * The bug this fixes: August data imported on 08.08 carries metric_date
+ * 01.08, so day-counting called it seven days old — "לא עדכני" with the
+ * misleading line "הנתונים עודכנו לאחרונה ב־01.08.2026" — while the numbers
+ * were the current month's, imported that same day.
+ */
+export type MonthlyFreshnessInput = {
+  /** "YYYY-MM" from import_history.period, or a "YYYY-MM-DD" period marker. */
+  period: string | null;
+  /** import_history.created_at — when data last actually arrived. */
+  lastImportAt: string | null;
+  lastImportStatus: string | null;
+  /** "YYYY-MM-DD". */
+  today: string;
+  /** After how many days a current-period import deserves a check. */
+  staleImportAfterDays?: number;
+};
+
+export type MonthlyFreshnessSummary = {
+  state: "current" | "import_old" | "stale_period" | "unknown_period" | "no_import";
+  /** "עדכני" / "דורש בדיקה" / "לא עדכני" / "ללא ייבוא". */
+  stateLabel: string;
+  /** Ordered copy lines, ready to render. */
+  lines: string[];
+  tone: "success" | "warning" | "danger" | "muted";
+};
+
+const MONTHLY_FRESHNESS_STATE_LABEL: Record<MonthlyFreshnessSummary["state"], string> = {
+  current: "עדכני",
+  import_old: "דורש בדיקה",
+  stale_period: "לא עדכני",
+  unknown_period: "דורש בדיקה",
+  no_import: "ללא ייבוא",
+};
+
+export const NO_IMPORT_LINE = "טרם בוצע ייבוא נתונים";
+export const IMPORT_DUE_LINE = "נדרש ייבוא נתונים לחודש הנוכחי";
+
+/** "אוגוסט 2026" from either "2026-08" or "2026-08-01". */
+function monthLabelOf(periodMonth: string): string {
+  return formatMonthIL(`${periodMonth}-01`);
+}
+
+/**
+ * The single definition of "is the data on screen current" for monthly
+ * imported data. A period equal to the current month is current data no
+ * matter which day of the month it is; only the IMPORT's own age can demote
+ * it — and then only to "דורש בדיקה", with copy that says the period is
+ * current but the import is old, never to "לא עדכני".
+ */
+export function summariseMonthlyFreshness(input: MonthlyFreshnessInput): MonthlyFreshnessSummary {
+  const staleImportAfterDays = input.staleImportAfterDays ?? STALE_AFTER_DAYS;
+  const periodMonth = input.period ? input.period.slice(0, 7) : null;
+  const currentMonth = input.today.slice(0, 7);
+  const importLine = input.lastImportAt
+    ? `${lastImportLabel(input.lastImportStatus)}: ${formatDateIL(input.lastImportAt)}`
+    : null;
+
+  if (!periodMonth && !input.lastImportAt) {
+    return {
+      state: "no_import",
+      stateLabel: MONTHLY_FRESHNESS_STATE_LABEL.no_import,
+      lines: [NO_IMPORT_LINE],
+      tone: "muted",
+    };
+  }
+
+  if (!periodMonth) {
+    // Data arrived but its reporting period is unknowable (e.g. a mixed-months
+    // file records no single period). Say so instead of guessing a month.
+    return {
+      state: "unknown_period",
+      stateLabel: MONTHLY_FRESHNESS_STATE_LABEL.unknown_period,
+      lines: ["תקופת הנתונים אינה ידועה", ...(importLine ? [importLine] : [])],
+      tone: "warning",
+    };
+  }
+
+  if (periodMonth < currentMonth) {
+    return {
+      state: "stale_period",
+      stateLabel: MONTHLY_FRESHNESS_STATE_LABEL.stale_period,
+      lines: [
+        `תקופת נתונים אחרונה: ${monthLabelOf(periodMonth)}`,
+        IMPORT_DUE_LINE,
+        ...(importLine ? [importLine] : []),
+      ],
+      tone: "danger",
+    };
+  }
+
+  // Current (or, defensively, future) period. The period line is stated as a
+  // period — never as the date the data "was updated".
+  const periodLine = `תקופת נתונים: ${monthLabelOf(periodMonth)}`;
+  const importAgeInDays = input.lastImportAt
+    ? daysBetweenIso(input.lastImportAt.slice(0, 10), input.today)
+    : null;
+  if (importAgeInDays !== null && importAgeInDays > staleImportAfterDays) {
+    return {
+      state: "import_old",
+      stateLabel: MONTHLY_FRESHNESS_STATE_LABEL.import_old,
+      lines: [periodLine, ...(importLine ? [importLine] : [])],
+      tone: "warning",
+    };
+  }
+  return {
+    state: "current",
+    stateLabel: MONTHLY_FRESHNESS_STATE_LABEL.current,
+    lines: [periodLine, ...(importLine ? [importLine] : [NO_IMPORT_LINE])],
+    tone: "success",
+  };
 }

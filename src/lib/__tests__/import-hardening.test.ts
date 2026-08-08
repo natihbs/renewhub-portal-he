@@ -269,11 +269,12 @@ describe("D — freshness comes from real import/KPI dates", () => {
     expect(fn).not.toContain('from("representatives")');
   });
 
-  it("manager/admin copy: fresh, missing-import and stale states", () => {
-    expect(homeCardsSrc).toContain("הנתונים עודכנו לאחרונה ב־");
-    expect(homeCardsSrc).toContain("טרם בוצע ייבוא נתונים");
-    // stale renders on the warning/danger tones with the last import date line.
-    expect(homeCardsSrc).toContain("lastImportLabel");
+  it("manager/admin copy: period-aware states, never a period date as an update timestamp", () => {
+    // Monthly-import freshness: the bar renders summariseMonthlyFreshness
+    // lines — reporting period + real import timestamp — and no longer claims
+    // the data "was updated" on the period-marker date.
+    expect(homeCardsSrc).toContain("summariseMonthlyFreshness");
+    expect(homeCardsSrc).not.toContain("הנתונים עודכנו לאחרונה ב־");
   });
 
   it("RepresentativeHome still renders no freshness bar", () => {

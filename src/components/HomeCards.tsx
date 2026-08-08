@@ -44,7 +44,6 @@ import { useAppMode } from "@/lib/app-mode";
 import { useListening } from "@/lib/listening-store";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { getPerformanceDataFreshness } from "@/lib/dashboard.functions";
-import { computeFreshness } from "@/lib/dashboard-domain";
 import { scoreTone, SCORE_BADGE_CLASS, todayIsoDate } from "@/lib/feedback-domain";
 import {
   formatDateIL,
@@ -60,12 +59,11 @@ import {
   activeCompetitions,
   competitionStandings,
   daysUntil,
-  lastImportLabel,
   recentFeedback,
   sessionsToDo,
   splitByPace,
   standingFor,
-  summariseFreshness,
+  summariseMonthlyFreshness,
   summariseTasks,
   PACE_BUCKET_LABEL,
   type PaceInput,
@@ -119,11 +117,13 @@ const FRESHNESS_TONE_CLASS: Record<"success" | "warning" | "danger" | "muted", s
 /**
  * One honest line about how current the figures above it are.
  *
- * Two separate facts are reported side by side rather than merged, because a
- * manager acts differently on each: the newest DATED measurement is what the
- * numbers on this screen actually describe, while the last import is when data
- * last arrived in Pulse. A recent import of old data is not fresh data, and
- * collapsing the two into a single "עודכן לאחרונה" would say it was.
+ * Three separate facts are reported rather than merged, because a manager
+ * acts differently on each: the reporting PERIOD is which month the numbers
+ * describe, the last IMPORT is when data actually arrived in Pulse, and the
+ * freshness STATE compares the period to the current month. For monthly
+ * data the newest metric_date is the first of the month — a period marker —
+ * so counting days from it and calling current-month figures "לא עדכני"
+ * misreads a period as an update timestamp.
  */
 export function DataFreshnessBar({ teamId }: { teamId: string | null }) {
   const { isDemo } = useAppMode();
@@ -137,25 +137,24 @@ export function DataFreshnessBar({ teamId }: { teamId: string | null }) {
     staleTime: 60_000,
   });
 
-  const freshness = useMemo(
+  const summary = useMemo(
     () =>
-      computeFreshness({
-        sourceDataDate: q.data?.sourceDataDate ?? null,
+      summariseMonthlyFreshness({
+        // import_history.period is the authoritative reporting period; the
+        // newest kpi metric_date is only a period marker fallback.
+        period: q.data?.lastImportPeriod ?? q.data?.sourceDataDate ?? null,
         lastImportAt: q.data?.lastImportAt ?? null,
-        lastRefreshAt: null,
+        lastImportStatus: q.data?.lastImportStatus ?? null,
         today,
       }),
     [q.data, today],
   );
-  const summary = summariseFreshness(freshness);
 
   const reason = isDemo
     ? "מצב הדגמה — הנתונים אינם מגיעים ממקור אמיתי."
     : q.isLoading
       ? "בודק…"
-      : q.isError
-        ? "בדיקת מצב הנתונים נכשלה."
-        : "לא נמצאה מדידה מתוארכת. ייתכן שטרם בוצע ייבוא נתונים.";
+      : "בדיקת מצב הנתונים נכשלה.";
 
   return (
     <div
@@ -168,20 +167,16 @@ export function DataFreshnessBar({ teamId }: { teamId: string | null }) {
         <Database className="h-4 w-4" />
         מצב הנתונים
       </span>
-      {summary.unknown || q.isLoading || q.isError ? (
+      {isDemo || q.isLoading || q.isError ? (
         <span className="text-xs">{reason}</span>
       ) : (
         <>
           <span>{summary.stateLabel}</span>
-          <span className="text-xs opacity-90">
-            הנתונים עודכנו לאחרונה ב־{formatDateIL(freshness.sourceDataDate as string)} (
-            {summary.ageLabel})
-          </span>
-          <span className="text-xs opacity-90">
-            {freshness.lastImportAt
-              ? `${lastImportLabel(q.data?.lastImportStatus)}: ${formatDateIL(freshness.lastImportAt)}`
-              : "טרם בוצע ייבוא נתונים"}
-          </span>
+          {summary.lines.map((line) => (
+            <span key={line} className="text-xs opacity-90">
+              {line}
+            </span>
+          ))}
         </>
       )}
     </div>
