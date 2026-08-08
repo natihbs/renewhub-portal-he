@@ -47,7 +47,7 @@ export type ProcessedRow = {
    */
   matchedInactive: boolean;
   /** How the match was found, so the UI can explain itself honestly. */
-  matchedBy: "external_ref" | "name" | null;
+  matchedBy: "external_ref" | "email" | "name" | null;
   action: ResolvedAction;
 };
 
@@ -68,13 +68,16 @@ export type ImportMatchCandidate = {
   id: string;
   name: string;
   externalRef: string | null;
+  /** Login-account email of a linked representative (profiles.email), for
+   * email-based matching. Null for unlinked representatives. */
+  email: string | null;
   active: boolean;
   teamId: string | null;
 };
 
 export type ImportMatch = {
   candidate: ImportMatchCandidate;
-  matchedBy: "external_ref" | "name";
+  matchedBy: "external_ref" | "email" | "name";
 } | null;
 
 /**
@@ -92,11 +95,19 @@ export function matchImportRow(
   rowName: string,
   rowExternalRef: string | null,
   candidates: ImportMatchCandidate[],
+  rowEmail?: string | null,
 ): ImportMatch {
   const ref = rowExternalRef?.trim();
   if (ref) {
     const byRef = candidates.find((c) => c.externalRef && c.externalRef.trim() === ref);
     if (byRef) return { candidate: byRef, matchedBy: "external_ref" };
+  }
+  // Email sits between external_ref and name: unique per login account and
+  // rename-proof, but only linked representatives have one.
+  const email = rowEmail?.trim().toLowerCase();
+  if (email) {
+    const byEmail = candidates.find((c) => c.email && c.email.trim().toLowerCase() === email);
+    if (byEmail) return { candidate: byEmail, matchedBy: "email" };
   }
   const name = rowName?.trim();
   if (name) {
@@ -106,6 +117,14 @@ export function matchImportRow(
   }
   return null;
 }
+
+/**
+ * An unmatched row is never auto-created (import hardening §B): it parks on
+ * "skip" with this warning, and creating a representative from an import is
+ * only ever an explicit per-row human choice in the preview.
+ */
+export const UNMATCHED_NO_AUTOCREATE_MESSAGE =
+  'נציג לא מזוהה — לא ייווצר נציג חדש באופן אוטומטי. ניתן לבחור "יצירת נציג חדש" במפורש בשורה זו.';
 
 /** Explains an inactive match in the row list, and in the confirmation UI. */
 export const INACTIVE_MATCH_MESSAGE =
@@ -153,11 +172,15 @@ export function processRows(
   reps.forEach((r) => repByNorm.set(normalizeName(r.name), r));
 
   const seenNames = new Map<string, number>();
+  const seenRefs = new Map<string, number>();
   const out: ProcessedRow[] = [];
 
   rows.forEach((raw, i) => {
     const issues: RowIssue[] = [];
     const rawName = fieldToCol.name ? String(raw[fieldToCol.name] ?? "").trim() : "";
+    const rowExternalRefEarly = fieldToCol.externalRef
+      ? String(raw[fieldToCol.externalRef] ?? "").trim() || null
+      : null;
     const teamRaw = fieldToCol.team ? String(raw[fieldToCol.team] ?? "").trim() : "";
     const { teamId, teamName } = resolveTeam(fieldToCol.team ? raw[fieldToCol.team] : null, teams);
     // An update never clears an existing team assignment just because this
@@ -194,6 +217,23 @@ export function processRows(
     }
     const renewalOpportunities = teamProfile === "renewals" ? rawOpportunities : null;
     const completedRenewals = teamProfile === "renewals" ? rawCompleted : null;
+    // Renewal figures are counts — a negative one is always a file error, and
+    // more completed renewals than opportunities deserves a human look.
+    if (
+      (rawOpportunities != null && rawOpportunities < 0) ||
+      (rawCompleted != null && rawCompleted < 0)
+    ) {
+      issues.push({ severity: "error", message: "ערכי חידושים אינם יכולים להיות שליליים" });
+    } else if (
+      renewalOpportunities != null &&
+      completedRenewals != null &&
+      completedRenewals > renewalOpportunities
+    ) {
+      issues.push({
+        severity: "warning",
+        message: "חידושים שבוצעו גדולים ממספר ההזדמנויות — בדקו את הנתונים",
+      });
+    }
 
     const check = rowSchema.safeParse({
       name: rawName,
@@ -205,30 +245,45 @@ export function processRows(
         issues.push({ severity: "error", message: err.message });
       }
     }
-    // duplicate detection
+    // duplicate detection — by normalized name, and by the stable identifier
+    // when the file carries one (two rows for the same person must be seen).
     if (rawName) {
       const key = normalizeName(rawName);
       if (seenNames.has(key)) {
         issues.push({ severity: "warning", message: `כפילות – מופיע גם בשורה ${seenNames.get(key)! + 1}` });
       } else seenNames.set(key, i);
     }
+    if (rowExternalRefEarly) {
+      if (seenRefs.has(rowExternalRefEarly)) {
+        issues.push({
+          severity: "warning",
+          message: `כפילות מזהה נציג – מופיע גם בשורה ${seenRefs.get(rowExternalRefEarly)! + 1}`,
+        });
+      } else seenRefs.set(rowExternalRefEarly, i);
+    }
 
     // §P1: match against the authoritative candidate set (active AND inactive)
     // when one was supplied, falling back to the legacy active-only list only
     // when a caller hasn't been migrated yet.
-    const rowExternalRef = fieldToCol.externalRef ? String(raw[fieldToCol.externalRef] ?? "").trim() || null : null;
+    const rowExternalRef = rowExternalRefEarly;
+    const rowEmail = fieldToCol.email ? String(raw[fieldToCol.email] ?? "").trim() || null : null;
     const matched = candidates
-      ? matchImportRow(rawName, rowExternalRef, candidates)
+      ? matchImportRow(rawName, rowExternalRef, candidates, rowEmail)
       : (() => {
           const legacy = rawName ? repByNorm.get(normalizeName(rawName)) : undefined;
           return legacy
-            ? { candidate: { id: legacy.id, name: legacy.name, externalRef: null, active: true, teamId: legacy.teamId }, matchedBy: "name" as const }
+            ? { candidate: { id: legacy.id, name: legacy.name, externalRef: null, email: null, active: true, teamId: legacy.teamId }, matchedBy: "name" as const }
             : null;
         })();
 
     const matchedInactive = !!matched && !matched.candidate.active;
     if (matchedInactive) {
       issues.push({ severity: "warning", message: INACTIVE_MATCH_MESSAGE });
+    }
+    // Unknown representative: surfaced, never silently created (§B). The row
+    // parks on "skip"; creation is an explicit per-row choice in the preview.
+    if (!matched && rawName) {
+      issues.push({ severity: "warning", message: UNMATCHED_NO_AUTOCREATE_MESSAGE });
     }
 
     const hasErrors = issues.some((x) => x.severity === "error");
@@ -241,8 +296,10 @@ export function processRows(
       matchedBy: matched?.matchedBy ?? null,
       // An inactive match parks on "skip": never "create" (that duplicated the
       // person) and never "update" (that would write new operational numbers
-      // to a deactivated record). A human resolves it explicitly.
-      action: hasErrors ? "skip" : matchedInactive ? "skip" : matched ? "update" : "create",
+      // to a deactivated record). An UNMATCHED row also parks on "skip" —
+      // representatives are never auto-created from an import; creating one
+      // is an explicit per-row choice. A human resolves both explicitly.
+      action: hasErrors ? "skip" : matchedInactive ? "skip" : matched ? "update" : "skip",
     });
   });
   return out;

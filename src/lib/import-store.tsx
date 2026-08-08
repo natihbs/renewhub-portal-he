@@ -10,6 +10,9 @@ export type ImportFieldKey =
   // only identifier that survives a rename, and it is UNIQUE where non-null
   // at the database level.
   | "externalRef"
+  // Login-account email of a linked representative. Match-only, like
+  // externalRef: it identifies the person, it is never persisted by imports.
+  | "email"
   | "team"
   | "monthlyTarget"
   | "currentResult"
@@ -60,7 +63,7 @@ export const PERSISTED_FIELDS: ImportFieldKey[] = ["name", "team", "monthlyTarge
  * values are dropped, these are used). The truthfulness test treats it as a
  * first-class category so no field can ever go silently uncategorized.
  */
-export const MATCH_ONLY_FIELDS: ImportFieldKey[] = ["externalRef"];
+export const MATCH_ONLY_FIELDS: ImportFieldKey[] = ["externalRef", "email"];
 export const MATCH_ONLY_FIELD_REASON =
   "העמודה משמשת להתאמה מדויקת מול נציג קיים בלבד — הערך עצמו אינו נשמר על רשומת הנציג.";
 
@@ -84,6 +87,7 @@ export const UNSUPPORTED_FIELD_REASON = "השדה מוצג להתאמה עתיד
 export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   name: "שם הנציג",
   externalRef: "מזהה נציג (התאמה מדויקת, אופציונלי)",
+  email: "אימייל (התאמה לחשבון מקושר, אופציונלי)",
   team: "צוות",
   monthlyTarget: "יעד חודשי (אופציונלי — עדכון יעדים רשמיים דורש אישור נפרד)",
   currentResult: "ביצוע נוכחי",
@@ -138,6 +142,9 @@ export type ImportHistoryEntry = {
   warnings: number;
   errors: number;
   status: "success" | "partial" | "failed";
+  /** Reporting period ("YYYY-MM") the applied rows agreed on — null when the
+   * file mixed months or carried no dates. */
+  period?: string | null;
   snapshot?: ImportSnapshot; // only the most recent import keeps its snapshot
   errorReport?: { row: number; name?: string; messages: string[] }[];
 };
@@ -164,6 +171,7 @@ type HistoryRow = {
   warnings: number;
   errors: number;
   status: ImportHistoryEntry["status"];
+  period?: string | null;
   // snapshot is a schemaless JSONB column — accepts both the current shape
   // ({reps, targetGoals}) and the legacy bare-array shape written before
   // target-aware undo existed, normalized on read below.
@@ -229,6 +237,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       warnings: h.warnings,
       errors: h.errors,
       status: h.status,
+      period: h.period ?? null,
       snapshot: normalizeSnapshot(h.snapshot),
       errorReport: h.error_report ?? undefined,
     }));
@@ -240,23 +249,25 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         void templatesCloud.insert({ name, mapping } as never, "created_by"),
       removeTemplate: (id) => void templatesCloud.remove(id),
       pushHistory: (entry) => {
+        const baseRow = {
+          file_name: entry.fileName,
+          imported_by_name: entry.importedBy,
+          rows_processed: entry.rowsProcessed,
+          rows_updated: entry.rowsUpdated,
+          rows_created: entry.rowsCreated,
+          rows_skipped: entry.rowsSkipped,
+          warnings: entry.warnings,
+          errors: entry.errors,
+          status: entry.status,
+          snapshot: (entry.snapshot ?? null) as never,
+          error_report: (entry.errorReport ?? null) as never,
+        };
         void historyCloud
-          .insert(
-            {
-              file_name: entry.fileName,
-              imported_by_name: entry.importedBy,
-              rows_processed: entry.rowsProcessed,
-              rows_updated: entry.rowsUpdated,
-              rows_created: entry.rowsCreated,
-              rows_skipped: entry.rowsSkipped,
-              warnings: entry.warnings,
-              errors: entry.errors,
-              status: entry.status,
-              snapshot: (entry.snapshot ?? null) as never,
-              error_report: (entry.errorReport ?? null) as never,
-            },
-            "imported_by",
-          )
+          .insert({ ...baseRow, period: entry.period ?? null } as never, "imported_by")
+          // Drift safety: a live database that has not applied the additive
+          // `period` column migration yet must still get its history row —
+          // retry once without the new column rather than losing the record.
+          .catch(() => historyCloud.insert(baseRow as never, "imported_by"))
           .then(() => {
             // keep snapshots only on the most recent import
             for (const old of history.filter((h) => h.snapshot)) {
@@ -305,10 +316,14 @@ export function normalizeName(name: string): string {
 const AUTO_MAP: { field: ImportFieldKey; keywords: string[] }[] = [
   { field: "name", keywords: ["שם הנציג", "שם נציג", "שם עובד", "שם", "נציג", "name", "employee"] },
   { field: "externalRef", keywords: ["מזהה נציג", "מזהה", "external_ref", "externalref", "employee id", "id"] },
+  { field: "email", keywords: ["אימייל", "דואל", 'דוא"ל', "מייל", "email", "mail"] },
   { field: "team", keywords: ["צוות", "team", "מחלקה"] },
   { field: "monthlyTarget", keywords: ["יעד חודשי", "יעד", "target"] },
   { field: "currentResult", keywords: ["ביצוע נוכחי", "ביצוע", "תוצאה", "result", "actual"] },
-  { field: "updatedAt", keywords: ["תאריך עדכון", "תאריך", "date", "updated"] },
+  {
+    field: "updatedAt",
+    keywords: ["תאריך עדכון", "תאריך", "חודש", "תקופה", "date", "month", "updated", "period"],
+  },
   { field: "renewalOpportunities", keywords: ["הזדמנויות חידוש", "הזדמנויות", "opportunities"] },
   { field: "completedRenewals", keywords: ["חידושים שבוצעו", "חידושים בפועל", "completed renewals", "completedrenewals"] },
 ];
@@ -375,6 +390,20 @@ export function parseDate(v: unknown): string | null {
     return isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : null;
   }
   const s = String(v).trim();
+  // A reporting MONTH is a legal period value: "YYYY-MM" or "MM/YYYY" become
+  // the first of that month, so a "חודש" column works without a day-of-month.
+  const ym = s.match(/^((?:19|20)\d{2})[-/.](\d{1,2})$/);
+  if (ym) {
+    const mm = Number(ym[2]);
+    if (mm >= 1 && mm <= 12) return `${ym[1]}-${String(mm).padStart(2, "0")}-01`;
+    return null;
+  }
+  const my = s.match(/^(\d{1,2})[-/.]((?:19|20)\d{2})$/);
+  if (my) {
+    const mm = Number(my[1]);
+    if (mm >= 1 && mm <= 12) return `${my[2]}-${String(mm).padStart(2, "0")}-01`;
+    return null;
+  }
   // dd/mm/yyyy or dd.mm.yyyy
   const m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
   if (m) {

@@ -174,7 +174,7 @@ export function DataFreshnessBar({ teamId }: { teamId: string | null }) {
         <>
           <span>{summary.stateLabel}</span>
           <span className="text-xs opacity-90">
-            הנתונים מתארים מדידה מ־{formatDateIL(freshness.sourceDataDate as string)} (
+            הנתונים עודכנו לאחרונה ב־{formatDateIL(freshness.sourceDataDate as string)} (
             {summary.ageLabel})
           </span>
           <span className="text-xs opacity-90">
