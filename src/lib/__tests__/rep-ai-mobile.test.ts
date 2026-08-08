@@ -24,7 +24,7 @@ const feedbackSrc = read("../../routes/_authenticated/feedback.tsx");
 describe("Issue A — the AI request carries no system message", () => {
   const generateInsightSrc = aiFnsSrc.slice(
     aiFnsSrc.indexOf("async function generateInsight"),
-    aiFnsSrc.indexOf("function parseFallback"),
+    aiFnsSrc.indexOf("function formatPerformancePrompt"),
   );
 
   it("no system role appears anywhere in the functions module", () => {
@@ -40,9 +40,9 @@ describe("Issue A — the AI request carries no system message", () => {
   it("system guidance travels through the provider's `instructions` option", () => {
     expect(generateInsightSrc).toContain("providerOptions: { lovable: { instructions } }");
     // The three insight kinds still supply their guidance — now as instructions.
-    expect(aiFnsSrc).toContain("generateInsight(prompt, SYSTEM_PERFORMANCE)");
-    expect(aiFnsSrc).toContain("generateInsight(prompt, SYSTEM_FEEDBACK)");
-    expect(aiFnsSrc).toContain("generateInsight(prompt, SYSTEM_GOALS)");
+    expect(aiFnsSrc).toContain("generateInsight(prompt, SYSTEM_PERFORMANCE, hasData)");
+    expect(aiFnsSrc).toContain("generateInsight(prompt, SYSTEM_FEEDBACK, hasData)");
+    expect(aiFnsSrc).toContain("generateInsight(prompt, SYSTEM_GOALS, hasData)");
   });
 
   it("role scoping is untouched: representative rows are still filtered to self, server-side", () => {
