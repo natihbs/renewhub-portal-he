@@ -122,8 +122,8 @@ export const writeRepresentativeKpiValue = createServerFn({ method: "POST" })
   .inputValidator((data: KpiValueWriteInput) => {
     if (!data?.representative_id) throw new Error("חסר מזהה נציג");
     if (!KPI_WRITE_SOURCES.includes(data.source)) throw new Error("מקור עדכון לא חוקי");
-    const opportunities = normalizeKpiMetric(data.renewal_opportunities, "הזדמנויות חידוש");
-    const completed = normalizeKpiMetric(data.completed_renewals, "חידושים שבוצעו");
+    const opportunities = normalizeKpiMetric(data.renewal_opportunities, "מיועדות חודשיות");
+    const completed = normalizeKpiMetric(data.completed_renewals, "חידושים שנסגרו");
     if (opportunities === null && completed === null) {
       throw new Error("אין נתוני מדדים לשמירה");
     }

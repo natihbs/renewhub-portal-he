@@ -17,8 +17,7 @@ import {
 import { calculateAchievement, achievementStatus, DEFAULT_KPI_PROFILE } from "@/lib/performance-domain";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useTeamGoals, useRepresentativeGoals, currentGoalMonth } from "@/lib/goals-hooks";
-import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
-import { calculateRenewalRate } from "@/lib/renewal-rate";
+import { calculateAssignedRenewalRate } from "@/lib/renewal-rate";
 import { formatDateIL, formatNum, formatPct, workdaysRemaining } from "@/lib/format";
 import { useComms, KIND_LABEL, isCommsKind, type CommsKind, type CommsMessage, type CommsTemplate } from "@/lib/comms-store";
 import { PageHeader } from "@/components/ui/page-header";
@@ -142,17 +141,20 @@ function useGenerationInputs() {
       totalTarget,
     );
 
-    // Renewal-specific teams only — never a combined/derived rate across teams that
-    // don't share the metric, and never derived from target/result.
+    // Renewal-specific teams only — never a combined/derived rate across teams
+    // that don't share the metric. Business model: the team's official monthly
+    // goal IS the assigned renewal book (מיועדות חודשיות) and the summed
+    // current_result is closed renewals — both already computed in `teams`.
     const profileByTeamId = new Map(cloudTeams.map((t) => [t.id, t.kpiProfile]));
     const renewalTeams = teams
       .filter((t) => (profileByTeamId.get(t.teamId) ?? DEFAULT_KPI_PROFILE) === "renewals")
-      .map((t) => {
-        // Historical attribution (kpi_values.team_id) — the team's own
-        // produced numbers, unaffected by later representative transfers.
-        const totals = renewalTotalsForTeamHistorical(t.teamId, state.kpiValues);
-        return { teamId: t.teamId, teamName: t.teamName, totals, rate: calculateRenewalRate("renewals", totals.completed, totals.opportunities) };
-      });
+      .map((t) => ({
+        teamId: t.teamId,
+        teamName: t.teamName,
+        assigned: t.target,
+        completed: t.result,
+        rate: calculateAssignedRenewalRate("renewals", t.result, t.target),
+      }));
 
     const withPct = reps.map((r) => {
       const target = goalsByRepId.get(r.id) ?? null;
@@ -799,7 +801,9 @@ export function renewalSectionLines(renewalTeams: Inputs["renewalTeams"]): strin
   const lines: string[] = [];
   for (const t of renewalTeams) {
     if (!t.rate.available) continue;
-    lines.push(`🔹 ${t.teamName}: ${formatPct(t.rate.pct)} אחוז חידוש · ${formatNum(t.totals.completed ?? 0)}/${formatNum(t.totals.opportunities ?? 0)}`);
+    lines.push(
+      `🔹 ${t.teamName}: ${formatPct(t.rate.pct)} אחוז חידוש · ${formatNum(t.completed)} חידושים שנסגרו מתוך ${formatNum(t.assigned ?? 0)} מיועדות חודשיות`,
+    );
   }
   if (lines.length === 0) return [];
   return ["", "🔄 חידושים:", ...lines];

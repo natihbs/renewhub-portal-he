@@ -102,8 +102,8 @@ describe("A — template and Hebrew aliases", () => {
       "צוות",
       "ביצוע נוכחי",
       "תאריך עדכון",
-      "הזדמנויות חידוש",
-      "חידושים שבוצעו",
+      "מיועדות חודשיות",
+      "חידושים שנסגרו",
     ]) {
       expect(dataImportSrc).toContain(`"${col}"`);
     }
@@ -174,7 +174,7 @@ describe("B — validation and preview", () => {
     );
     expect(
       r.issues.some(
-        (i) => i.severity === "warning" && i.message.includes("גדולים ממספר ההזדמנויות"),
+        (i) => i.severity === "warning" && i.message.includes("גדולים ממספר המיועדות"),
       ),
     ).toBe(true);
   });

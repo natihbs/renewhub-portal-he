@@ -231,7 +231,7 @@ export function processRows(
     ) {
       issues.push({
         severity: "warning",
-        message: "חידושים שבוצעו גדולים ממספר ההזדמנויות — בדקו את הנתונים",
+        message: "חידושים שנסגרו גדולים ממספר המיועדות החודשיות — בדקו את הנתונים",
       });
     }
 
