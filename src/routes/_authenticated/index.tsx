@@ -33,7 +33,23 @@ import {
 import { useWorkspace, managerScopeLabel } from "@/lib/workspace-context";
 import { useBusinessScope } from "@/lib/business-scope-hooks";
 import {
+  aggregateByProfile,
+  buildScopeTeamRows,
+  groupScopeRows,
+  isScopedManagerKind,
+  managerHeaderPrimaryLine,
+  missingTargetsByTeam,
+  SCOPE_SELECT_TEAM_HINT,
+  SCOPE_SELECTED_TEAM_SECTION_TITLE,
+  SCOPE_TARGETS_ACTION_LABEL,
+  TEAM_TARGETS_ACTION_LABEL,
+  type ScopedManagerKind,
+  type ScopeHomeTeamInput,
+} from "@/lib/scope-home";
+import { ScopeMissingTargetsCard, ScopeOverviewCard } from "@/components/ScopeHomeCards";
+import {
   useTeamGoal,
+  useTeamGoals,
   useRepresentativeGoal,
   useRepresentativeGoals,
   currentGoalMonth,
@@ -187,17 +203,25 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
     () => visibleTeams.filter((t) => t.managerId === user?.id),
     [visibleTeams, user],
   );
-  const scopeLine =
-    role === "admin"
-      ? ADMIN_SCOPE_LABEL
-      : role === "manager"
-        ? managerScopeLabel({ workspace, managedTeams, ready })
-        : me?.teamName || NO_TEAM_LABEL;
   // The resolved BUSINESS scope (מנהל צוות / מנהל מוקד / מנהל פעילות /
   // סמנכ"ל) — a manager-only "היקף צפייה" line. Admin keeps the system-
   // administrator framing and never gets a business-executive label;
   // representatives see only their own team name above.
   const { scope: businessScope } = useBusinessScope();
+  // A business-scope manager's identity line is their business title
+  // ("מנהל מוקד · דירות וחידושים") — having no profile team and no direct
+  // teams.manager_id rows is a VALID setup for them, so they must never see
+  // the "לא הוגדר צוות לניהול" warning. Everyone else keeps the exact
+  // workspace-derived label they had.
+  const scopeLine =
+    role === "admin"
+      ? ADMIN_SCOPE_LABEL
+      : role === "manager"
+        ? managerHeaderPrimaryLine(
+            businessScope,
+            managerScopeLabel({ workspace, managedTeams, ready }),
+          )
+        : me?.teamName || NO_TEAM_LABEL;
 
   return (
     <div className="space-y-2">
@@ -427,7 +451,7 @@ function AdminShortcutsGrid() {
 function ManagerHome() {
   const { state } = useApp();
   const { reps, announcements, competitions } = state;
-  const { workspace } = useWorkspace();
+  const { workspace, setWorkspaceTeam } = useWorkspace();
   const workspaceTeamId = workspace.type === "team" ? workspace.teamId : null;
   const scopedReps = useMemo(
     () => (workspaceTeamId ? reps.filter((r) => r.teamId === workspaceTeamId) : reps),
@@ -438,6 +462,70 @@ function ManagerHome() {
   const teamGoal = useTeamGoal(workspaceTeamId);
   const scopedRepIds = useMemo(() => scopedReps.map((r) => r.id), [scopedReps]);
   const repGoals = useRepresentativeGoals(scopedRepIds);
+
+  // Business-scope managers (מנהל מוקד / מנהל פעילות / סמנכ"ל) lead with the
+  // TEAMS in their scope, grouped by their hierarchy level; the single
+  // selected team becomes the secondary drill-down. A plain team manager
+  // keeps the unchanged single-team layout below.
+  const { scope, isLoading: scopeLoading, isError: scopeError } = useBusinessScope();
+  const scopedManager = isScopedManagerKind(scope?.kind);
+  const scopeTeamInputs = useMemo<ScopeHomeTeamInput[]>(() => {
+    if (!scopedManager || !scope) return [];
+    const unitByTeam = new Map(scope.teamUnits.map((t) => [t.id, t.businessUnitId]));
+    return scope.teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      kpiProfile: profileByTeamId.get(t.id) ?? DEFAULT_KPI_PROFILE,
+      businessUnitId: unitByTeam.get(t.id) ?? null,
+    }));
+  }, [scopedManager, scope, profileByTeamId]);
+  const scopeTeamIds = useMemo(() => scopeTeamInputs.map((t) => t.id), [scopeTeamInputs]);
+  const scopeAllReps = useMemo(() => {
+    const ids = new Set(scopeTeamIds);
+    return reps.filter((r) => r.teamId && ids.has(r.teamId));
+  }, [reps, scopeTeamIds]);
+  const scopeTeamGoals = useTeamGoals(scopeTeamIds);
+  const scopeAllRepIds = useMemo(() => scopeAllReps.map((r) => r.id), [scopeAllReps]);
+  const scopeRepGoals = useRepresentativeGoals(scopeAllRepIds);
+  const scopeRows = useMemo(
+    () =>
+      buildScopeTeamRows({
+        teams: scopeTeamInputs,
+        reps: scopeAllReps.map((r) => ({
+          id: r.id,
+          teamId: r.teamId,
+          currentResult: r.currentResult,
+        })),
+        goalsByTeamId: scopeTeamGoals.goalsByTeamId,
+        goalsByRepId: scopeRepGoals.goalsByRepId,
+      }),
+    [scopeTeamInputs, scopeAllReps, scopeTeamGoals.goalsByTeamId, scopeRepGoals.goalsByRepId],
+  );
+  const scopeGroups = useMemo(
+    () =>
+      scopedManager && scope
+        ? groupScopeRows({
+            kind: scope.kind as ScopedManagerKind,
+            rows: scopeRows,
+            units: scope.units,
+          })
+        : [],
+    [scopedManager, scope, scopeRows],
+  );
+  const scopeAggregates = useMemo(() => aggregateByProfile(scopeRows), [scopeRows]);
+  const scopeMissing = useMemo(() => missingTargetsByTeam(scopeRows), [scopeRows]);
+  const scopeCardsLoading =
+    scopeLoading ||
+    teamsLoading ||
+    state.repsLoading ||
+    scopeTeamGoals.isLoading ||
+    scopeRepGoals.isLoading;
+  const scopeCardsError =
+    scopeError ||
+    teamsError ||
+    !!state.repsError ||
+    scopeTeamGoals.isError ||
+    scopeRepGoals.isError;
 
   // Renewals business model: the team's official monthly goal IS the assigned
   // renewal book (מיועדות חודשיות) and current_result is closed renewals — so
@@ -470,7 +558,12 @@ function ManagerHome() {
               <Link to="/feedback"><Headphones className="ms-1 h-4 w-4" />הוספת האזנה</Link>
             </Button>
             <Button asChild variant="outline" size="sm">
-              <Link to="/targets"><Target className="ms-1 h-4 w-4" />יעדי הצוות</Link>
+              {/* One selected team is a team-manager assumption — a scope
+                  manager sets targets across teams, so the label says so. */}
+              <Link to="/targets">
+                <Target className="ms-1 h-4 w-4" />
+                {scopedManager ? SCOPE_TARGETS_ACTION_LABEL : TEAM_TARGETS_ACTION_LABEL}
+              </Link>
             </Button>
             <Button asChild size="sm">
               <Link to="/competitions"><Trophy className="ms-1 h-4 w-4" />יצירת תחרות</Link>
@@ -487,7 +580,29 @@ function ManagerHome() {
           removed. */}
       <DataFreshnessBar teamId={workspaceTeamId} />
 
-      {workspace.type === "team" && (
+      {/* A business-scope manager's PRIMARY view is the teams in their scope
+          — grouped by their level, labeled by each team's own KPI profile —
+          with missing targets broken down by team. The per-rep pace detail
+          becomes a drill-down into the selected team below. A plain team
+          manager keeps the exact single-team layout. */}
+      {scopedManager && (
+        <>
+          <ScopeOverviewCard
+            groups={scopeGroups}
+            aggregates={scopeAggregates}
+            isLoading={scopeCardsLoading}
+            isError={scopeCardsError}
+            onSelectTeam={setWorkspaceTeam}
+          />
+          <ScopeMissingTargetsCard
+            rows={scopeMissing}
+            isLoading={scopeCardsLoading}
+            isError={scopeCardsError}
+          />
+        </>
+      )}
+
+      {!scopedManager && workspace.type === "team" && (
         <TeamCard
           teamName={workspace.teamName}
           teamActive={cloudTeams.find((t) => t.id === workspace.teamId)?.active ?? true}
@@ -500,12 +615,45 @@ function ManagerHome() {
         />
       )}
 
-      <TeamPaceCard
-        reps={scopedReps}
-        goalsByRepId={repGoals.goalsByRepId}
-        isLoading={state.repsLoading || repGoals.isLoading}
-        isError={!!state.repsError || repGoals.isError}
-      />
+      {!scopedManager && (
+        <TeamPaceCard
+          reps={scopedReps}
+          goalsByRepId={repGoals.goalsByRepId}
+          isLoading={state.repsLoading || repGoals.isLoading}
+          isError={!!state.repsError || repGoals.isError}
+        />
+      )}
+
+      {/* For a scope manager the per-rep pace detail is SECONDARY: it lives
+          behind the selected-team fold, not on the first screen. */}
+      {scopedManager && (
+        <CollapsibleSection title={SCOPE_SELECTED_TEAM_SECTION_TITLE}>
+          {workspace.type === "team" ? (
+            <div className="space-y-4">
+              <TeamCard
+                teamName={workspace.teamName}
+                teamActive={cloudTeams.find((t) => t.id === workspace.teamId)?.active ?? true}
+                reps={scopedReps}
+                teamTarget={teamGoal.targetValue}
+                targetsLoading={teamGoal.isLoading || teamsLoading}
+                targetsError={teamGoal.isError || teamsError}
+                kpiProfile={profileByTeamId.get(workspace.teamId) ?? DEFAULT_KPI_PROFILE}
+                renewal={renewal}
+              />
+              <TeamPaceCard
+                reps={scopedReps}
+                goalsByRepId={repGoals.goalsByRepId}
+                isLoading={state.repsLoading || repGoals.isLoading}
+                isError={!!state.repsError || repGoals.isError}
+              />
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+              {SCOPE_SELECT_TEAM_HINT}
+            </div>
+          )}
+        </CollapsibleSection>
+      )}
 
       <CollapsibleSection title="שגרת בוקר מלאה">
         <MorningRoutine />

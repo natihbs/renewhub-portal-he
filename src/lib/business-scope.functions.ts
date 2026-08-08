@@ -183,6 +183,13 @@ async function readScopeTeams(ctx: Ctx): Promise<ScopeTeam[]> {
 export type BusinessScopePayload = ResolvedBusinessScope & {
   importNotice: string[];
   teamIds: string[];
+  /**
+   * The hierarchy nodes (business_units is authenticated-readable) plus each
+   * covered team's unit attachment — what the scope home needs to group team
+   * rows by center/activity. Display-only; RLS remains the boundary.
+   */
+  units: BusinessUnit[];
+  teamUnits: { id: string; businessUnitId: string | null }[];
 };
 
 /**
@@ -208,7 +215,7 @@ export const getBusinessScope = createServerFn({ method: "POST" })
         units: [],
         grants: [],
       });
-      return { ...resolved, importNotice: [], teamIds: [] };
+      return { ...resolved, importNotice: [], teamIds: [], units: [], teamUnits: [] };
     }
 
     const teams = await readScopeTeams(ctx);
@@ -223,10 +230,15 @@ export const getBusinessScope = createServerFn({ method: "POST" })
     }));
 
     const resolved = resolveBusinessScope({ role, userId: ctx.userId, teams, units, grants });
+    const coveredIds = new Set(resolved.teams.map((t) => t.id));
     return {
       ...resolved,
       importNotice: importScopeNotice(resolved),
       teamIds: resolved.teams.map((t) => t.id),
+      units,
+      teamUnits: teams
+        .filter((t) => coveredIds.has(t.id))
+        .map((t) => ({ id: t.id, businessUnitId: t.businessUnitId })),
     };
   });
 
