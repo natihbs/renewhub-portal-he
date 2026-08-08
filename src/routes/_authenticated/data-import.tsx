@@ -25,6 +25,8 @@ import { useIsManager, useApp, teamsFromReps } from "@/lib/store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
 import { useCloudTeams } from "@/lib/teams-hooks";
+import { useBusinessScope } from "@/lib/business-scope-hooks";
+import { MANAGE_SCOPE_TITLE } from "@/lib/business-scope";
 import { createRepresentative, updateRepresentativeMetrics, setRepresentativeActive, listRepresentativeMatchCandidates } from "@/lib/rep-admin.functions";
 import { writeRepresentativeKpiValue } from "@/lib/kpi.functions";
 import { setRepresentativeGoals, restoreRepresentativeGoals } from "@/lib/goals.functions";
@@ -87,6 +89,31 @@ function PrivacyNotice() {
       <AlertTitle>הודעת אבטחה ופרטיות</AlertTitle>
       <AlertDescription>
         המערכת מיועדת לנתוני ביצועים ניהוליים בלבד. אין להעלות פרטי לקוחות, מספרי פוליסה, תעודות זהות, מספרי טלפון או מידע רגיש אחר.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/**
+ * Visible import scope (§business hierarchy foundation): says out loud which
+ * teams this import can reach. A manager sees the limit and the exact team
+ * names their resolved scope covers ("צוותים זמינים: …"); the system
+ * administrator sees the admin fact instead. The server/RLS funnel enforces
+ * the same resolved scope — this card only makes it visible.
+ */
+function ImportScopeCard() {
+  const { scope } = useBusinessScope();
+  if (!scope || scope.importNotice.length === 0) return null;
+  return (
+    <Alert>
+      <ShieldAlert className="h-4 w-4" />
+      <AlertTitle>{MANAGE_SCOPE_TITLE}</AlertTitle>
+      <AlertDescription>
+        <div className="space-y-0.5">
+          {scope.importNotice.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+        </div>
       </AlertDescription>
     </Alert>
   );
@@ -543,6 +570,7 @@ function DataImportPage() {
       />
 
       <PrivacyNotice />
+      <ImportScopeCard />
 
       <Card>
         <CardHeader className="pb-3"><StepBar step={step} /></CardHeader>

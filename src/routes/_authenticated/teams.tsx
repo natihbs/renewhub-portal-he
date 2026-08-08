@@ -29,6 +29,14 @@ import {
   listTeamAssignmentCandidates, canManagerRemoveTarget,
 } from "@/lib/team-admin.functions";
 import { useWorkspace } from "@/lib/workspace-context";
+import {
+  listBusinessHierarchy,
+  createBusinessUnit,
+  attachTeamToUnit,
+  setUserBusinessScope,
+  HIERARCHY_TABLES_MISSING_MESSAGE,
+} from "@/lib/business-scope.functions";
+import { BUSINESS_UNIT_TYPE_LABEL } from "@/lib/business-scope";
 import { type KpiProfile, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS } from "@/lib/performance-domain";
 
 export const Route = createFileRoute("/_authenticated/teams")({
@@ -390,6 +398,8 @@ function TeamsPage() {
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && <BusinessHierarchyCard onChanged={invalidate} />}
 
       {canManage && (
         <TeamDialog
@@ -974,6 +984,354 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
         ) : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Admin-only business hierarchy configuration (§business hierarchy
+ * foundation): פעילות ← מוקד ← צוות, plus per-manager business scopes
+ * (מנהל מוקד / מנהל פעילות / סמנכ"ל-מנהל ממ"ט). Deliberately minimal — this
+ * configures scope METADATA only. It never touches teams.manager_id (the
+ * authoritative team-manager ownership), never changes the technical role
+ * enum, and the admin stays "מנהל מערכת" rather than a business executive.
+ */
+function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
+  const listFn = useServerFn(listBusinessHierarchy);
+  const createUnitFn = useServerFn(createBusinessUnit);
+  const attachFn = useServerFn(attachTeamToUnit);
+  const setScopeFn = useServerFn(setUserBusinessScope);
+  const qc = useQueryClient();
+
+  const q = useQuery({
+    queryKey: ["admin", "business-hierarchy"],
+    queryFn: () => listFn(),
+  });
+  const view = q.data;
+
+  const [unitName, setUnitName] = useState("");
+  const [unitType, setUnitType] = useState<"activity" | "center">("activity");
+  const [unitParent, setUnitParent] = useState<string>("");
+  const [attachTeam, setAttachTeam] = useState<string>("");
+  const [attachUnit, setAttachUnit] = useState<string>(NONE);
+  const [scopeUser, setScopeUser] = useState<string>("");
+  const [scopeType, setScopeType] = useState<"none" | "center" | "activity" | "executive">("none");
+  const [scopeUnit, setScopeUnit] = useState<string>("");
+
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ["admin", "business-hierarchy"] });
+    await onChanged();
+    // The caller's own resolved scope may have changed too.
+    await qc.invalidateQueries({ queryKey: ["business-scope"] });
+  };
+
+  const createUnitM = useMutation({
+    mutationFn: () =>
+      createUnitFn({
+        data: {
+          name: unitName,
+          unitType,
+          parentId: unitType === "center" ? unitParent || null : null,
+        },
+      }),
+    onSuccess: async () => {
+      await refresh();
+      setUnitName("");
+      toast.success("היחידה העסקית נוצרה");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const attachM = useMutation({
+    mutationFn: () =>
+      attachFn({
+        data: {
+          teamId: attachTeam,
+          unitId: attachUnit === NONE ? null : attachUnit,
+        },
+      }),
+    onSuccess: async () => {
+      await refresh();
+      toast.success("שיוך הצוות עודכן");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const setScopeM = useMutation({
+    mutationFn: () =>
+      setScopeFn({
+        data: {
+          userId: scopeUser,
+          scopeType,
+          unitId: scopeType === "center" || scopeType === "activity" ? scopeUnit || null : null,
+        },
+      }),
+    onSuccess: async () => {
+      await refresh();
+      toast.success("היקף הניהול עודכן");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const activities = (view?.units ?? []).filter((u) => u.unitType === "activity");
+  const centers = (view?.units ?? []).filter((u) => u.unitType === "center");
+  const teamsByUnit = new Map<string, string[]>();
+  for (const t of view?.teams ?? []) {
+    if (!t.businessUnitId) continue;
+    teamsByUnit.set(t.businessUnitId, [...(teamsByUnit.get(t.businessUnitId) ?? []), t.name]);
+  }
+  const scopeUnitOptions = scopeType === "activity" ? activities : centers;
+
+  return (
+    <Card>
+      <CardContent className="pt-5 space-y-5">
+        <div>
+          <h2 className="text-base font-bold">היררכיה עסקית</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            סמנכ"ל / מנהל ממ"ט ← מנהל פעילות ← מנהל מוקד ← מנהל צוות ← נציג. ההיקפים העסקיים נוספים
+            מעל הבעלות הישירה על צוות (teams.manager_id) ואינם משנים אותה; מנהל מערכת נשאר מנהל
+            מערכת בלבד.
+          </p>
+        </div>
+
+        {q.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : q.isError ? (
+          <p className="text-sm text-destructive">טעינת ההיררכיה העסקית נכשלה.</p>
+        ) : !view?.ready ? (
+          <p className="text-sm text-muted-foreground">{HIERARCHY_TABLES_MISSING_MESSAGE}</p>
+        ) : (
+          <>
+            {/* Current structure — read-only view */}
+            {activities.length === 0 && centers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                טרם הוגדרו פעילויות או מוקדים. צרו פעילות ראשונה כדי להתחיל.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {activities.map((a) => (
+                  <div key={a.id} className="rounded-lg border p-3 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">פעילות</Badge>
+                      <span className="text-sm font-semibold">{a.name}</span>
+                      {(teamsByUnit.get(a.id) ?? []).length > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          צוותים: {(teamsByUnit.get(a.id) ?? []).join(", ")}
+                        </span>
+                      )}
+                    </div>
+                    {centers
+                      .filter((c) => c.parentId === a.id)
+                      .map((c) => (
+                        <div key={c.id} className="me-4 flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">מוקד</Badge>
+                          <span className="text-sm">{c.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {(teamsByUnit.get(c.id) ?? []).length > 0
+                              ? `צוותים: ${(teamsByUnit.get(c.id) ?? []).join(", ")}`
+                              : "ללא צוותים משויכים"}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                ))}
+                {centers
+                  .filter((c) => !c.parentId)
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      className="rounded-lg border p-3 flex flex-wrap items-center gap-2"
+                    >
+                      <Badge variant="outline">מוקד</Badge>
+                      <span className="text-sm">{c.name}</span>
+                      <span className="text-xs text-muted-foreground">ללא פעילות אב</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {/* Create unit */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="bh-unit-name">שם יחידה חדשה</Label>
+                <Input
+                  id="bh-unit-name"
+                  value={unitName}
+                  onChange={(e) => setUnitName(e.target.value)}
+                  placeholder="למשל: פעילות חידושים"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>סוג</Label>
+                <Select
+                  value={unitType}
+                  onValueChange={(v) => setUnitType(v as "activity" | "center")}
+                >
+                  <SelectTrigger aria-label="סוג יחידה">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="activity">פעילות</SelectItem>
+                    <SelectItem value="center">מוקד</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {unitType === "center" && (
+                <div className="space-y-1.5">
+                  <Label>פעילות אב</Label>
+                  <Select value={unitParent} onValueChange={setUnitParent}>
+                    <SelectTrigger aria-label="פעילות אב">
+                      <SelectValue placeholder="בחרו פעילות" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activities.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <Button
+                size="sm"
+                disabled={
+                  !unitName.trim() ||
+                  (unitType === "center" && !unitParent) ||
+                  createUnitM.isPending
+                }
+                onClick={() => createUnitM.mutate()}
+              >
+                <Plus className="ms-1 h-4 w-4" />
+                הוספת יחידה
+              </Button>
+            </div>
+
+            {/* Attach team */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
+              <div className="space-y-1.5">
+                <Label>שיוך צוות ליחידה</Label>
+                <Select value={attachTeam} onValueChange={setAttachTeam}>
+                  <SelectTrigger aria-label="בחירת צוות לשיוך">
+                    <SelectValue placeholder="בחרו צוות" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(view.teams ?? []).map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>יחידה</Label>
+                <Select value={attachUnit} onValueChange={setAttachUnit}>
+                  <SelectTrigger aria-label="בחירת יחידה">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>ללא שיוך</SelectItem>
+                    {(view.units ?? []).map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {BUSINESS_UNIT_TYPE_LABEL[u.unitType]} · {u.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!attachTeam || attachM.isPending}
+                onClick={() => attachM.mutate()}
+              >
+                עדכון שיוך
+              </Button>
+            </div>
+
+            {/* Assign manager scope */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
+                <div className="space-y-1.5">
+                  <Label>היקף ניהול למנהל</Label>
+                  <Select value={scopeUser} onValueChange={setScopeUser}>
+                    <SelectTrigger aria-label="בחירת מנהל">
+                      <SelectValue placeholder="בחרו מנהל" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(view.managers ?? []).map((m) => (
+                        <SelectItem key={m.userId} value={m.userId}>
+                          {m.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>סוג היקף</Label>
+                  <Select
+                    value={scopeType}
+                    onValueChange={(v) => {
+                      setScopeType(v as typeof scopeType);
+                      setScopeUnit("");
+                    }}
+                  >
+                    <SelectTrigger aria-label="סוג היקף">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">ללא היקף נוסף (מנהל צוות)</SelectItem>
+                      <SelectItem value="center">מנהל מוקד</SelectItem>
+                      <SelectItem value="activity">מנהל פעילות</SelectItem>
+                      <SelectItem value="executive">סמנכ"ל / מנהל ממ"ט</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(scopeType === "center" || scopeType === "activity") && (
+                  <div className="space-y-1.5">
+                    <Label>{scopeType === "activity" ? "פעילות" : "מוקד"}</Label>
+                    <Select value={scopeUnit} onValueChange={setScopeUnit}>
+                      <SelectTrigger aria-label="בחירת יחידה להיקף">
+                        <SelectValue placeholder="בחרו יחידה" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {scopeUnitOptions.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    !scopeUser ||
+                    ((scopeType === "center" || scopeType === "activity") && !scopeUnit) ||
+                    setScopeM.isPending
+                  }
+                  onClick={() => setScopeM.mutate()}
+                >
+                  עדכון היקף
+                </Button>
+              </div>
+              {(view.grants ?? []).length > 0 && (
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  {view.grants.map((g) => (
+                    <div key={`${g.userId}-${g.scopeType}-${g.businessUnitId ?? "all"}`}>
+                      {g.userName} —{" "}
+                      {g.scopeType === "executive"
+                        ? 'סמנכ"ל / מנהל ממ"ט (כלל הפעילות העסקית)'
+                        : `${g.scopeType === "activity" ? "מנהל פעילות" : "מנהל מוקד"}${g.unitName ? ` · ${g.unitName}` : ""}`}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

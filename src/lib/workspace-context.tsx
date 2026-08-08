@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useAuth } from "@/lib/auth";
 import { useAppMode } from "@/lib/app-mode";
 import { useVisibleTeams } from "@/lib/teams-hooks";
+import { useBusinessScope } from "@/lib/business-scope-hooks";
 
 /**
  * Workspace = the operational scope the current screen should be read/filtered
@@ -52,10 +53,13 @@ export type WorkspaceTeamInput = { id: string; name: string; managerId: string |
  *  - System Administrator: entire organization + every team, including
  *    inactive ones (P2a — deactivating a team must not make its history
  *    unreachable; the UI marks it with a "מושבת" badge, see WorkspaceOption.active).
- *  - Manager: only the teams they personally manage (never every team RLS
- *    happens to let them read — e.g. one they're merely a member of),
- *    including an inactive team they manage — otherwise a manager whose only
- *    team gets deactivated would lose all workspace access.
+ *  - Manager: the teams they personally manage via teams.manager_id (never
+ *    every team RLS happens to let them read — e.g. one they're merely a
+ *    member of), including an inactive team they manage — otherwise a manager
+ *    whose only team gets deactivated would lose all workspace access — PLUS
+ *    any teams covered by a granted business scope (מוקד/פעילות/סמנכ"ל; see
+ *    business-scope.ts). A manager with no grants gets exactly the
+ *    manager_id set, unchanged.
  *  - Representative / Demo Mode: no switcher at all.
  */
 export function computeWorkspaceOptions(params: {
@@ -65,8 +69,11 @@ export function computeWorkspaceOptions(params: {
   isDemo: boolean;
   userId: string | null;
   teams: WorkspaceTeamInput[];
+  /** Team ids covered by the user's resolved business scope (may be empty). */
+  scopeTeamIds?: string[];
 }): WorkspaceOption[] {
   const { isAdmin, isManager, isRepresentative, isDemo, userId, teams } = params;
+  const scopeIds = new Set(params.scopeTeamIds ?? []);
   if (isDemo || isRepresentative) return [];
   if (isAdmin) {
     return [
@@ -76,7 +83,7 @@ export function computeWorkspaceOptions(params: {
   }
   if (isManager) {
     return teams
-      .filter((t) => t.managerId === userId)
+      .filter((t) => t.managerId === userId || scopeIds.has(t.id))
       .map((t) => ({ type: "team" as const, teamId: t.id, label: t.name, active: t.active }));
   }
   return [];
@@ -116,15 +123,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { isAdmin, isManager, isRepresentative, user } = useAuth();
   const { isDemo } = useAppMode();
   const { teams, isLoading } = useVisibleTeams();
+  // Additive business scope (מוקד/פעילות/סמנכ"ל) — widens which teams a
+  // manager may switch into; a manager with no grants resolves to exactly
+  // their teams.manager_id set (see business-scope.ts).
+  const { scope } = useBusinessScope();
+  const scopeTeamIds = useMemo(() => scope?.teamIds ?? [], [scope]);
 
-  const managedTeams = useMemo(
-    () => teams.filter((t) => isManager && !isAdmin && t.managerId === user?.id),
-    [teams, isManager, isAdmin, user],
-  );
+  const managedTeams = useMemo(() => {
+    const scopeIds = new Set(scopeTeamIds);
+    return teams.filter(
+      (t) => isManager && !isAdmin && (t.managerId === user?.id || scopeIds.has(t.id)),
+    );
+  }, [teams, isManager, isAdmin, user, scopeTeamIds]);
 
   const options: WorkspaceOption[] = useMemo(
-    () => computeWorkspaceOptions({ isAdmin, isManager, isRepresentative, isDemo, userId: user?.id ?? null, teams }),
-    [isAdmin, isManager, isRepresentative, isDemo, user, teams],
+    () =>
+      computeWorkspaceOptions({
+        isAdmin,
+        isManager,
+        isRepresentative,
+        isDemo,
+        userId: user?.id ?? null,
+        teams,
+        scopeTeamIds,
+      }),
+    [isAdmin, isManager, isRepresentative, isDemo, user, teams, scopeTeamIds],
   );
 
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
