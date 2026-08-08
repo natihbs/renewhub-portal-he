@@ -24,7 +24,7 @@ import { calculateAchievement, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFI
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { renewalTotalsForTeamHistorical } from "@/lib/kpi-values";
 import { calculateRenewalRate, RENEWAL_RATE_UNAVAILABLE_LABEL } from "@/lib/renewal-rate";
-import { useWorkspace } from "@/lib/workspace-context";
+import { useWorkspace, managerScopeLabel } from "@/lib/workspace-context";
 import {
   useTeamGoal,
   useRepresentativeGoal,
@@ -167,14 +167,25 @@ function ErrorState({ message, onRetry, compact }: { message?: string; onRetry?:
  */
 function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNode }) {
   const { profile, user } = useAuth();
-  const { workspace } = useWorkspace();
+  const { workspace, ready } = useWorkspace();
   const { state } = useApp();
+  const { teams: visibleTeams } = useVisibleTeams();
   const me = state.reps.find((r) => r.id === state.currentRepId);
   const displayName = profile?.full_name || user?.email || "משתמש";
+  // Managed teams = teams.manager_id names this user — the ownership source.
+  // profiles.team_id is profile membership and is never consulted here, so a
+  // manager whose profile points at a team they don't manage can't get a
+  // wrong label from it (and one who does manage their team can't lose it).
+  const managedTeams = useMemo(
+    () => visibleTeams.filter((t) => t.managerId === user?.id),
+    [visibleTeams, user],
+  );
   const scopeLine =
-    role === "admin" ? ADMIN_SCOPE_LABEL
-    : role === "manager" ? (workspace.type === "team" ? workspace.teamName : NO_TEAM_LABEL)
-    : (me?.teamName || NO_TEAM_LABEL);
+    role === "admin"
+      ? ADMIN_SCOPE_LABEL
+      : role === "manager"
+        ? managerScopeLabel({ workspace, managedTeams, ready })
+        : me?.teamName || NO_TEAM_LABEL;
 
   return (
     <div className="space-y-2">

@@ -82,6 +82,36 @@ export function computeWorkspaceOptions(params: {
   return [];
 }
 
+export const NO_MANAGED_TEAM_LABEL = "לא הוגדר צוות לניהול";
+export const TEAM_SCOPE_LOADING_LABEL = "טוען נתוני צוות…";
+
+/**
+ * The scope line under "שלום, {name}" on a manager's home. Resolution order:
+ *
+ *  1. A selected team workspace → that team's name (the switcher and the
+ *     header can never contradict each other).
+ *  2. Workspace not resolved yet (provider default effect hasn't run, or the
+ *     context isn't ready) but the user manages at least one team — by
+ *     teams.manager_id, NEVER profiles.team_id — → the first managed team,
+ *     which is exactly the team the provider is about to select by default.
+ *  3. Genuinely zero managed teams, once team data has loaded → the honest
+ *     warning. While still loading, a neutral loading label — "no team" is a
+ *     claim about the world and must not be made before the data that could
+ *     refute it has arrived.
+ *
+ * Display only: permissions never flow from this label, and profiles.team_id
+ * (profile membership) is not an input at all.
+ */
+export function managerScopeLabel(params: {
+  workspace: Workspace;
+  managedTeams: { name: string }[];
+  ready: boolean;
+}): string {
+  if (params.workspace.type === "team") return params.workspace.teamName;
+  if (params.managedTeams.length > 0) return params.managedTeams[0].name;
+  return params.ready ? NO_MANAGED_TEAM_LABEL : TEAM_SCOPE_LOADING_LABEL;
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { isAdmin, isManager, isRepresentative, user } = useAuth();
   const { isDemo } = useAppMode();
