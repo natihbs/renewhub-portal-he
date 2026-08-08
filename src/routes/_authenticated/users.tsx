@@ -1173,6 +1173,24 @@ function EditUserDialog({
   const updateFn = useServerFn(updateUser);
   const updateEmailFn = useServerFn(updateUserEmail);
 
+  // For a LINKED representative the responsible manager is DERIVED from the
+  // rep's team (teams.manager_id) by the server-side rep-link sync — a manual
+  // pick here would be silently overwritten in the same save. Show the derived
+  // value read-only instead; changing it is done in /teams.
+  const isLinkedRep = role === "representative" && !!user.representative_link;
+  const linkedRep = isLinkedRep
+    ? (state.reps ?? []).find((r) => r.id === (repId || user.representative_link?.id))
+    : undefined;
+  const linkedRepTeam = linkedRep?.teamId
+    ? teams.find((t) => t.id === linkedRep.teamId)
+    : undefined;
+  const derivedManager = linkedRepTeam?.manager_id
+    ? managers.find((m) => m.id === linkedRepTeam.manager_id)
+    : undefined;
+  const derivedManagerLabel = derivedManager
+    ? derivedManager.full_name || derivedManager.email
+    : "לא הוגדר מנהל צוות";
+
   const mut = useMutation({
     // The email correction runs FIRST (it also rewrites the Supabase Auth
     // login address) — if it is invalid or already taken, the edit fails
@@ -1201,7 +1219,9 @@ function EditUserDialog({
           user_id: user.id,
           full_name: fullName,
           team_id: teamId === "none" ? null : teamId,
-          manager_id: managerId === "none" ? null : managerId,
+          // A linked representative's responsible manager is derived from the
+          // rep's team manager (set in /teams) — never send a manual value.
+          ...(isLinkedRep ? {} : { manager_id: managerId === "none" ? null : managerId }),
           representative_id: role === "representative" ? repId.trim() : null,
           must_change_password: mustChange,
           ...(roleChanged ? { role } : {}),
@@ -1233,12 +1253,15 @@ function EditUserDialog({
               </p>
             </div>
             <div className="space-y-1">
-              <Label>תפקיד</Label>
+              {/* The TECHNICAL permission level (admin/manager/representative)
+                  — the business title below is a separate, derived concept, so
+                  the manager option reads "מנהל", not "מנהל צוות". */}
+              <Label>הרשאת מערכת</Label>
               <Select value={role} onValueChange={(v) => setRole(v as AppRole)} disabled={roleLocked}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">מנהל מערכת</SelectItem>
-                  <SelectItem value="manager">מנהל צוות</SelectItem>
+                  <SelectItem value="manager">מנהל</SelectItem>
                   <SelectItem value="representative">נציג</SelectItem>
                 </SelectContent>
               </Select>
@@ -1269,7 +1292,18 @@ function EditUserDialog({
                 </p>
               )}
             </div>
-            {role !== "admin" && (
+            {role !== "admin" && isLinkedRep && (
+              <div className="space-y-1 col-span-2">
+                <Label>מנהל אחראי נגזר מצוות הנציג</Label>
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  {derivedManagerLabel}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  לנציג מקושר, המנהל האחראי נקבע לפי מנהל הצוות של הנציג. שינוי מתבצע בעמוד הצוותים.
+                </p>
+              </div>
+            )}
+            {role !== "admin" && !isLinkedRep && (
               <div className="space-y-1 col-span-2">
                 <Label>מנהל אחראי</Label>
                 <Select value={managerId} onValueChange={setManagerId}>

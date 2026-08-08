@@ -20,6 +20,15 @@ export type UserHealthInput = {
    * checks are skipped rather than guessed.
    */
   managed_team_ids?: string[];
+  /**
+   * True when the user holds a business-scope grant (user_business_scopes:
+   * מוקד / פעילות / סמנכ"ל). A scoped manager has real managerial reach with
+   * no profiles.team_id and no direct teams.manager_id rows — that setup is
+   * VALID, not incomplete. Counted only for role=manager: a representative
+   * or admin with a stray grant gains nothing from it here (mirroring the
+   * PR #41 is_manager guard at the SQL funnel).
+   */
+  has_business_scope?: boolean;
 };
 
 export type UserHealth = {
@@ -66,7 +75,11 @@ export function computeUserHealth(input: UserHealthInput): UserHealth {
   const isManagerOnly = input.roles.includes("manager") && !input.roles.includes("admin");
   const managedKnown = input.managed_team_ids !== undefined;
   const managesNothing = managedKnown && (input.managed_team_ids as string[]).length === 0;
-  if (isManagerOnly && managesNothing && input.team_id) {
+  // A business-scope grant (מוקד/פעילות/סמנכ"ל) is real managerial reach —
+  // it counts ONLY for the manager role, exactly like the SQL funnel's
+  // is_manager guard, so a stray grant never launders another role's gaps.
+  const scopedManager = isManagerOnly && input.has_business_scope === true;
+  if (isManagerOnly && managesNothing && input.team_id && !scopedManager) {
     issues.push(
       "משויך לצוות בפרופיל אך אינו מוגדר כמנהל של אף צוות — יש להגדירו כמנהל הצוות בעמוד הצוותים",
     );
@@ -80,13 +93,16 @@ export function computeUserHealth(input: UserHealthInput): UserHealth {
   if (input.roles.length === 0) {
     attention.push("לא הוגדר תפקיד למשתמש");
   }
-  if (!input.team_id) {
+  // A scoped manager (מנהל מוקד/פעילות/סמנכ"ל) legitimately has no profile
+  // team and no direct teams.manager_id rows — their reach comes from the
+  // business scope, so neither "no team" nor "manages nothing" is a gap.
+  if (!input.team_id && !scopedManager) {
     attention.push("המשתמש אינו משויך לצוות");
   }
   if (isRepresentative && !link) {
     attention.push("לא קיים נציג מקושר לחשבון המשתמש");
   }
-  if (isManagerOnly && managesNothing && !input.team_id) {
+  if (isManagerOnly && managesNothing && !input.team_id && !scopedManager) {
     attention.push("מנהל צוות שאינו מנהל אף צוות — יש להגדירו כמנהל הצוות בעמוד הצוותים");
   }
   if (attention.length > 0) {
