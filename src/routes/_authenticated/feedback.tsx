@@ -37,6 +37,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ManagerOnly } from "@/components/ManagerOnly";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { formatDateIL } from "@/lib/format";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -132,8 +133,13 @@ export const Route = createFileRoute("/_authenticated/feedback")({
   // action) deep-link straight into the real "טופס האזנה חכם" dialog for a
   // specific representative, instead of that button faking success with a
   // toast and recording nothing.
-  validateSearch: (search: Record<string, unknown>): { repId?: string } => ({
+  // ?feedbackId= deep-links straight into "פירוט משוב" for one evaluation —
+  // used by the representative home's "צפייה במשוב" action (and safe for
+  // notifications later). Resolution happens against the caller's VISIBLE
+  // list only, so an unauthorized or stale id shows a not-found notice.
+  validateSearch: (search: Record<string, unknown>): { repId?: string; feedbackId?: string } => ({
     repId: typeof search.repId === "string" ? search.repId : undefined,
+    feedbackId: typeof search.feedbackId === "string" ? search.feedbackId : undefined,
   }),
   head: () => ({
     meta: [
@@ -184,7 +190,10 @@ function ListeningCenter() {
     () => (inWorkspace ? feedbackListAll.filter((f) => scopedRepIds.has(f.repId)) : feedbackListAll),
     [inWorkspace, feedbackListAll, scopedRepIds],
   );
-  const viewed = view ? state.feedback.find((f) => f.id === view) : null;
+  // Resolved against the VISIBLE list, never raw state.feedback — so nothing
+  // (including a crafted ?feedbackId=) can open an evaluation this viewer is
+  // not allowed to see: for a representative that means own published only.
+  const viewed = view ? feedbackListAll.find((f) => f.id === view) : null;
   const editing = editingId ? state.feedback.find((f) => f.id === editingId) ?? null : null;
   const nameOf = (id: string) => state.reps.find((r) => r.id === id)?.name ?? "—";
   const teamNameOf = (id: string) => state.reps.find((r) => r.id === id)?.teamName ?? "ללא צוות";
@@ -208,6 +217,24 @@ function ListeningCenter() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.repId, isManager]);
+
+  // ?feedbackId= deep link (from the home card's "צפייה במשוב") opens the
+  // detail dialog once — but only for an evaluation this viewer can actually
+  // see. An unknown or unauthorized id gets a calm not-found line, not a
+  // crash and not someone else's feedback. Resolution waits for the feedback
+  // query to settle so a slow load is never misreported as "לא נמצא".
+  const [deepLinkMiss, setDeepLinkMiss] = useState(false);
+  const openedFeedbackFromSearchRef = useRef(false);
+  useEffect(() => {
+    if (!search.feedbackId || openedFeedbackFromSearchRef.current) return;
+    if (state.feedbackLoading) return;
+    openedFeedbackFromSearchRef.current = true;
+    if (feedbackListAll.some((f) => f.id === search.feedbackId)) {
+      setView(search.feedbackId);
+    } else {
+      setDeepLinkMiss(true);
+    }
+  }, [search.feedbackId, state.feedbackLoading, feedbackListAll]);
   const openEditFor = (id: string) => {
     setEditingId(id);
     setPrefRepId(undefined);
@@ -327,8 +354,29 @@ function ListeningCenter() {
         </Tabs>
       ) : (
         <div className="space-y-4">
-          <MyTasksAndNotes />
-          <HistoryTable list={feedbackList} nameOf={nameOf} teamNameOf={teamNameOf} onView={setView} />
+          {/* The representative came here for "המשוב שלי" — so the feedback
+              history leads, every row carries a visible "צפייה במשוב" action
+              (icon-only was too easy to miss on mobile), and tasks/notes fold
+              into a secondary section below. Nothing was removed. */}
+          {deepLinkMiss && (
+            <div className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
+              המשוב המבוקש לא נמצא או שאינו זמין עבורך. ייתכן שהקישור ישן או שהמשוב אינו מפורסם.
+            </div>
+          )}
+          <HistoryTable
+            list={feedbackList}
+            nameOf={nameOf}
+            teamNameOf={teamNameOf}
+            onView={setView}
+            showViewLabel
+            emptyTitle="טרם פורסם עבורך משוב"
+            emptyDescription="משוב מהאזנה יופיע כאן ברגע שמנהל/ת הצוות יפרסמו אותו."
+            isLoading={state.feedbackLoading}
+            isError={!!state.feedbackError}
+          />
+          <CollapsibleSection title="המשימות וההערות שלי">
+            <MyTasksAndNotes />
+          </CollapsibleSection>
         </div>
       )}
 
@@ -1545,7 +1593,9 @@ function MyTasksAndNotes() {
   }
 
   const tasks = getTasks(repId);
-  const notes = getNotes(repId);
+  // RLS already returns only non-private notes to a representative; this
+  // client-side filter keeps Demo Mode honest to the same rule.
+  const notes = getNotes(repId).filter((n) => !n.isPrivate);
   const openTasks = tasks.filter((t) => !t.done);
   const doneTasks = tasks.filter((t) => t.done);
 
@@ -1607,8 +1657,23 @@ function MyTasksAndNotes() {
 }
 
 // -------------------- History table --------------------
-function HistoryTable({ list, nameOf, teamNameOf, onView, onPublish, publishingId, isLoading, isError }: {
-  list: Feedback[]; nameOf: (id: string) => string; teamNameOf: (id: string) => string; onView: (id: string) => void;
+function HistoryTable({
+  list,
+  nameOf,
+  teamNameOf,
+  onView,
+  onPublish,
+  publishingId,
+  isLoading,
+  isError,
+  showViewLabel,
+  emptyTitle,
+  emptyDescription,
+}: {
+  list: Feedback[];
+  nameOf: (id: string) => string;
+  teamNameOf: (id: string) => string;
+  onView: (id: string) => void;
   /** Present only for manager/admin — publishes through the same audited
    * setFeedbackPublished path as the button inside the feedback view. A
    * representative never receives this prop (and only ever sees published
@@ -1616,6 +1681,12 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, onPublish, publishingI
   onPublish?: (id: string) => void;
   publishingId?: string | null;
   isLoading?: boolean; isError?: boolean;
+  /** Representative view: a visible "צפייה במשוב" text button instead of the
+   * icon-only eye — the eye was too easy to miss on mobile. Manager call
+   * sites don't pass this and keep their current row actions unchanged. */
+  showViewLabel?: boolean;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }) {
   if (isLoading) {
     return (
@@ -1631,9 +1702,16 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, onPublish, publishingI
   }
   if (list.length === 0) {
     return (
-      <Card><CardContent className="pt-6">
-        <EmptyState icon={Headphones} title="עדיין לא נרשמו האזנות" description="פתחו האזנה חדשה כדי לתעד ציון וסיכום." compact />
-      </CardContent></Card>
+      <Card>
+        <CardContent className="pt-6">
+          <EmptyState
+            icon={Headphones}
+            title={emptyTitle ?? "עדיין לא נרשמו האזנות"}
+            description={emptyDescription ?? "פתחו האזנה חדשה כדי לתעד ציון וסיכום."}
+            compact
+          />
+        </CardContent>
+      </Card>
     );
   }
   return (
@@ -1698,9 +1776,26 @@ function HistoryTable({ list, nameOf, teamNameOf, onView, onPublish, publishingI
                           {publishingId === f.id ? "מפרסם..." : "פרסום לנציג"}
                         </Button>
                       )}
-                      <Button size="icon" variant="ghost" aria-label="צפייה בהאזנה" onClick={() => onView(f.id)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      {showViewLabel ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 whitespace-nowrap"
+                          onClick={() => onView(f.id)}
+                        >
+                          <Eye className="ms-1 h-3.5 w-3.5" />
+                          צפייה במשוב
+                        </Button>
+                      ) : (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="צפייה בהאזנה"
+                          onClick={() => onView(f.id)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -548,7 +548,11 @@ function RepresentativeHome() {
     <div className="space-y-8">
       <HomeHeader role="representative" />
 
-      <DataFreshnessBar teamId={me?.teamId ?? null} />
+      {/* No freshness bar here — import freshness is an operator's concern
+          (manager/admin homes keep it). A representative can't act on "טרם
+          בוצע ייבוא נתונים", and the warning read as if something was wrong
+          with THEIR data. Real loading/error states on the personal cards
+          below are untouched. */}
 
       {state.repsLoading ? (
         <CardSkeleton rows={2} />
