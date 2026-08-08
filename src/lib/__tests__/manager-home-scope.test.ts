@@ -300,6 +300,115 @@ describe("hierarchy grouping per scope level", () => {
     const groups = groupScopeRows({ kind: "activity", rows: onlyDira, units });
     expect(groups.map((g) => g.label)).toEqual(["מוקד דירות וחידושים"]);
   });
+
+  // PR #45 follow-up: a covered team with NO hierarchy attachment (e.g. one
+  // the activity manager also owns via teams.manager_id) was in scope, in the
+  // switcher and in the aggregates — but in no visible group. It now lands in
+  // an honest "ללא שיוך להיררכיה" fallback, always last, never duplicated.
+  it("activity grouping includes an unattached fallback so no covered team disappears", () => {
+    const activityRows = rows().filter((r) =>
+      ["cen-dira", "cen-south"].includes(r.businessUnitId ?? ""),
+    );
+    const ownedUnattached: ScopeTeamRow = {
+      ...activityRows[0],
+      id: "t-owned",
+      name: "צוות בבעלות ישירה",
+      businessUnitId: null,
+    };
+    const groups = groupScopeRows({
+      kind: "activity",
+      rows: [...activityRows, ownedUnattached],
+      units,
+    });
+    expect(groups.map((g) => g.label)).toEqual([
+      "מוקד דירות וחידושים",
+      "מוקד דרום",
+      SCOPE_UNATTACHED_GROUP_LABEL,
+    ]);
+    const fallback = groups[groups.length - 1];
+    expect(fallback.rows.map((r) => r.id)).toEqual(["t-owned"]);
+    // Grouping priority: centers → direct-to-activity → unattached, and every
+    // covered row appears exactly once across all groups.
+    const allGrouped = groups.flatMap((g) => g.rows.map((r) => r.id));
+    expect(allGrouped.sort()).toEqual(["t-dira", "t-owned", "t-rechev", "t-south"]);
+    expect(new Set(allGrouped).size).toBe(allGrouped.length);
+  });
+
+  it("a team already under a center or directly attached is never duplicated into the fallback", () => {
+    const activityRows = rows().filter((r) =>
+      ["cen-dira", "cen-south"].includes(r.businessUnitId ?? ""),
+    );
+    const directRow: ScopeTeamRow = {
+      ...activityRows[0],
+      id: "t-direct",
+      name: "צוות ישיר",
+      businessUnitId: "act-elem",
+    };
+    const groups = groupScopeRows({
+      kind: "activity",
+      rows: [...activityRows, directRow],
+      units,
+    });
+    // No unattached rows → no fallback group at all.
+    expect(groups.map((g) => g.label)).toEqual([
+      "מוקד דירות וחידושים",
+      "מוקד דרום",
+      SCOPE_DIRECT_ACTIVITY_GROUP_LABEL,
+    ]);
+    const allGrouped = groups.flatMap((g) => g.rows.map((r) => r.id));
+    expect(new Set(allGrouped).size).toBe(allGrouped.length);
+    expect(allGrouped).toContain("t-direct");
+  });
+
+  it("a row attached to an unknown unit id falls back instead of vanishing", () => {
+    const ghost: ScopeTeamRow = {
+      ...rows()[0],
+      id: "t-ghost",
+      name: "צוות רפאים",
+      businessUnitId: "unit-deleted",
+    };
+    const groups = groupScopeRows({ kind: "activity", rows: [ghost], units });
+    expect(groups.map((g) => g.label)).toEqual([SCOPE_UNATTACHED_GROUP_LABEL]);
+    expect(groups[0].rows.map((r) => r.id)).toEqual(["t-ghost"]);
+  });
+
+  it("center and executive grouping are unchanged by the activity fallback", () => {
+    // Center: still one flat, label-less group — even for an unattached row.
+    const centerGroups = groupScopeRows({
+      kind: "center",
+      rows: rows().filter((r) => r.businessUnitId === "cen-dira"),
+      units,
+    });
+    expect(centerGroups).toHaveLength(1);
+    expect(centerGroups[0].label).toBeNull();
+    // Executive: keeps its own pre-existing unattached remainder group.
+    const execGroups = groupScopeRows({ kind: "executive", rows: rows(), units });
+    expect(execGroups.map((g) => g.label)).toEqual([
+      "פעילות אלמנטרי",
+      SCOPE_UNATTACHED_GROUP_LABEL,
+    ]);
+    expect(execGroups[1].rows.map((r) => r.id)).toEqual(["t-generic"]);
+  });
+
+  it("aggregates still count every covered row exactly once, grouped or fallback", () => {
+    const activityRows = rows().filter((r) =>
+      ["cen-dira", "cen-south"].includes(r.businessUnitId ?? ""),
+    );
+    const ownedUnattached: ScopeTeamRow = {
+      ...activityRows.find((r) => r.id === "t-south")!,
+      id: "t-owned",
+      name: "צוות בבעלות ישירה",
+      businessUnitId: null,
+    };
+    const all = [...activityRows, ownedUnattached];
+    const aggs = aggregateByProfile(all);
+    const total = aggs.reduce((a, g) => a + g.teamCount, 0);
+    expect(total).toBe(all.length);
+    // The generic aggregate counts t-south AND the unattached copy once each.
+    const generic = aggs.find((a) => a.kpiProfile === "generic_sales")!;
+    expect(generic.teamCount).toBe(2);
+    expect(generic.completed).toBe(60);
+  });
 });
 
 describe("per-profile aggregation — never one combined total", () => {
