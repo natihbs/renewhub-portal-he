@@ -205,6 +205,89 @@ export function resolveBusinessScope(params: {
   };
 }
 
+// -------------------------------------------------- effective business title
+
+export const EXECUTIVE_SCOPE_TARGET_LABEL = "כלל הפעילות העסקית";
+
+/**
+ * The business title a user row should DISPLAY, derived from the technical
+ * role plus user_business_scopes — never stored, never a new role value:
+ *   admin                      → מנהל מערכת (never a business executive)
+ *   representative / no role   → נציג
+ *   manager, no grants         → מנהל צוות
+ *   manager + center grant     → "מנהל מוקד · <center>"
+ *   manager + activity grant   → "מנהל פעילות · <activity>"
+ *   manager + executive grant  → 'סמנכ"ל / מנהל ממ"ט · כלל הפעילות העסקית'
+ * Multiple grants report the highest (executive > activity > center).
+ */
+export function effectiveBusinessTitle(input: {
+  roles: string[];
+  grants: { scopeType: "center" | "activity" | "executive"; unitName: string | null }[];
+}): string {
+  if (input.roles.includes("admin")) return BUSINESS_ROLE_LABEL.admin;
+  if (!input.roles.includes("manager")) return BUSINESS_ROLE_LABEL.representative;
+  if (input.grants.some((g) => g.scopeType === "executive")) {
+    return `${BUSINESS_ROLE_LABEL.executive} · ${EXECUTIVE_SCOPE_TARGET_LABEL}`;
+  }
+  const activity = input.grants.find((g) => g.scopeType === "activity");
+  if (activity) {
+    return activity.unitName
+      ? `${BUSINESS_ROLE_LABEL.activity} · ${activity.unitName}`
+      : BUSINESS_ROLE_LABEL.activity;
+  }
+  const center = input.grants.find((g) => g.scopeType === "center");
+  if (center) {
+    return center.unitName
+      ? `${BUSINESS_ROLE_LABEL.center} · ${center.unitName}`
+      : BUSINESS_ROLE_LABEL.center;
+  }
+  return BUSINESS_ROLE_LABEL.team_manager;
+}
+
+// ------------------------------------------------------ user-creation titles
+
+/**
+ * The business-friendly "תפקיד" options offered when CREATING a user. The
+ * managerial business titles all map to the technical role `manager` — the
+ * actual center/activity/executive scope is assigned afterwards in the
+ * hierarchy card, so no fake title is ever stored; postCreateNotice tells the
+ * admin exactly that. The technical role enum is untouched.
+ */
+export type CreateRoleOption = {
+  value: string;
+  label: string;
+  role: "admin" | "manager" | "representative";
+  postCreateNotice?: string;
+};
+
+export const CREATE_ROLE_OPTIONS: CreateRoleOption[] = [
+  { value: "admin", label: BUSINESS_ROLE_LABEL.admin, role: "admin" },
+  { value: "team_manager", label: BUSINESS_ROLE_LABEL.team_manager, role: "manager" },
+  {
+    value: "center_manager",
+    label: BUSINESS_ROLE_LABEL.center,
+    role: "manager",
+    postCreateNotice: "המשתמש נוצר כמנהל. יש לשייך אותו למוקד במסך היררכיה עסקית.",
+  },
+  {
+    value: "activity_manager",
+    label: BUSINESS_ROLE_LABEL.activity,
+    role: "manager",
+    postCreateNotice: "המשתמש נוצר כמנהל. יש לשייך אותו לפעילות במסך היררכיה עסקית.",
+  },
+  {
+    value: "executive",
+    label: BUSINESS_ROLE_LABEL.executive,
+    role: "manager",
+    postCreateNotice: "המשתמש נוצר כמנהל. יש להקצות לו היקף כלל-עסקי במסך היררכיה עסקית.",
+  },
+  { value: "representative", label: BUSINESS_ROLE_LABEL.representative, role: "representative" },
+];
+
+export const CREATE_ROLE_HELPER_TEXT =
+  "התפקידים הניהוליים משתמשים בהרשאת מנהל. שיוך למוקד, פעילות או כלל הפעילות מתבצע במסך היררכיה עסקית.";
+export const EDIT_SCOPE_HELPER_TEXT = "שינוי היקף ניהולי מתבצע במסך היררכיה עסקית.";
+
 // ---------------------------------------------------------- team attachment
 
 /**
