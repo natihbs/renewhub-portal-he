@@ -232,6 +232,10 @@ export const listUsers = createServerFn({ method: "GET" })
           team_id: p.team_id,
           representative_link: rep ? { active: rep.active, team_id: rep.team_id } : null,
           managed_team_ids: managedTeamsByUser.get(p.id) ?? [],
+          // A scoped manager (מוקד/פעילות/סמנכ"ל) with no profile team and no
+          // direct teams.manager_id rows is validly configured — reuse the
+          // grants already loaded for the effective titles.
+          has_business_scope: (scopeGrantsByUser.get(p.id) ?? []).length > 0,
         });
         return {
           ...p,
@@ -392,6 +396,30 @@ export const updateUser = createServerFn({ method: "POST" })
     if (data.representative_id !== undefined) profileUpdate.representative_id = data.representative_id;
     if (data.active !== undefined) profileUpdate.active = data.active;
     if (data.must_change_password !== undefined) profileUpdate.must_change_password = data.must_change_password;
+
+    // For a LINKED representative the responsible manager is DERIVED: the
+    // representative-team sync (linkRepresentativeToUserCore →
+    // syncLinkedProfileTeam) sets profile.manager_id from the rep team's
+    // teams.manager_id, so a manual value written here would be silently
+    // overwritten in this very call (the אודל case: her team had no manager,
+    // so the "saved" manager_id reverted to null). Ignore the manual value
+    // instead of pretending it persisted — changing the responsible manager
+    // for a linked rep is done by setting the team manager in /teams.
+    if (profileUpdate.manager_id !== undefined) {
+      const roleForManagerCheck = data.role !== undefined ? data.role : (existingRoles[0] ?? null);
+      if (roleForManagerCheck === "representative") {
+        let isLinkedRep = !!data.representative_id;
+        if (!isLinkedRep) {
+          const { data: linkedRow } = await supabaseAdmin
+            .from("representatives")
+            .select("id")
+            .eq("user_id", data.user_id)
+            .maybeSingle();
+          isLinkedRep = !!linkedRow;
+        }
+        if (isLinkedRep) delete profileUpdate.manager_id;
+      }
+    }
 
     // Correction (post-review, PR #19): a destination team must be active
     // only when this edit is an actual NEW assignment — never when the form
@@ -763,6 +791,8 @@ export const getUserDetails = createServerFn({ method: "POST" })
       roles,
       team_id: profile.team_id,
       representative_link: rep ? { active: rep.active, team_id: rep.team_id } : null,
+      managed_team_ids: ((managedTeams ?? []) as { id: string }[]).map((t) => t.id),
+      has_business_scope: (scopeGrantsByUser.get(data.user_id) ?? []).length > 0,
     });
 
     return {

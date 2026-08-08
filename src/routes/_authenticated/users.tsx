@@ -161,7 +161,10 @@ function UsersPage() {
       if (q) {
         const teamName = u.team_id ? teamNameById.get(u.team_id) ?? "" : "";
         const managerName = u.manager_id ? managerNameById.get(u.manager_id) ?? "" : "";
-        const hay = `${u.full_name ?? ""} ${u.email ?? ""} ${teamName} ${managerName}`.toLowerCase();
+        // business_title makes scoped managers findable by their business
+        // role ("מנהל מוקד") or unit name ("דירות וחידושים").
+        const hay =
+          `${u.full_name ?? ""} ${u.email ?? ""} ${teamName} ${managerName} ${u.business_title ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (roleFilter !== "all" && !u.roles.includes(roleFilter as AppRole)) return false;
@@ -236,14 +239,16 @@ function UsersPage() {
               <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                 <div className="relative md:col-span-2">
                   <Search className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="חיפוש לפי שם, מייל, צוות או מנהל" className="pe-3 ps-9" />
+                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="חיפוש לפי שם, מייל, צוות, מנהל או תפקיד עסקי" className="pe-3 ps-9" />
                 </div>
+                {/* Filters by the TECHNICAL permission (role=manager covers
+                    מנהל צוות/מוקד/פעילות/סמנכ"ל alike), hence "מנהל". */}
                 <Select value={roleFilter} onValueChange={setRoleFilter}>
-                  <SelectTrigger><SelectValue placeholder="תפקיד" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="הרשאת מערכת" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">כל התפקידים</SelectItem>
+                    <SelectItem value="all">כל ההרשאות</SelectItem>
                     <SelectItem value="admin">מנהל מערכת</SelectItem>
-                    <SelectItem value="manager">מנהל צוות</SelectItem>
+                    <SelectItem value="manager">מנהל</SelectItem>
                     <SelectItem value="representative">נציג</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1173,6 +1178,24 @@ function EditUserDialog({
   const updateFn = useServerFn(updateUser);
   const updateEmailFn = useServerFn(updateUserEmail);
 
+  // For a LINKED representative the responsible manager is DERIVED from the
+  // rep's team (teams.manager_id) by the server-side rep-link sync — a manual
+  // pick here would be silently overwritten in the same save. Show the derived
+  // value read-only instead; changing it is done in /teams.
+  const isLinkedRep = role === "representative" && !!user.representative_link;
+  const linkedRep = isLinkedRep
+    ? (state.reps ?? []).find((r) => r.id === (repId || user.representative_link?.id))
+    : undefined;
+  const linkedRepTeam = linkedRep?.teamId
+    ? teams.find((t) => t.id === linkedRep.teamId)
+    : undefined;
+  const derivedManager = linkedRepTeam?.manager_id
+    ? managers.find((m) => m.id === linkedRepTeam.manager_id)
+    : undefined;
+  const derivedManagerLabel = derivedManager
+    ? derivedManager.full_name || derivedManager.email
+    : "לא הוגדר מנהל צוות";
+
   const mut = useMutation({
     // The email correction runs FIRST (it also rewrites the Supabase Auth
     // login address) — if it is invalid or already taken, the edit fails
@@ -1201,7 +1224,9 @@ function EditUserDialog({
           user_id: user.id,
           full_name: fullName,
           team_id: teamId === "none" ? null : teamId,
-          manager_id: managerId === "none" ? null : managerId,
+          // A linked representative's responsible manager is derived from the
+          // rep's team manager (set in /teams) — never send a manual value.
+          ...(isLinkedRep ? {} : { manager_id: managerId === "none" ? null : managerId }),
           representative_id: role === "representative" ? repId.trim() : null,
           must_change_password: mustChange,
           ...(roleChanged ? { role } : {}),
@@ -1233,12 +1258,15 @@ function EditUserDialog({
               </p>
             </div>
             <div className="space-y-1">
-              <Label>תפקיד</Label>
+              {/* The TECHNICAL permission level (admin/manager/representative)
+                  — the business title below is a separate, derived concept, so
+                  the manager option reads "מנהל", not "מנהל צוות". */}
+              <Label>הרשאת מערכת</Label>
               <Select value={role} onValueChange={(v) => setRole(v as AppRole)} disabled={roleLocked}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">מנהל מערכת</SelectItem>
-                  <SelectItem value="manager">מנהל צוות</SelectItem>
+                  <SelectItem value="manager">מנהל</SelectItem>
                   <SelectItem value="representative">נציג</SelectItem>
                 </SelectContent>
               </Select>
@@ -1269,7 +1297,18 @@ function EditUserDialog({
                 </p>
               )}
             </div>
-            {role !== "admin" && (
+            {role !== "admin" && isLinkedRep && (
+              <div className="space-y-1 col-span-2">
+                <Label>מנהל אחראי נגזר מצוות הנציג</Label>
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  {derivedManagerLabel}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  לנציג מקושר, המנהל האחראי נקבע לפי מנהל הצוות של הנציג. שינוי מתבצע בעמוד הצוותים.
+                </p>
+              </div>
+            )}
+            {role !== "admin" && !isLinkedRep && (
               <div className="space-y-1 col-span-2">
                 <Label>מנהל אחראי</Label>
                 <Select value={managerId} onValueChange={setManagerId}>
