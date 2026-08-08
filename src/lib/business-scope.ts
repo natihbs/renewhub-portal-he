@@ -51,6 +51,15 @@ export type ResolvedBusinessScope = {
   roleLabel: string;
   /** "היקף צפייה: …" — the visible scope line for manager screens. */
   scopeLabel: string;
+  /**
+   * The header identity line for this scope holder — "מנהל מוקד · דירות
+   * וחידושים", "מנהל פעילות · אלמנטרי", 'סמנכ"ל / מנהל ממ"ט'. For a plain
+   * team manager this is just the role label; the home header keeps showing
+   * the selected team name for them (unchanged behavior).
+   */
+  title: string;
+  /** The highest granted unit's raw name (center/activity kinds), else null. */
+  unitName: string | null;
   /** Teams covered by the resolved scope. Personal scope resolves to []. */
   teams: { id: string; name: string }[];
 };
@@ -128,6 +137,8 @@ export function resolveBusinessScope(params: {
       kind: "representative",
       roleLabel: BUSINESS_ROLE_LABEL.representative,
       scopeLabel: `${VIEW_SCOPE_PREFIX}: אישי`,
+      title: BUSINESS_ROLE_LABEL.representative,
+      unitName: null,
       teams: [],
     };
   }
@@ -139,6 +150,8 @@ export function resolveBusinessScope(params: {
       kind: "admin",
       roleLabel: BUSINESS_ROLE_LABEL.admin,
       scopeLabel: `${BUSINESS_ROLE_LABEL.admin} — כלל המערכת`,
+      title: BUSINESS_ROLE_LABEL.admin,
+      unitName: null,
       teams: teams.map(asTeam),
     };
   }
@@ -172,6 +185,10 @@ export function resolveBusinessScope(params: {
       kind: "executive",
       roleLabel: BUSINESS_ROLE_LABEL.executive,
       scopeLabel: EXECUTIVE_SCOPE_LABEL,
+      // The executive title stands alone — the business-wide reach is stated
+      // by the scope line, not appended to the name.
+      title: BUSINESS_ROLE_LABEL.executive,
+      unitName: null,
       teams: coveredTeams,
     };
   }
@@ -186,6 +203,9 @@ export function resolveBusinessScope(params: {
       kind,
       roleLabel: BUSINESS_ROLE_LABEL[kind],
       scopeLabel: `${VIEW_SCOPE_PREFIX}: ${unitLabel}`,
+      // "מנהל מוקד · דירות וחידושים" — same shape as effectiveBusinessTitle.
+      title: `${BUSINESS_ROLE_LABEL[kind]} · ${highestUnit.name}`,
+      unitName: highestUnit.name,
       teams: coveredTeams,
     };
   }
@@ -201,6 +221,8 @@ export function resolveBusinessScope(params: {
     kind: "team_manager",
     roleLabel: BUSINESS_ROLE_LABEL.team_manager,
     scopeLabel,
+    title: BUSINESS_ROLE_LABEL.team_manager,
+    unitName: null,
     teams: coveredTeams,
   };
 }

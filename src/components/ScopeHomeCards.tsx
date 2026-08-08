@@ -1,0 +1,260 @@
+// Scope-level home cards for business-scope managers (מנהל מוקד / מנהל
+// פעילות / סמנכ"ל). All derivations live in scope-home.ts (pure, tested);
+// this file only renders the groups, per-profile aggregates and the missing-
+// targets-by-team breakdown. Direct team managers never see these cards —
+// their home is the unchanged single-team layout.
+import { Link } from "@tanstack/react-router";
+import { Building2, Target } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+import { formatNum, formatPct } from "@/lib/format";
+import { KPI_PROFILE_BADGE_CLASS, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
+import {
+  SCOPE_METRIC_LABELS,
+  SCOPE_MISSING_TARGETS_TITLE,
+  SCOPE_NO_TEAMS_MESSAGE,
+  SCOPE_TEAMS_TITLE,
+  type MissingTargetsRow,
+  type ScopeGroup,
+  type ScopeProfileAggregate,
+  type ScopeTeamRow,
+} from "@/lib/scope-home";
+
+function ScopeCardSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="space-y-2" aria-busy="true" aria-live="polite">
+      <span className="sr-only">טוען נתונים…</span>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-12 animate-pulse rounded-lg bg-muted" />
+      ))}
+    </div>
+  );
+}
+
+function ScopeErrorState({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+      {message}
+    </div>
+  );
+}
+
+/** One team row, labeled by the team's OWN KPI profile. */
+function ScopeTeamRowView({ row, onSelect }: { row: ScopeTeamRow; onSelect?: () => void }) {
+  const labels = SCOPE_METRIC_LABELS[row.kpiProfile];
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium">{row.name}</span>
+          <Badge
+            variant="secondary"
+            className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[row.kpiProfile])}
+          >
+            {KPI_PROFILE_LABEL[row.kpiProfile]}
+          </Badge>
+          <Badge variant="outline" className="shrink-0">
+            {row.repCount} נציגים
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          {row.missingTargets > 0 && (
+            <Badge variant="secondary" className="bg-primary/10 text-primary">
+              {row.missingTargets} ללא יעד
+            </Badge>
+          )}
+          {onSelect && (
+            <Button size="sm" variant="ghost" className="h-7" onClick={onSelect}>
+              פירוט
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+        <div>
+          <div className="text-muted-foreground">{labels.target}</div>
+          <div className="font-bold">{row.target == null ? "—" : formatNum(row.target)}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">{labels.result}</div>
+          <div className="font-bold">{formatNum(row.completed)}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">{labels.rate}</div>
+          <div className="font-bold">{row.pct == null ? "לא זמין" : formatPct(row.pct)}</div>
+        </div>
+      </div>
+      {row.pct != null && <Progress value={Math.min(row.pct, 150)} className="mt-2 h-1.5" />}
+    </div>
+  );
+}
+
+/** Per-profile aggregate chips — renewals and generic sales stay separate. */
+function ProfileAggregates({ aggregates }: { aggregates: ScopeProfileAggregate[] }) {
+  if (aggregates.length === 0) return null;
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {aggregates.map((agg) => {
+        const labels = SCOPE_METRIC_LABELS[agg.kpiProfile];
+        return (
+          <div key={agg.kpiProfile} className="rounded-lg border bg-muted/30 p-3 text-xs">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="font-semibold">
+                {KPI_PROFILE_LABEL[agg.kpiProfile]} · {agg.teamCount} צוותים
+              </span>
+              {agg.teamsWithTarget < agg.teamCount && (
+                <span className="text-muted-foreground">
+                  יעד מוגדר ל-{agg.teamsWithTarget} מתוך {agg.teamCount}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-muted-foreground">{labels.target}</div>
+                <div className="font-bold">{agg.target == null ? "—" : formatNum(agg.target)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">{labels.result}</div>
+                <div className="font-bold">{formatNum(agg.completed)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">{labels.rate}</div>
+                <div className="font-bold">{agg.pct == null ? "לא זמין" : formatPct(agg.pct)}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The scope's primary card: per-profile aggregates on top, then team rows in
+ * the hierarchy grouping of the manager's level (flat for a center; by center
+ * for an activity; activity → centers for an executive).
+ */
+export function ScopeOverviewCard({
+  groups,
+  aggregates,
+  isLoading,
+  isError,
+  onSelectTeam,
+}: {
+  groups: ScopeGroup[];
+  aggregates: ScopeProfileAggregate[];
+  isLoading: boolean;
+  isError: boolean;
+  onSelectTeam?: (teamId: string) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Building2 className="h-4 w-4 text-primary" /> {SCOPE_TEAMS_TITLE}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <ScopeCardSkeleton />
+        ) : isError ? (
+          <ScopeErrorState message="לא ניתן לטעון את נתוני ההיקף." />
+        ) : groups.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+            {SCOPE_NO_TEAMS_MESSAGE}
+          </div>
+        ) : (
+          <>
+            <ProfileAggregates aggregates={aggregates} />
+            {groups.map((group) => (
+              <div key={group.key} className="space-y-2">
+                {group.label && <div className="text-sm font-semibold">{group.label}</div>}
+                {group.rows.map((row) => (
+                  <ScopeTeamRowView
+                    key={row.id}
+                    row={row}
+                    onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+                  />
+                ))}
+                {(group.subgroups ?? []).map((sub) => (
+                  <div key={sub.key} className="space-y-2 ps-3">
+                    <div className="text-sm font-medium text-muted-foreground">{sub.label}</div>
+                    {sub.rows.map((row) => (
+                      <ScopeTeamRowView
+                        key={row.id}
+                        row={row}
+                        onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Missing representative targets grouped BY TEAM — "חידושי רכב · 9 נציגים
+ * ללא יעד" tells the manager where to act; an org-wide count does not.
+ */
+export function ScopeMissingTargetsCard({
+  rows,
+  isLoading,
+  isError,
+}: {
+  rows: MissingTargetsRow[];
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  const anyMissing = rows.some((r) => r.missing > 0);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Target className="h-4 w-4 text-primary" /> {SCOPE_MISSING_TARGETS_TITLE}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {isLoading ? (
+          <ScopeCardSkeleton rows={2} />
+        ) : isError ? (
+          <ScopeErrorState message="לא ניתן לטעון את נתוני היעדים." />
+        ) : rows.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+            {SCOPE_NO_TEAMS_MESSAGE}
+          </div>
+        ) : (
+          <>
+            {rows.map((row) => (
+              <div
+                key={row.teamId}
+                className={cn(
+                  "flex items-center justify-between gap-2 rounded-lg border p-2.5 text-sm",
+                  row.missing > 0 && "border-primary/40 bg-primary/5",
+                )}
+              >
+                <span>{row.line}</span>
+                <span className="text-xs text-muted-foreground">מתוך {row.repCount} נציגים</span>
+              </div>
+            ))}
+            {anyMissing && (
+              <Button asChild size="sm" variant="outline">
+                <Link to="/targets">
+                  <Target className="ms-1 h-3.5 w-3.5" />
+                  להגדרת יעדים
+                </Link>
+              </Button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
