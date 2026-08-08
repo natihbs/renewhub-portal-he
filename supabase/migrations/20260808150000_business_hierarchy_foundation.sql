@@ -133,9 +133,16 @@ CREATE POLICY "user_business_scopes admin all" ON public.user_business_scopes
 --   activity / center   → the team's unit is the scoped unit, or the team's
 --                         unit is a center whose parent is the scoped activity.
 -- A manager with no scope rows gets FALSE here — nothing changes for them.
+--
+-- HARDENING: grants are effective ONLY for users whose technical role is
+-- manager (private.is_manager). Several existing policies consume
+-- manages_team in an OR branch without their own is_manager guard
+-- (team_goals read/write, one kpi_values read, snapshot reads), so a
+-- user_business_scopes row accidentally created for a representative must
+-- be inert — the role guard here makes it so at the single funnel point.
 CREATE OR REPLACE FUNCTION private.team_in_business_scope(_team_id uuid, _user_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT _team_id IS NOT NULL AND EXISTS (
+  SELECT _team_id IS NOT NULL AND private.is_manager(_user_id) AND EXISTS (
     SELECT 1
     FROM public.user_business_scopes ubs
     WHERE ubs.user_id = _user_id

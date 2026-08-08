@@ -36,6 +36,21 @@ type Ctx = { supabase: SupabaseClient; userId: string; claims: Record<string, un
 export const HIERARCHY_TABLES_MISSING_MESSAGE =
   "טבלאות ההיררכיה העסקית טרם הוקמו במסד הנתונים — יש להריץ את המיגרציה העדכנית ולנסות שוב";
 export const HIERARCHY_ADMIN_ONLY_MESSAGE = "רק מנהל מערכת יכול להגדיר את ההיררכיה העסקית";
+export const SCOPE_TARGET_NOT_MANAGER_MESSAGE = "היקף עסקי ניתן להקצות רק למשתמש בתפקיד מנהל";
+export const SCOPE_TARGET_ADMIN_MESSAGE =
+  "מנהל מערכת נשאר מנהל מערכת בלבד — אין להקצות לו תואר עסקי";
+
+/**
+ * A business scope may be granted only to a user whose technical role is
+ * manager. Rejects representatives (they stay personal-only even if
+ * misconfigured — and the SQL funnel's is_manager guard backs this at the
+ * database) and rejects admins (the admin is "מנהל מערכת", never a business
+ * executive). Pure so it is unit-testable.
+ */
+export function validateScopeTargetRoles(roles: string[]): void {
+  if (roles.includes("admin")) throw new Error(SCOPE_TARGET_ADMIN_MESSAGE);
+  if (!roles.includes("manager")) throw new Error(SCOPE_TARGET_NOT_MANAGER_MESSAGE);
+}
 
 function isMissingTableError(message: string): boolean {
   return /does not exist|schema cache|PGRST205|42P01/i.test(message);
@@ -227,11 +242,17 @@ export const listBusinessHierarchy = createServerFn({ method: "POST" })
 
     // Names for grant holders and manager candidates (admin reads profiles
     // and user_roles under the existing admin RLS policies).
-    const { data: managerRoleRows } = await ctx.supabase
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "manager");
-    const managerIds = ((managerRoleRows ?? []) as { user_id: string }[]).map((r) => r.user_id);
+    // Scope-assignable candidates: technical role manager, and NOT admin —
+    // the same rule validateScopeTargetRoles enforces on write, so the
+    // dropdown never offers a target the server would reject.
+    const { data: roleRows } = await ctx.supabase.from("user_roles").select("user_id, role");
+    const rolesByUser = new Map<string, string[]>();
+    for (const r of (roleRows ?? []) as { user_id: string; role: string }[]) {
+      rolesByUser.set(r.user_id, [...(rolesByUser.get(r.user_id) ?? []), r.role]);
+    }
+    const managerIds = [...rolesByUser.entries()]
+      .filter(([, roles]) => roles.includes("manager") && !roles.includes("admin"))
+      .map(([id]) => id);
     const nameIds = [...new Set([...managerIds, ...grantRows.map((g) => g.user_id)])];
     const nameById = new Map<string, string>();
     if (nameIds.length > 0) {
@@ -358,6 +379,17 @@ export const setUserBusinessScope = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
     await requireAdmin(ctx);
+
+    // Assigning (not clearing) a scope requires the TARGET's technical role
+    // to be manager — read under the admin's own RLS ("user_roles admin all").
+    if (data.scopeType !== "none") {
+      const { data: targetRoleRows, error: targetRoleErr } = await ctx.supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.userId);
+      if (targetRoleErr) throw new Error("שגיאה באימות תפקיד המשתמש");
+      validateScopeTargetRoles(((targetRoleRows ?? []) as { role: string }[]).map((r) => r.role));
+    }
 
     const del = await ctx.supabase.from("user_business_scopes").delete().eq("user_id", data.userId);
     if (del.error) throw hierarchyWriteError(del.error.message);

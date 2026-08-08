@@ -13,6 +13,11 @@ import {
   type BusinessUnit,
   type ScopeTeam,
 } from "@/lib/business-scope";
+import {
+  SCOPE_TARGET_ADMIN_MESSAGE,
+  SCOPE_TARGET_NOT_MANAGER_MESSAGE,
+  validateScopeTargetRoles,
+} from "@/lib/business-scope.functions";
 
 // ---------------------------------------------------------------------------
 // Business hierarchy foundation: scope METADATA above teams — technical roles
@@ -198,6 +203,63 @@ describe("D — visible scope labels on manager screens only", () => {
 
   it("the admin configuration card is admin-gated on the teams page", () => {
     expect(teamsPageSrc).toContain("{isAdmin && <BusinessHierarchyCard");
+  });
+});
+
+// -------------------------------------------------------------- hardening
+describe("hardening — grants are inert for non-managers", () => {
+  it("team_in_business_scope requires the technical manager role at the SQL funnel", () => {
+    // A representative with an accidental user_business_scopes row must not
+    // gain any team/business-scope access — including through the policies
+    // that consume manages_team without their own is_manager guard
+    // (team_goals read/write, kpi_values team reads, snapshot reads).
+    expect(migrationSrc).toContain(
+      "SELECT _team_id IS NOT NULL AND private.is_manager(_user_id) AND EXISTS (",
+    );
+  });
+
+  it("setUserBusinessScope validates the target's technical role before writing", () => {
+    expect(scopeFnsSrc).toContain("validateScopeTargetRoles(");
+    // The check runs on assignment; clearing a scope ("none") stays allowed.
+    expect(scopeFnsSrc).toContain('if (data.scopeType !== "none") {');
+  });
+
+  it("rejects a representative target with a Hebrew error", () => {
+    expect(() => validateScopeTargetRoles(["representative"])).toThrowError(
+      SCOPE_TARGET_NOT_MANAGER_MESSAGE,
+    );
+    expect(SCOPE_TARGET_NOT_MANAGER_MESSAGE).toBe("היקף עסקי ניתן להקצות רק למשתמש בתפקיד מנהל");
+    expect(() => validateScopeTargetRoles([])).toThrowError(SCOPE_TARGET_NOT_MANAGER_MESSAGE);
+  });
+
+  it("rejects an admin target — admin remains מנהל מערכת only, never a business executive", () => {
+    expect(() => validateScopeTargetRoles(["admin"])).toThrowError(SCOPE_TARGET_ADMIN_MESSAGE);
+    // Even a dual-role admin+manager user is rejected: the admin identity wins.
+    expect(() => validateScopeTargetRoles(["admin", "manager"])).toThrowError(
+      SCOPE_TARGET_ADMIN_MESSAGE,
+    );
+    expect(SCOPE_TARGET_ADMIN_MESSAGE).toContain("מנהל מערכת");
+  });
+
+  it("accepts a manager target", () => {
+    expect(() => validateScopeTargetRoles(["manager"])).not.toThrow();
+    expect(() => validateScopeTargetRoles(["manager", "representative"])).not.toThrow();
+  });
+
+  it("the admin card's candidate list applies the same rule (manager and not admin)", () => {
+    expect(scopeFnsSrc).toContain('roles.includes("manager") && !roles.includes("admin")');
+  });
+
+  it("a representative resolves personal-only even if grants are passed in (misconfiguration)", () => {
+    const s = resolveBusinessScope({
+      role: "representative",
+      userId: "rep-misconfigured",
+      teams,
+      units,
+      grants: [{ scopeType: "executive", businessUnitId: null }],
+    });
+    expect(s.kind).toBe("representative");
+    expect(s.teams).toEqual([]);
   });
 });
 
