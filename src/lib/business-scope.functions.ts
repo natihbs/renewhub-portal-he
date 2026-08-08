@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   resolveBusinessScope,
   importScopeNotice,
+  validateAttachTargetUnitType,
   type BusinessScopeGrant,
   type BusinessUnit,
   type ResolvedBusinessScope,
@@ -39,6 +40,38 @@ export const HIERARCHY_ADMIN_ONLY_MESSAGE = "רק מנהל מערכת יכול �
 export const SCOPE_TARGET_NOT_MANAGER_MESSAGE = "היקף עסקי ניתן להקצות רק למשתמש בתפקיד מנהל";
 export const SCOPE_TARGET_ADMIN_MESSAGE =
   "מנהל מערכת נשאר מנהל מערכת בלבד — אין להקצות לו תואר עסקי";
+export const UNIT_NAME_REQUIRED_MESSAGE = "יש להזין שם יחידה";
+export const DELETE_ACTIVITY_HAS_CENTERS_MESSAGE = "לא ניתן למחוק פעילות שיש תחתיה מוקדים";
+export const DELETE_CENTER_HAS_TEAMS_MESSAGE = "לא ניתן למחוק מוקד שמשויכים אליו צוותים";
+export const DELETE_ACTIVITY_HAS_TEAMS_MESSAGE = "לא ניתן למחוק פעילות שמשויכים אליה צוותים";
+export const DELETE_UNIT_HAS_SCOPES_MESSAGE = "לא ניתן למחוק יחידה שיש לה היקפי ניהול פעילים";
+
+/**
+ * Delete guards for a business unit — the unit must be genuinely empty:
+ * no child centers (activities), no linked teams (which also covers a team
+ * legacy-linked directly to an activity), and no active business-scope
+ * grants pointing at it. Deleting never cascades into teams or grants —
+ * these guards run BEFORE the delete so the FK behaviors (SET NULL on
+ * teams, CASCADE on grants) can never actually fire. Pure and unit-tested.
+ */
+export function validateUnitDeletion(input: {
+  unitType: "activity" | "center";
+  childCenters: number;
+  linkedTeams: number;
+  activeGrants: number;
+}): void {
+  if (input.unitType === "activity" && input.childCenters > 0) {
+    throw new Error(DELETE_ACTIVITY_HAS_CENTERS_MESSAGE);
+  }
+  if (input.linkedTeams > 0) {
+    throw new Error(
+      input.unitType === "center"
+        ? DELETE_CENTER_HAS_TEAMS_MESSAGE
+        : DELETE_ACTIVITY_HAS_TEAMS_MESSAGE,
+    );
+  }
+  if (input.activeGrants > 0) throw new Error(DELETE_UNIT_HAS_SCOPES_MESSAGE);
+}
 
 /**
  * A business scope may be granted only to a user whose technical role is
@@ -336,6 +369,23 @@ export const attachTeamToUnit = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
     await requireAdmin(ctx);
+    // Business rule: a team attaches to a CENTER only — the activity is
+    // inherited through the center (validated here for the friendly error,
+    // and enforced again by the teams trigger at the database).
+    if (data.unitId) {
+      const { data: unitRow, error: unitErr } = await ctx.supabase
+        .from("business_units")
+        .select("unit_type")
+        .eq("id", data.unitId)
+        .maybeSingle();
+      if (unitErr) throw hierarchyWriteError(unitErr.message);
+      if (!unitRow) throw new Error("היחידה המבוקשת לא נמצאה");
+      // Anything that is not a center — an activity or an unknown type —
+      // must fail the center-only rule.
+      validateAttachTargetUnitType(
+        (unitRow as { unit_type: string }).unit_type === "center" ? "center" : "activity",
+      );
+    }
     const { error } = await ctx.supabase
       .from("teams")
       .update({ business_unit_id: data.unitId })
@@ -406,6 +456,136 @@ export const setUserBusinessScope = createServerFn({ method: "POST" })
       target_user_id: data.userId,
       scope_type: data.scopeType,
       business_unit_id: data.unitId,
+    });
+    return { ok: true as const };
+  });
+
+/**
+ * Admin-only: rename a business unit, and (for a center only) move it under a
+ * different parent activity. The unit TYPE is immutable — an activity stays
+ * an activity and a center stays a center; no type input exists here. A
+ * center's re-parenting is validated to target an activity (the
+ * business_units parent-shape trigger enforces the same rule again at the
+ * database).
+ */
+export const updateBusinessUnit = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { unitId: string; name: string; parentId?: string | null }) => {
+    const unitId = String(data?.unitId ?? "");
+    if (!unitId) throw new Error("נדרשת יחידה");
+    const name = String(data?.name ?? "")
+      .trim()
+      .slice(0, 120);
+    if (!name) throw new Error(UNIT_NAME_REQUIRED_MESSAGE);
+    return { unitId, name, parentId: data?.parentId ?? undefined };
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    await requireAdmin(ctx);
+
+    const { data: unitRow, error: unitErr } = await ctx.supabase
+      .from("business_units")
+      .select("unit_type, name, parent_id")
+      .eq("id", data.unitId)
+      .maybeSingle();
+    if (unitErr) throw hierarchyWriteError(unitErr.message);
+    if (!unitRow) throw new Error("היחידה המבוקשת לא נמצאה");
+    const existing = unitRow as { unit_type: string; name: string; parent_id: string | null };
+
+    const patch: Record<string, unknown> = { name: data.name };
+    if (data.parentId !== undefined && existing.unit_type === "center") {
+      const nextParent = data.parentId;
+      if (!nextParent) throw new Error("מוקד חייב להשתייך לפעילות");
+      if (nextParent !== existing.parent_id) {
+        const { data: parentRow, error: parentErr } = await ctx.supabase
+          .from("business_units")
+          .select("unit_type")
+          .eq("id", nextParent)
+          .maybeSingle();
+        if (parentErr) throw hierarchyWriteError(parentErr.message);
+        if (!parentRow || (parentRow as { unit_type: string }).unit_type !== "activity") {
+          throw new Error("פעילות אב חייבת להיות יחידת פעילות");
+        }
+      }
+      patch.parent_id = nextParent;
+    }
+
+    const { error } = await ctx.supabase.from("business_units").update(patch).eq("id", data.unitId);
+    if (error) throw hierarchyWriteError(error.message);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await logAudit(supabaseAdmin as unknown as SupabaseClient, ctx, "business_unit.updated", {
+      business_unit_id: data.unitId,
+      unit_type: existing.unit_type,
+      name: data.name,
+      parent_id: patch.parent_id ?? existing.parent_id,
+      previous: { name: existing.name, parent_id: existing.parent_id },
+    });
+    return { ok: true as const };
+  });
+
+/**
+ * Admin-only: delete a business unit, ONLY when it is empty — no child
+ * centers, no linked teams, no active scope grants (validateUnitDeletion).
+ * Deletes exactly the one business_units row; teams, representatives,
+ * goals, feedback, KPI and import data are never touched, and nothing is
+ * silently detached — a non-empty unit is refused with the friendly rule.
+ */
+export const deleteBusinessUnit = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { unitId: string }) => {
+    const unitId = String(data?.unitId ?? "");
+    if (!unitId) throw new Error("נדרשת יחידה");
+    return { unitId };
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    await requireAdmin(ctx);
+
+    const { data: unitRow, error: unitErr } = await ctx.supabase
+      .from("business_units")
+      .select("unit_type, name")
+      .eq("id", data.unitId)
+      .maybeSingle();
+    if (unitErr) throw hierarchyWriteError(unitErr.message);
+    if (!unitRow) throw new Error("היחידה המבוקשת לא נמצאה");
+    const existing = unitRow as { unit_type: string; name: string };
+    const unitType =
+      existing.unit_type === "activity" ? ("activity" as const) : ("center" as const);
+
+    const [childrenRes, teamsRes, grantsRes] = await Promise.all([
+      ctx.supabase
+        .from("business_units")
+        .select("id", { count: "exact", head: true })
+        .eq("parent_id", data.unitId),
+      ctx.supabase
+        .from("teams")
+        .select("id", { count: "exact", head: true })
+        .eq("business_unit_id", data.unitId),
+      ctx.supabase
+        .from("user_business_scopes")
+        .select("id", { count: "exact", head: true })
+        .eq("business_unit_id", data.unitId),
+    ]);
+    if (childrenRes.error) throw hierarchyWriteError(childrenRes.error.message);
+    if (teamsRes.error) throw hierarchyWriteError(teamsRes.error.message);
+    if (grantsRes.error) throw hierarchyWriteError(grantsRes.error.message);
+
+    validateUnitDeletion({
+      unitType,
+      childCenters: childrenRes.count ?? 0,
+      linkedTeams: teamsRes.count ?? 0,
+      activeGrants: grantsRes.count ?? 0,
+    });
+
+    const { error } = await ctx.supabase.from("business_units").delete().eq("id", data.unitId);
+    if (error) throw hierarchyWriteError(error.message);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await logAudit(supabaseAdmin as unknown as SupabaseClient, ctx, "business_unit.deleted", {
+      business_unit_id: data.unitId,
+      unit_type: unitType,
+      name: existing.name,
     });
     return { ok: true as const };
   });

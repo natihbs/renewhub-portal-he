@@ -32,11 +32,14 @@ import { useWorkspace } from "@/lib/workspace-context";
 import {
   listBusinessHierarchy,
   createBusinessUnit,
+  updateBusinessUnit,
+  deleteBusinessUnit,
   attachTeamToUnit,
   setUserBusinessScope,
   HIERARCHY_TABLES_MISSING_MESSAGE,
+  UNIT_NAME_REQUIRED_MESSAGE,
 } from "@/lib/business-scope.functions";
-import { BUSINESS_UNIT_TYPE_LABEL } from "@/lib/business-scope";
+import { centerOptionLabel } from "@/lib/business-scope";
 import { type KpiProfile, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS } from "@/lib/performance-domain";
 
 export const Route = createFileRoute("/_authenticated/teams")({
@@ -995,9 +998,54 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
  * authoritative team-manager ownership), never changes the technical role
  * enum, and the admin stays "מנהל מערכת" rather than a business executive.
  */
+type HierarchyUnit = {
+  id: string;
+  name: string;
+  unitType: "activity" | "center";
+  parentId: string | null;
+};
+
+/** Admin-only edit/delete actions on a hierarchy row (עריכה / מחיקה). */
+function UnitRowActions({
+  unit,
+  onEdit,
+  onDelete,
+}: {
+  unit: HierarchyUnit;
+  onEdit: (u: HierarchyUnit) => void;
+  onDelete: (u: HierarchyUnit) => void;
+}) {
+  return (
+    <span className="ms-auto flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 p-0"
+        aria-label="עריכה"
+        title="עריכה"
+        onClick={() => onEdit(unit)}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 p-0 text-destructive"
+        aria-label="מחיקה"
+        title="מחיקה"
+        onClick={() => onDelete(unit)}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </span>
+  );
+}
+
 function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
   const listFn = useServerFn(listBusinessHierarchy);
   const createUnitFn = useServerFn(createBusinessUnit);
+  const updateUnitFn = useServerFn(updateBusinessUnit);
+  const deleteUnitFn = useServerFn(deleteBusinessUnit);
   const attachFn = useServerFn(attachTeamToUnit);
   const setScopeFn = useServerFn(setUserBusinessScope);
   const qc = useQueryClient();
@@ -1016,6 +1064,11 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
   const [scopeUser, setScopeUser] = useState<string>("");
   const [scopeType, setScopeType] = useState<"none" | "center" | "activity" | "executive">("none");
   const [scopeUnit, setScopeUnit] = useState<string>("");
+  // Edit / delete a unit (admin-only, guarded server-side).
+  const [editUnit, setEditUnit] = useState<HierarchyUnit | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editParent, setEditParent] = useState<string>("");
+  const [deleteUnit, setDeleteUnit] = useState<HierarchyUnit | null>(null);
 
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["admin", "business-hierarchy"] });
@@ -1054,6 +1107,41 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  const updateUnitM = useMutation({
+    mutationFn: () =>
+      updateUnitFn({
+        data: {
+          unitId: editUnit?.id ?? "",
+          name: editName,
+          // Only a center may move to a different parent activity; the type
+          // itself is immutable and is not sent at all.
+          ...(editUnit?.unitType === "center" ? { parentId: editParent || null } : {}),
+        },
+      }),
+    onSuccess: async () => {
+      await refresh();
+      setEditUnit(null);
+      toast.success("היחידה עודכנה");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const deleteUnitM = useMutation({
+    mutationFn: () => deleteUnitFn({ data: { unitId: deleteUnit?.id ?? "" } }),
+    onSuccess: async () => {
+      await refresh();
+      setDeleteUnit(null);
+      toast.success("היחידה נמחקה");
+    },
+    onError: (e: Error) => {
+      setDeleteUnit(null);
+      toast.error(e.message);
+    },
+  });
+  const openEdit = (u: HierarchyUnit) => {
+    setEditUnit(u);
+    setEditName(u.name);
+    setEditParent(u.parentId ?? "");
+  };
   const setScopeM = useMutation({
     mutationFn: () =>
       setScopeFn({
@@ -1078,6 +1166,11 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
     teamsByUnit.set(t.businessUnitId, [...(teamsByUnit.get(t.businessUnitId) ?? []), t.name]);
   }
   const scopeUnitOptions = scopeType === "activity" ? activities : centers;
+  // Teams attached directly to an activity predate the centers-only rule and
+  // are surfaced for a manual admin fix (they keep working for scope until then).
+  const activityAttachedTeams = (view?.teams ?? []).filter(
+    (t) => t.businessUnitId !== null && activities.some((a) => a.id === t.businessUnitId),
+  );
 
   return (
     <Card>
@@ -1116,6 +1209,7 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
                           צוותים: {(teamsByUnit.get(a.id) ?? []).join(", ")}
                         </span>
                       )}
+                      <UnitRowActions unit={a} onEdit={openEdit} onDelete={setDeleteUnit} />
                     </div>
                     {centers
                       .filter((c) => c.parentId === a.id)
@@ -1128,6 +1222,7 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
                               ? `צוותים: ${(teamsByUnit.get(c.id) ?? []).join(", ")}`
                               : "ללא צוותים משויכים"}
                           </span>
+                          <UnitRowActions unit={c} onEdit={openEdit} onDelete={setDeleteUnit} />
                         </div>
                       ))}
                   </div>
@@ -1142,8 +1237,21 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
                       <Badge variant="outline">מוקד</Badge>
                       <span className="text-sm">{c.name}</span>
                       <span className="text-xs text-muted-foreground">ללא פעילות אב</span>
+                      <UnitRowActions unit={c} onEdit={openEdit} onDelete={setDeleteUnit} />
                     </div>
                   ))}
+              </div>
+            )}
+
+            {/* Legacy rows from before the centers-only rule: never rewritten
+                automatically — the admin moves each team to a center manually. */}
+            {activityAttachedTeams.length > 0 && (
+              <div className="flex items-start gap-2 rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2.5 text-xs text-warning-foreground">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>
+                  צוות ניתן לשייך למוקד בלבד — הפעילות נקבעת דרך המוקד. הצוותים הבאים משויכים ישירות
+                  לפעילות ויש להעבירם למוקד: {activityAttachedTeams.map((t) => t.name).join(", ")}
+                </span>
               </div>
             )}
 
@@ -1222,16 +1330,18 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>יחידה</Label>
+                {/* Teams attach to CENTERS only — the activity is inherited
+                    through the center, so activities are not offered here. */}
+                <Label>מוקד</Label>
                 <Select value={attachUnit} onValueChange={setAttachUnit}>
-                  <SelectTrigger aria-label="בחירת יחידה">
+                  <SelectTrigger aria-label="בחירת מוקד">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>ללא שיוך</SelectItem>
-                    {(view.units ?? []).map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {BUSINESS_UNIT_TYPE_LABEL[u.unitType]} · {u.name}
+                    {centers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {centerOptionLabel(c, view.units ?? [])}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1330,6 +1440,88 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
             </div>
           </>
         )}
+
+        {/* Edit unit — the name (and, for a center, the parent activity).
+            The unit TYPE is immutable and has no control here. */}
+        <Dialog open={!!editUnit} onOpenChange={(o) => !o && setEditUnit(null)}>
+          <DialogContent dir="rtl" className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                {editUnit?.unitType === "activity" ? "עריכת פעילות" : "עריכת מוקד"}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="bh-edit-name">שם היחידה</Label>
+                <Input
+                  id="bh-edit-name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                />
+              </div>
+              {editUnit?.unitType === "center" && (
+                <div className="space-y-1.5">
+                  <Label>פעילות אב</Label>
+                  <Select value={editParent} onValueChange={setEditParent}>
+                    <SelectTrigger aria-label="פעילות אב">
+                      <SelectValue placeholder="בחרו פעילות" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activities.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setEditUnit(null)}>
+                ביטול
+              </Button>
+              <Button
+                size="sm"
+                disabled={updateUnitM.isPending}
+                onClick={() => {
+                  if (!editName.trim()) {
+                    toast.error(UNIT_NAME_REQUIRED_MESSAGE);
+                    return;
+                  }
+                  updateUnitM.mutate();
+                }}
+              >
+                שמירת שינויים
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete unit — explicit confirmation; the server refuses any unit
+            that still has centers, teams or active scope grants. */}
+        <AlertDialog open={!!deleteUnit} onOpenChange={(o) => !o && setDeleteUnit(null)}>
+          <AlertDialogContent dir="rtl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {deleteUnit?.unitType === "activity" ? "מחיקת פעילות" : "מחיקת מוקד"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                הפעולה תמחק את היחידה מההיררכיה העסקית. לא ניתן לבטל פעולה זו.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2">
+              <AlertDialogCancel>ביטול</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={deleteUnitM.isPending}
+                onClick={() => deleteUnitM.mutate()}
+              >
+                מחיקה
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );
