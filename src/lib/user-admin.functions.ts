@@ -30,6 +30,24 @@ type UpdateInput = {
 
 type Ctx = { supabase: any; userId: string; claims: any };
 
+export const EMAIL_REQUIRED_MESSAGE = "יש להזין כתובת אימייל";
+export const EMAIL_INVALID_MESSAGE = "כתובת האימייל אינה תקינה";
+export const EMAIL_TAKEN_MESSAGE = "כתובת האימייל כבר בשימוש על ידי משתמש אחר";
+
+/**
+ * Trim + lowercase + shape-validate an email. The login email lives in
+ * Supabase Auth, which is case-insensitive — normalizing here keeps
+ * profiles.email and the auth email byte-identical. Pure and unit-tested.
+ */
+export function normalizeEmailInput(raw: string): string {
+  const email = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (!email) throw new Error(EMAIL_REQUIRED_MESSAGE);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(EMAIL_INVALID_MESSAGE);
+  return email;
+}
+
 async function assertAdmin(ctx: Ctx) {
   const { data, error } = await ctx.supabase
     .from("user_roles")
@@ -380,6 +398,84 @@ export const updateUser = createServerFn({ method: "POST" })
       role: data.role ?? null,
     });
     return { ok: true };
+  });
+
+/**
+ * Admin-only email correction (e.g. a typo at account creation). Changes
+ * EXACTLY two things, kept in sync: the Supabase Auth login email
+ * (auth.admin.updateUserById) and profiles.email. Nothing else moves —
+ * user_roles, the representative link, the password and
+ * must_change_password are untouched, and the user is never
+ * deleted/recreated. If the profiles write fails after the auth email
+ * already changed, the auth email is reverted (best-effort) so the two
+ * never stay out of sync.
+ */
+export const updateUserEmail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { user_id: string; email: string }) => {
+    if (!data.user_id) throw new Error("חסר מזהה משתמש");
+    return { user_id: data.user_id, email: normalizeEmailInput(data.email) };
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    await assertAdmin(ctx);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email")
+      .eq("id", data.user_id)
+      .maybeSingle();
+    if (profileErr) throw new Error(profileErr.message);
+    if (!profile) throw new Error("המשתמש לא נמצא");
+    const previousEmail = (profile.email as string | null) ?? null;
+
+    if (previousEmail && previousEmail.trim().toLowerCase() === data.email) {
+      return { ok: true, email: data.email, unchanged: true };
+    }
+
+    // Another profile already using this address (case-insensitive).
+    const { data: taken, error: takenErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("email", data.email)
+      .neq("id", data.user_id)
+      .maybeSingle();
+    if (takenErr) throw new Error(takenErr.message);
+    if (taken) throw new Error(EMAIL_TAKEN_MESSAGE);
+
+    // Auth first — it is the login source of truth and the stricter write.
+    const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
+      email: data.email,
+      email_confirm: true,
+    });
+    if (authErr) throw new Error(authErr.message);
+
+    const { error: syncErr } = await supabaseAdmin
+      .from("profiles")
+      .update({ email: data.email })
+      .eq("id", data.user_id);
+    if (syncErr) {
+      // Keep auth and profile in sync: revert the auth email (best-effort)
+      // before surfacing the failure.
+      if (previousEmail) {
+        await supabaseAdmin.auth.admin
+          .updateUserById(data.user_id, { email: previousEmail, email_confirm: true })
+          .catch(() => {});
+      }
+      throw new Error(syncErr.message);
+    }
+
+    await logAudit(
+      supabaseAdmin,
+      ctx.userId,
+      ctx.claims?.email ?? null,
+      "user.email_updated",
+      data.user_id,
+      data.email,
+      { previous_email: previousEmail, new_email: data.email },
+    );
+    return { ok: true, email: data.email };
   });
 
 export const resetPassword = createServerFn({ method: "POST" })

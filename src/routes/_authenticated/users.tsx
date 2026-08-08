@@ -35,6 +35,7 @@ import {
   listAuditLog,
   createUser,
   updateUser,
+  updateUserEmail,
   resetPassword,
   sendPasswordResetEmail,
   getUserDetails,
@@ -1126,6 +1127,7 @@ function EditUserDialog({
   open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void;
 }) {
   const [fullName, setFullName] = useState(user.full_name ?? "");
+  const [email, setEmail] = useState(user.email ?? "");
   const [role, setRole] = useState<AppRole>(user.roles[0] ?? "representative");
   const [teamId, setTeamId] = useState<string>(user.team_id ?? "none");
   const [managerId, setManagerId] = useState<string>(user.manager_id ?? "none");
@@ -1133,9 +1135,19 @@ function EditUserDialog({
   const [mustChange, setMustChange] = useState(user.must_change_password);
   const { state } = useApp();
   const updateFn = useServerFn(updateUser);
+  const updateEmailFn = useServerFn(updateUserEmail);
 
   const mut = useMutation({
-    mutationFn: updateFn,
+    // The email correction runs FIRST (it also rewrites the Supabase Auth
+    // login address) — if it is invalid or already taken, the edit fails
+    // before any other field changes.
+    mutationFn: async (vars: {
+      update: Parameters<typeof updateFn>[0];
+      newEmail: string | null;
+    }) => {
+      if (vars.newEmail) await updateEmailFn({ data: { user_id: user.id, email: vars.newEmail } });
+      return updateFn(vars.update);
+    },
     onSuccess: () => { toast.success("המשתמש עודכן"); onDone(); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -1143,16 +1155,21 @@ function EditUserDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (role === "representative" && !repId.trim()) return toast.error("יש לשייך נציג");
+    if (!email.trim()) return toast.error("יש להזין כתובת אימייל");
+    const emailChanged = email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase();
     const roleChanged = role !== (user.roles[0] ?? null);
     mut.mutate({
-      data: {
-        user_id: user.id,
-        full_name: fullName,
-        team_id: teamId === "none" ? null : teamId,
-        manager_id: managerId === "none" ? null : managerId,
-        representative_id: role === "representative" ? repId.trim() : null,
-        must_change_password: mustChange,
-        ...(roleChanged ? { role } : {}),
+      newEmail: emailChanged ? email.trim() : null,
+      update: {
+        data: {
+          user_id: user.id,
+          full_name: fullName,
+          team_id: teamId === "none" ? null : teamId,
+          manager_id: managerId === "none" ? null : managerId,
+          representative_id: role === "representative" ? repId.trim() : null,
+          must_change_password: mustChange,
+          ...(roleChanged ? { role } : {}),
+        },
       },
     });
   }
@@ -1167,7 +1184,18 @@ function EditUserDialog({
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1 col-span-2"><Label>שם מלא</Label><Input value={fullName} onChange={(e) => setFullName(e.target.value)} /></div>
-            <div className="space-y-1 col-span-2"><Label>אימייל</Label><Input dir="ltr" value={user.email ?? ""} disabled /></div>
+            <div className="space-y-1 col-span-2">
+              <Label>אימייל</Label>
+              <Input
+                dir="ltr"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                שינוי האימייל יעדכן גם את כתובת ההתחברות של המשתמש.
+              </p>
+            </div>
             <div className="space-y-1">
               <Label>תפקיד</Label>
               <Select value={role} onValueChange={(v) => setRole(v as AppRole)} disabled={roleLocked}>
