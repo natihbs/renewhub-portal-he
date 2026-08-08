@@ -21,14 +21,33 @@ import { Target, ChevronRight, ChevronLeft, Users2, Save, Copy, AlertTriangle, G
 import { requireRole } from "@/lib/require-role";
 import { formatMonthIL, formatNum, formatPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { calculateAchievement } from "@/lib/performance-domain";
+import {
+  calculateAchievement,
+  DEFAULT_KPI_PROFILE,
+  KPI_PROFILE_BADGE_CLASS,
+  KPI_PROFILE_LABEL,
+  type KpiProfile,
+} from "@/lib/performance-domain";
 import { useApp } from "@/lib/store";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useResolvedRole } from "@/lib/use-resolved-role";
+import { useBusinessScope } from "@/lib/business-scope-hooks";
+import {
+  buildScopeTeamRows,
+  groupScopeRows,
+  isScopedManagerKind,
+  missingTargetsByTeam,
+  SCOPE_METRIC_LABELS,
+  type ScopedManagerKind,
+  type ScopeHomeTeamInput,
+  type ScopeTeamRow,
+} from "@/lib/scope-home";
 import {
   useTeamGoal,
+  useTeamGoals,
   useRepresentativeGoal,
+  useRepresentativeGoals,
   currentGoalMonth,
   goalMonthKind,
 } from "@/lib/goals-hooks";
@@ -165,12 +184,40 @@ function ManagerAdminTargetsView() {
   const selectedTeamId = workspace.type === "team" ? workspace.teamId : null;
   const needsTeamPicker = options.length > 1 || (options.length >= 1 && !selectedTeamId);
 
+  const profileByTeamId = useMemo(
+    () => new Map(cloudTeams.map((t) => [t.id, t.kpiProfile])),
+    [cloudTeams],
+  );
+
+  // A business-scope manager (מנהל מוקד / מנהל פעילות / סמנכ"ל) doesn't manage
+  // one team — the page opens with the target status of EVERY team in their
+  // scope for the selected month, and a team is picked from there for editing.
+  // The team options themselves come from the workspace switcher, which is
+  // already scope-limited, and the server re-verifies every write through the
+  // RLS scope funnel — this overview adds visibility, never reach.
+  const { scope } = useBusinessScope();
+  const scopedManager = isScopedManagerKind(scope?.kind);
+
   return (
     <>
       <PageHeader
         title="ניהול יעדים"
-        description="יעד חודשי רשמי לצוות ולכל נציג — המקור היחיד לחישובי עמידה ביעד, קצב ותחזית."
+        description={
+          scopedManager
+            ? "יעדים בהיקף — סטטוס היעדים של כל הצוותים בהיקף הניהול, ובחירת צוות לעריכה."
+            : "יעד חודשי רשמי לצוות ולכל נציג — המקור היחיד לחישובי עמידה ביעד, קצב ותחזית."
+        }
       />
+
+      {scopedManager && scope && (
+        <ScopeTargetsOverview
+          scope={scope}
+          month={month}
+          profileByTeamId={profileByTeamId}
+          selectedTeamId={selectedTeamId}
+          onSelectTeam={setWorkspaceTeam}
+        />
+      )}
 
       {needsTeamPicker && (
         <Card>
@@ -200,13 +247,163 @@ function ManagerAdminTargetsView() {
           </CardContent>
         </Card>
       ) : (
-        <TargetWorkspacePanel teamId={selectedTeamId} month={month} onMonthChange={setMonth} />
+        <TargetWorkspacePanel
+          teamId={selectedTeamId}
+          month={month}
+          onMonthChange={setMonth}
+          kpiProfile={profileByTeamId.get(selectedTeamId) ?? DEFAULT_KPI_PROFILE}
+        />
       )}
     </>
   );
 }
 
-function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string; month: string; onMonthChange: (m: string) => void }) {
+/**
+ * Scope-level target status for a business-scope manager, for the selected
+ * month: every covered team, grouped by the manager's hierarchy level (center
+ * → flat; activity → by center + "משויכים ישירות לפעילות" + "ללא שיוך
+ * להיררכיה"; executive → activity → centers), each row labeled by its OWN
+ * kpi_profile. Reuses the scope-home domain, so this page and ManagerHome
+ * cannot disagree about who is missing targets.
+ */
+function ScopeTargetsOverview({
+  scope,
+  month,
+  profileByTeamId,
+  selectedTeamId,
+  onSelectTeam,
+}: {
+  scope: NonNullable<ReturnType<typeof useBusinessScope>["scope"]>;
+  month: string;
+  profileByTeamId: Map<string, KpiProfile>;
+  selectedTeamId: string | null;
+  onSelectTeam: (teamId: string) => void;
+}) {
+  const { state } = useApp();
+  const teamInputs = useMemo<ScopeHomeTeamInput[]>(() => {
+    const unitByTeam = new Map(scope.teamUnits.map((t) => [t.id, t.businessUnitId]));
+    return scope.teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      kpiProfile: profileByTeamId.get(t.id) ?? DEFAULT_KPI_PROFILE,
+      businessUnitId: unitByTeam.get(t.id) ?? null,
+    }));
+  }, [scope, profileByTeamId]);
+  const teamIds = useMemo(() => teamInputs.map((t) => t.id), [teamInputs]);
+  const scopeReps = useMemo(() => {
+    const ids = new Set(teamIds);
+    return state.reps.filter((r) => r.teamId && ids.has(r.teamId));
+  }, [state.reps, teamIds]);
+  const teamGoals = useTeamGoals(teamIds, month);
+  const repGoals = useRepresentativeGoals(
+    useMemo(() => scopeReps.map((r) => r.id), [scopeReps]),
+    month,
+  );
+  const rows = useMemo(
+    () =>
+      buildScopeTeamRows({
+        teams: teamInputs,
+        reps: scopeReps.map((r) => ({
+          id: r.id,
+          teamId: r.teamId,
+          currentResult: r.currentResult,
+        })),
+        goalsByTeamId: teamGoals.goalsByTeamId,
+        goalsByRepId: repGoals.goalsByRepId,
+      }),
+    [teamInputs, scopeReps, teamGoals.goalsByTeamId, repGoals.goalsByRepId],
+  );
+  const groups = useMemo(
+    () => groupScopeRows({ kind: scope.kind as ScopedManagerKind, rows, units: scope.units }),
+    [scope, rows],
+  );
+  const missingByTeam = useMemo(() => new Map(missingTargetsByTeam(rows).map((m) => [m.teamId, m])), [rows]);
+  const loading = teamGoals.isLoading || repGoals.isLoading || state.repsLoading;
+
+  const rowView = (row: ScopeTeamRow) => {
+    const labels = SCOPE_METRIC_LABELS[row.kpiProfile];
+    const missing = missingByTeam.get(row.id);
+    return (
+      <div
+        key={row.id}
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2.5",
+          selectedTeamId === row.id && "border-primary/50 bg-primary/5",
+        )}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{row.name}</span>
+          <Badge
+            variant="secondary"
+            className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[row.kpiProfile])}
+          >
+            {KPI_PROFILE_LABEL[row.kpiProfile]}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            {row.target != null
+              ? `${labels.target}: ${formatNum(row.target)}`
+              : `לא הוגדר ${labels.target}`}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge
+            variant={row.missingTargets > 0 ? "secondary" : "outline"}
+            className={cn(row.missingTargets > 0 && "bg-primary/10 text-primary")}
+          >
+            {missing?.line ?? `${row.missingTargets} נציגים ללא יעד`}
+          </Badge>
+          <Button size="sm" variant="outline" className="h-7" onClick={() => onSelectTeam(row.id)}>
+            ניהול יעדים
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Target className="h-4 w-4 text-primary" />
+          יעדים בהיקף · {monthLabel(month)}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <div className="space-y-2">
+            {[0, 1].map((i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+            אין צוותים משויכים להיקף הניהול. שיוך צוותים למוקד מתבצע בעמוד הצוותים.
+          </div>
+        ) : (
+          groups.map((group) => (
+            <div key={group.key} className="space-y-2">
+              {group.label && <div className="text-sm font-semibold">{group.label}</div>}
+              {group.rows.map(rowView)}
+              {(group.subgroups ?? []).map((sub) => (
+                <div key={sub.key} className="space-y-2 ps-3">
+                  <div className="text-sm font-medium text-muted-foreground">{sub.label}</div>
+                  {sub.rows.map(rowView)}
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TargetWorkspacePanel({ teamId, month, onMonthChange, kpiProfile = DEFAULT_KPI_PROFILE }: { teamId: string; month: string; onMonthChange: (m: string) => void; kpiProfile?: KpiProfile }) {
+  // The team's own KPI language: a renewals team's target IS the assigned
+  // monthly renewal book (מיועדות חודשיות) and its result is closed renewals
+  // — same PR #39 definition the dashboards use; team_goals stays the source.
+  const isRenewals = kpiProfile === "renewals";
+  const metricLabels = SCOPE_METRIC_LABELS[kpiProfile];
   const qc = useQueryClient();
   const getWorkspace = useServerFn(getTargetWorkspace);
   const saveTeamGoal = useServerFn(setTeamGoal);
@@ -383,13 +580,19 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Target className="h-4 w-4 text-primary" />יעד חודשי לצוות {data.team.name}
+            <Badge
+              variant="secondary"
+              className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[kpiProfile])}
+            >
+              {KPI_PROFILE_LABEL[kpiProfile]}
+            </Badge>
             {readOnly && <Badge variant="secondary">מושבת</Badge>}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
-              <Label htmlFor="team-target">יעד צוות</Label>
+              <Label htmlFor="team-target">{isRenewals ? metricLabels.target : "יעד צוות"}</Label>
               <Input
                 id="team-target"
                 type="number"
@@ -420,7 +623,10 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
             <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">לא הוגדר יעד חודשי · סך יעדי הנציגים: {formatNum(data.representative_target_sum)}</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Stat label="יעד צוות" value={formatNum(data.team_target)} />
+              <Stat
+                label={isRenewals ? metricLabels.target : "יעד צוות"}
+                value={formatNum(data.team_target)}
+              />
               <Stat label="סך יעדי הנציגים" value={formatNum(data.representative_target_sum)} />
               <Stat
                 label={diff >= 0 ? "חריגה מהיעד הצוותי" : "טרם הוקצו"}
@@ -441,6 +647,7 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
         onSave={saveDirtyRepGoals}
         saving={repGoalsMutation.isPending}
         readOnly={readOnly}
+        kpiProfile={kpiProfile}
       />
 
       <CopyGoalsDialog
@@ -454,7 +661,16 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange }: { teamId: string
   );
 }
 
-function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRepIds, onSave, saving, readOnly }: {
+function RepresentativeTargetsTable({
+  representatives,
+  inputs,
+  onChange,
+  dirtyRepIds,
+  onSave,
+  saving,
+  readOnly,
+  kpiProfile = DEFAULT_KPI_PROFILE,
+}: {
   representatives: TargetWorkspaceRep[];
   inputs: Record<string, string>;
   onChange: (id: string, value: string) => void;
@@ -462,7 +678,15 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
   onSave: () => void;
   saving: boolean;
   readOnly?: boolean;
+  kpiProfile?: KpiProfile;
 }) {
+  // Renewals reps speak renewals: the personal target is the assigned book,
+  // the result is closed renewals, the pct is אחוז חידוש. Generic teams keep
+  // the exact previous wording.
+  const isRenewals = kpiProfile === "renewals";
+  const targetHeader = isRenewals ? SCOPE_METRIC_LABELS.renewals.target : "יעד אישי";
+  const resultHeader = isRenewals ? SCOPE_METRIC_LABELS.renewals.result : "ביצוע נוכחי";
+  const pctHeader = isRenewals ? SCOPE_METRIC_LABELS.renewals.rate : "עמידה ביעד";
   if (representatives.length === 0) {
     return (
       <Card><CardContent className="p-0">
@@ -491,9 +715,9 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
               <TableRow>
                 <TableHead>נציג</TableHead>
                 <TableHead>סטטוס</TableHead>
-                <TableHead>יעד אישי</TableHead>
-                <TableHead>ביצוע נוכחי</TableHead>
-                <TableHead>עמידה ביעד</TableHead>
+                <TableHead>{targetHeader}</TableHead>
+                <TableHead>{resultHeader}</TableHead>
+                <TableHead>{pctHeader}</TableHead>
                 <TableHead>פער</TableHead>
               </TableRow>
             </TableHeader>
@@ -540,7 +764,7 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-xs">יעד אישי</Label>
+                    <Label className="text-xs">{targetHeader}</Label>
                     <Input
                       type="number" min={0} inputMode="numeric" value={raw}
                       onChange={(e) => onChange(r.id, e.target.value)}
@@ -550,7 +774,7 @@ function RepresentativeTargetsTable({ representatives, inputs, onChange, dirtyRe
                     />
                   </div>
                   <div className="text-xs text-muted-foreground pt-5">
-                    ביצוע: {formatNum(r.current_result)} · {pct !== null ? formatPct(pct) : "אין יעד"}
+                    {resultHeader}: {formatNum(r.current_result)} · {pct !== null ? formatPct(pct) : "אין יעד"}
                   </div>
                 </div>
               </div>
