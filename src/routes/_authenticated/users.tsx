@@ -161,7 +161,10 @@ function UsersPage() {
       if (q) {
         const teamName = u.team_id ? teamNameById.get(u.team_id) ?? "" : "";
         const managerName = u.manager_id ? managerNameById.get(u.manager_id) ?? "" : "";
-        const hay = `${u.full_name ?? ""} ${u.email ?? ""} ${teamName} ${managerName}`.toLowerCase();
+        // business_title makes scoped managers findable by their business
+        // role ("מנהל מוקד") or unit name ("דירות וחידושים").
+        const hay =
+          `${u.full_name ?? ""} ${u.email ?? ""} ${teamName} ${managerName} ${u.business_title ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (roleFilter !== "all" && !u.roles.includes(roleFilter as AppRole)) return false;
@@ -236,14 +239,16 @@ function UsersPage() {
               <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                 <div className="relative md:col-span-2">
                   <Search className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="חיפוש לפי שם, מייל, צוות או מנהל" className="pe-3 ps-9" />
+                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="חיפוש לפי שם, מייל, צוות, מנהל או תפקיד עסקי" className="pe-3 ps-9" />
                 </div>
+                {/* Filters by the TECHNICAL permission (role=manager covers
+                    מנהל צוות/מוקד/פעילות/סמנכ"ל alike), hence "מנהל". */}
                 <Select value={roleFilter} onValueChange={setRoleFilter}>
-                  <SelectTrigger><SelectValue placeholder="תפקיד" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="הרשאת מערכת" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">כל התפקידים</SelectItem>
+                    <SelectItem value="all">כל ההרשאות</SelectItem>
                     <SelectItem value="admin">מנהל מערכת</SelectItem>
-                    <SelectItem value="manager">מנהל צוות</SelectItem>
+                    <SelectItem value="manager">מנהל</SelectItem>
                     <SelectItem value="representative">נציג</SelectItem>
                   </SelectContent>
                 </Select>

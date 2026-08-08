@@ -145,6 +145,28 @@ describe("Part A — edit dialog role field is the technical permission", () => 
   });
 });
 
+describe("Part A polish — list role filter uses the technical permission wording", () => {
+  // The list lives before EditUserDialog in the file — check that slice so the
+  // edit dialog's own role select never satisfies these pins by accident.
+  const listSrc = usersPageSrc.slice(0, usersPageSrc.indexOf("function EditUserDialog"));
+
+  it('labels the filter "הרשאת מערכת" with option "מנהל" (not "מנהל צוות")', () => {
+    expect(listSrc).toContain('placeholder="הרשאת מערכת"');
+    expect(listSrc).toContain('<SelectItem value="all">כל ההרשאות</SelectItem>');
+    expect(listSrc).toContain('<SelectItem value="manager">מנהל</SelectItem>');
+    expect(usersPageSrc).not.toContain('<SelectItem value="manager">מנהל צוות</SelectItem>');
+    expect(usersPageSrc).not.toContain("כל התפקידים");
+  });
+
+  it("still filters by the TECHNICAL role value", () => {
+    expect(listSrc).toContain("u.roles.includes(roleFilter as AppRole)");
+  });
+
+  it("searches business_title so scoped managers are findable by title or unit", () => {
+    expect(listSrc).toContain('${u.business_title ?? ""}');
+  });
+});
+
 describe("Part C — linked representative responsible manager is derived", () => {
   it("shows a read-only derived display labeled by its source", () => {
     expect(editDialogSrc).toContain("<Label>מנהל אחראי נגזר מצוות הנציג</Label>");
