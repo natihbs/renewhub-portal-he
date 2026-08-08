@@ -84,6 +84,17 @@ async function readScopeGrantsForTitles(
   return byUser;
 }
 
+/**
+ * Literal-match pattern for the ILIKE duplicate check: in SQL LIKE/ILIKE,
+ * "_" matches any single character and "%" any sequence, so an unescaped
+ * address like john_doe@x.com would also match johnXdoe@x.com and could
+ * block a free address. Escaping \, % and _ keeps the comparison exact
+ * while staying case-insensitive. Pure and unit-tested.
+ */
+export function emailToIlikePattern(email: string): string {
+  return email.replace(/[\\%_]/g, "\\$&");
+}
+
 export function normalizeEmailInput(raw: string): string {
   const email = String(raw ?? "")
     .trim()
@@ -489,7 +500,7 @@ export const updateUserEmail = createServerFn({ method: "POST" })
     const { data: taken, error: takenErr } = await supabaseAdmin
       .from("profiles")
       .select("id")
-      .ilike("email", data.email)
+      .ilike("email", emailToIlikePattern(data.email))
       .neq("id", data.user_id)
       .maybeSingle();
     if (takenErr) throw new Error(takenErr.message);

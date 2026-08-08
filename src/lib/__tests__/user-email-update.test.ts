@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  emailToIlikePattern,
   normalizeEmailInput,
   EMAIL_INVALID_MESSAGE,
   EMAIL_REQUIRED_MESSAGE,
@@ -50,6 +51,55 @@ describe("normalizeEmailInput — trim, lowercase, validate", () => {
   });
 });
 
+// ------------------------------------------------- duplicate-check exactness
+describe("emailToIlikePattern — exact, case-insensitive, no wildcard behavior", () => {
+  // A faithful model of Postgres ILIKE semantics: escaped \% / \_ / \\ are
+  // literals; a bare % matches any sequence and a bare _ any single char.
+  function ilikeMatches(pattern: string, value: string): boolean {
+    let regex = "";
+    for (let i = 0; i < pattern.length; i++) {
+      const ch = pattern[i];
+      if (ch === "\\" && i + 1 < pattern.length) {
+        regex += pattern[i + 1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        i++;
+      } else if (ch === "%") {
+        regex += ".*";
+      } else if (ch === "_") {
+        regex += ".";
+      } else {
+        regex += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+    }
+    return new RegExp(`^${regex}$`, "i").test(value);
+  }
+
+  it("a plain address stays unchanged and matches itself case-insensitively", () => {
+    expect(emailToIlikePattern("odelsa@menoramivt.co.il")).toBe("odelsa@menoramivt.co.il");
+    expect(
+      ilikeMatches(emailToIlikePattern("odelsa@menoramivt.co.il"), "OdelSA@MenoraMIVT.co.il"),
+    ).toBe(true);
+  });
+
+  it('an "_" is treated literally: the exact address still matches', () => {
+    expect(emailToIlikePattern("john_doe@x.com")).toBe("john\\_doe@x.com");
+    expect(ilikeMatches(emailToIlikePattern("john_doe@x.com"), "john_doe@x.com")).toBe(true);
+    expect(ilikeMatches(emailToIlikePattern("john_doe@x.com"), "John_Doe@X.com")).toBe(true);
+  });
+
+  it("john_doe@x.com is NOT matched by johnXdoe@x.com — no wildcard false positive", () => {
+    expect(ilikeMatches(emailToIlikePattern("john_doe@x.com"), "johnxdoe@x.com")).toBe(false);
+    // …whereas the unescaped pattern would have matched, which was the bug.
+    expect(ilikeMatches("john_doe@x.com", "johnxdoe@x.com")).toBe(true);
+  });
+
+  it('a "%" (validator-legal) is treated literally, not as any-sequence', () => {
+    expect(normalizeEmailInput("a%b@x.com")).toBe("a%b@x.com");
+    expect(emailToIlikePattern("a%b@x.com")).toBe("a\\%b@x.com");
+    expect(ilikeMatches(emailToIlikePattern("a%b@x.com"), "a%b@x.com")).toBe(true);
+    expect(ilikeMatches(emailToIlikePattern("a%b@x.com"), "aWHATEVERb@x.com")).toBe(false);
+  });
+});
+
 // ------------------------------------------------------------- server behavior
 describe("updateUserEmail — admin-only, both stores in sync, nothing else moves", () => {
   it("is admin-only", () => {
@@ -61,7 +111,7 @@ describe("updateUserEmail — admin-only, both stores in sync, nothing else move
   });
 
   it("rejects an address already used by another profile", () => {
-    expect(emailFn).toContain('.ilike("email", data.email)');
+    expect(emailFn).toContain('.ilike("email", emailToIlikePattern(data.email))');
     expect(emailFn).toContain('.neq("id", data.user_id)');
     expect(emailFn).toContain("EMAIL_TAKEN_MESSAGE");
     expect(EMAIL_TAKEN_MESSAGE).toBe("כתובת האימייל כבר בשימוש על ידי משתמש אחר");
