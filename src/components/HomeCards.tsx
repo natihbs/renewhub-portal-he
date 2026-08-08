@@ -23,6 +23,7 @@ import {
   Award,
   CheckSquare,
   Database,
+  Eye,
   Gauge,
   Headphones,
   ListChecks,
@@ -720,6 +721,15 @@ export function MyFeedbackCard({ repId, className }: { repId: string; className?
                     {f.improve}
                   </p>
                 )}
+                {/* Deep-links into /feedback's "פירוט משוב" dialog for exactly
+                    this evaluation — full details (score, sections, keep/
+                    improve, manager summary, next task, revision history). */}
+                <Button asChild size="sm" variant="outline" className="mt-2 h-7">
+                  <Link to="/feedback" search={{ feedbackId: f.id }}>
+                    <Eye className="ms-1 h-3.5 w-3.5" />
+                    צפייה במשוב
+                  </Link>
+                </Button>
               </li>
             ))}
           </ul>

@@ -30,7 +30,15 @@ import {
   FileSpreadsheet, Printer, Headphones, StickyNote, Lightbulb,
   Sparkles,
 } from "lucide-react";
-import { formatNum, formatPct, formatDateIL, workdaysInMonth, workdaysPassed, workdaysRemaining } from "@/lib/format";
+import {
+  formatNum,
+  formatPct,
+  formatDateIL,
+  formatMonthIL,
+  workdaysInMonth,
+  workdaysPassed,
+  workdaysRemaining,
+} from "@/lib/format";
 import {
   STALE_DATA_HINT,
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
@@ -133,7 +141,194 @@ function hasTarget(e: EnrichedRep): e is TargetedRep {
   return e.status !== "no_target";
 }
 
+/**
+ * Personal pace-status labels for the representative's own performance view.
+ * Deliberately NOT the manager's PACE_STATUS_LABEL: "דורש טיפול" is a label a
+ * manager puts on a row, not something a person should read about themselves.
+ * The underlying band is the same paceStatus() everywhere in the app.
+ */
+export const REP_STATUS_LABEL: Record<"above" | "onpace" | "attention", string> = {
+  above: "מעל הקצב",
+  onpace: "בקצב",
+  attention: "מתחת לקצב",
+};
+
+/**
+ * Role split, component-level so the hook trees stay independent:
+ * a manager/admin gets the management table (unchanged), a representative
+ * gets a personal view — cards about THEIR month, not a management table
+ * narrowed to one row. No export/print, no filters, no manual update, no
+ * add-representative, and clicking nothing ever opens the manager
+ * RepWorkspace: the page already IS their details.
+ */
 function PerformancePage() {
+  const isManager = useIsManager();
+  return isManager ? <ManagerPerformancePage /> : <RepresentativePerformancePage />;
+}
+
+function RepresentativePerformancePage() {
+  const { state } = useApp();
+  const me = state.reps.find((r) => r.id === state.currentRepId) ?? null;
+  const repIds = useMemo(() => (me ? [me.id] : []), [me]);
+  const myGoals = useRepresentativeGoals(repIds, currentGoalMonth());
+  const wdTotal = workdaysInMonth();
+  const wdPassed = workdaysPassed();
+  const wdRemaining = workdaysRemaining();
+
+  const target = me ? (myGoals.goalsByRepId.get(me.id) ?? null) : null;
+  // "אין יעד" is a claim about the world — only made once the goals query has
+  // actually settled (same rule as the home screen's personal cards).
+  const goalsSettled = !myGoals.isLoading && !myGoals.isError;
+  const measured = me && goalsSettled && target !== null;
+  const pct = measured ? calculateAchievement(me.currentResult, target) : null;
+  const status = measured
+    ? (paceStatus(me.currentResult, target, wdTotal, wdPassed) as "above" | "onpace" | "attention")
+    : null;
+  const pace = measured
+    ? sharedPaceInfo(target, me.currentResult, wdTotal, wdPassed, wdRemaining)
+    : null;
+  const remaining = measured ? Math.max(0, target - me.currentResult) : null;
+  const forecastPct = measured && pace && target > 0 ? (pace.forecast / target) * 100 : null;
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <PageHeader title="הביצועים שלי" description="מעקב אחר היעד החודשי שלך - קצב, פער ותחזית" />
+
+      {state.repsLoading || myGoals.isLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[0, 1, 2].map((i) => (
+            <Card key={i}>
+              <CardContent className="pt-5">
+                <div className="h-16 animate-pulse rounded-lg bg-muted" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : state.repsError ? (
+        <Card>
+          <CardContent className="pt-5 text-sm text-destructive">{state.repsError}</CardContent>
+        </Card>
+      ) : !me ? (
+        <EmptyState
+          icon={Users}
+          title="אין עדיין נתוני ביצועים"
+          description="החשבון שלך עדיין לא מקושר לפרופיל נציג — פנה/י למנהל המערכת."
+          compact
+        />
+      ) : myGoals.isError ? (
+        <Card>
+          <CardContent className="pt-5 text-sm text-destructive">
+            לא ניתן לטעון את היעד האישי שלך כרגע. נסו לרענן את הדף.
+          </CardContent>
+        </Card>
+      ) : !measured ? (
+        <Card>
+          <CardContent className="pt-5">
+            <div className="flex items-center gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-primary">
+                <Target className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="font-semibold">לא הוגדר יעד אישי לחודש זה</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  ביצוע נוכחי: {formatNum(me.currentResult)} יחידות. פנו למנהל/ת הצוות להגדרת יעד
+                  רשמי — עמידה, קצב ותחזית יחושבו רק מול יעד מוגדר.
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Status first — the one-line answer to "איך אני עומד/ת החודש". */}
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border p-3.5">
+            <span className="text-sm font-semibold">הסטטוס שלי החודש:</span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                statusBadgeClass(status as Status),
+              )}
+            >
+              <StatusDot status={status as Status} />
+              {REP_STATUS_LABEL[status as "above" | "onpace" | "attention"]}
+            </span>
+            <div className="flex min-w-[180px] flex-1 items-center gap-2">
+              <ColoredBar pct={pct as number} status={status as Status} className="flex-1" />
+              <span className="text-sm font-bold tabular-nums">{formatPct(pct as number)}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-3 gap-3">
+            <SummaryCard
+              tone="neutral"
+              icon={Target}
+              label="יעד אישי"
+              value={formatNum(target as number)}
+              sub={`יעד ${formatMonthIL(currentGoalMonth())}`}
+            />
+            <SummaryCard
+              tone="neutral"
+              icon={Gauge}
+              label="ביצוע נוכחי"
+              value={formatNum(me.currentResult)}
+              sub={`${formatPct(pct as number)} אחוז עמידה`}
+            />
+            <SummaryCard
+              tone={(remaining as number) <= 0 ? "success" : "neutral"}
+              icon={CheckCircle2}
+              label="נותר ליעד"
+              value={(remaining as number) <= 0 ? "היעד הושג" : formatNum(remaining as number)}
+              sub={(remaining as number) <= 0 ? "כל הכבוד!" : `מתוך ${formatNum(target as number)}`}
+            />
+            <SummaryCard
+              tone="neutral"
+              icon={LineChartIcon}
+              label="קצב יומי מומלץ"
+              value={
+                (remaining as number) <= 0
+                  ? "—"
+                  : pace?.periodState === "no_time_remaining"
+                    ? NO_TIME_REMAINING_LABEL
+                    : pace?.perDay != null
+                      ? `${formatNum(pace.perDay)}/יום`
+                      : "—"
+              }
+              sub={wdRemaining > 0 ? `${wdRemaining} ימי עבודה נותרו מתוך ${wdTotal}` : undefined}
+            />
+            <SummaryCard
+              tone={
+                forecastPct === null
+                  ? "neutral"
+                  : forecastPct >= 100
+                    ? "success"
+                    : forecastPct >= 90
+                      ? "warning"
+                      : "danger"
+              }
+              icon={Sparkles}
+              label="תחזית סוף חודש"
+              value={pace ? formatNum(pace.forecast) : "—"}
+              sub={forecastPct === null ? undefined : `${formatPct(forecastPct)} מהיעד בקצב הנוכחי`}
+            />
+            <SummaryCard
+              tone="neutral"
+              icon={Users}
+              label="הצוות שלי"
+              value={me.teamName || "ללא צוות"}
+              sub="השוואות צוותיות זמינות למנהל/ת הצוות"
+            />
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            הנתונים מבוססים על הייבוא האחרון למערכת. אם משהו נראה לא מעודכן — פנו למנהל/ת הצוות.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ManagerPerformancePage() {
   const { state } = useApp();
   const isManager = useIsManager();
   const { open: openWorkspace } = useRepWorkspace();

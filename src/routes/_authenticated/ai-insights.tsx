@@ -15,6 +15,7 @@ import {
 } from "@/lib/ai-insights.functions";
 import { BarChart3, Headphones, Target, Sparkles, AlertTriangle, RefreshCw, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIsManager } from "@/lib/store";
 import Markdown from "react-markdown";
 
 export const Route = createFileRoute("/_authenticated/ai-insights")({
@@ -38,13 +39,15 @@ type InsightResult = {
   recommendations: { action: string; priority: string; rationale: string }[];
 };
 
-const INSIGHTS: {
+type InsightCardDef = {
   id: InsightType;
   label: string;
   description: string;
   icon: typeof BarChart3;
   badge: string;
-}[] = [
+};
+
+const MANAGER_INSIGHTS: InsightCardDef[] = [
   {
     id: "performance",
     label: "תובנות ביצוע",
@@ -68,6 +71,38 @@ const INSIGHTS: {
   },
 ];
 
+/**
+ * The representative's cards, in personal language. Safe to offer because the
+ * scope is enforced SERVER-side, not by this copy: the insight functions fetch
+ * through the caller's RLS-scoped client, resolve the role from user_roles,
+ * and additionally filter both the performance and the feedback prompts to
+ * scope.repId for a representative (ai-insights.functions.ts) — so the model
+ * never receives another person's rows regardless of what the UI says.
+ */
+const REP_INSIGHTS: InsightCardDef[] = [
+  {
+    id: "performance",
+    label: "התקדמות מול היעד שלי",
+    description: "ניתוח אישי של הביצוע שלך מול היעד החודשי",
+    icon: BarChart3,
+    badge: "ביצועים",
+  },
+  {
+    id: "feedback",
+    label: "מה חוזר במשובים שלי",
+    description: "דפוסים חוזרים מהמשובים שפורסמו עבורך ב-30 הימים האחרונים",
+    icon: Headphones,
+    badge: "משוב",
+  },
+  {
+    id: "goals",
+    label: "איך להשתפר לקראת החודש הבא",
+    description: "המלצות אישיות על בסיס הביצוע שלך עד כה",
+    icon: Target,
+    badge: "יעדים",
+  },
+];
+
 const priorityClass = (p: string) => {
   const normalized = p.toLowerCase();
   if (normalized === "high") return "bg-destructive/10 text-destructive border-destructive/20";
@@ -83,6 +118,8 @@ const priorityLabel = (p: string) => {
 };
 
 function AiInsightsPage() {
+  const isManager = useIsManager();
+  const insightDefs = isManager ? MANAGER_INSIGHTS : REP_INSIGHTS;
   const [activeTab, setActiveTab] = useState<InsightType>("performance");
   const [results, setResults] = useState<Partial<Record<InsightType, InsightResult>>>({});
   const [loading, setLoading] = useState<Partial<Record<InsightType, boolean>>>({});
@@ -117,15 +154,24 @@ function AiInsightsPage() {
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">תובנות AI</h1>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+            {isManager ? "תובנות AI" : "התובנות שלי"}
+          </h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          ניתוח מבוסס בינה מלאכותית של נתוני הביצוע, המשוב והיעדים — מותאם לתפקיד שלך במערכת.
+          {isManager
+            ? "ניתוח מבוסס בינה מלאכותית של נתוני הביצוע, המשוב והיעדים — מותאם לתפקיד שלך במערכת."
+            : "ניתוח אישי מבוסס בינה מלאכותית של ההתקדמות והמשובים שלך."}
         </p>
+        {!isManager && (
+          <p className="text-xs text-muted-foreground">
+            התובנות מבוססות על הנתונים האישיים שלך בלבד.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {INSIGHTS.map((insight) => {
+        {insightDefs.map((insight) => {
           const Icon = insight.icon;
           const isLoading = !!loading[insight.id];
           const hasResult = !!results[insight.id];
@@ -185,14 +231,14 @@ function AiInsightsPage() {
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as InsightType)} className="w-full">
         <TabsList className="grid w-full grid-cols-3 md:w-auto">
-          {INSIGHTS.map((i) => (
+          {insightDefs.map((i) => (
             <TabsTrigger key={i.id} value={i.id}>
               {i.label}
             </TabsTrigger>
           ))}
         </TabsList>
 
-        {INSIGHTS.map((insight) => (
+        {insightDefs.map((insight) => (
           <TabsContent key={insight.id} value={insight.id} className="mt-4">
             <InsightPanel
               result={results[insight.id]}

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useApp } from "@/lib/store";
+import { useApp, useIsManager } from "@/lib/store";
 import type { Rep } from "@/lib/seed";
 import { type Feedback, scoreTone, SCORE_TEXT_CLASS } from "@/lib/feedback-domain";
 import { useRepWorkspace, type WorkspaceNote } from "@/lib/rep-workspace";
@@ -113,9 +113,17 @@ function CircularProgress({ pct, status }: { pct: number | null; status: Status 
 // ---------- main workspace ----------
 export function RepWorkspace() {
   const { openRepId, close } = useRepWorkspace();
+  const isManager = useIsManager();
   const { state } = useApp();
   const qc = useQueryClient();
   const rep = state.reps.find((r) => r.id === openRepId) ?? null;
+
+  // Manager tool, full stop. Notes, tasks and the managerial summary are a
+  // manager's working surface over a representative — a representative must
+  // never be shown this UI, even where RLS would block the writes anyway.
+  // With this gate no residual open() path (command palette, deep link, a
+  // future page) can present it to a representative.
+  if (!isManager) return null;
 
   // §P3: the sheet stays OPEN while a representative is open, so the previous
   // `{rep ? <WorkspaceBody/> : <div/>}` rendered a completely blank panel with
