@@ -46,9 +46,11 @@ describe("processRows — renewal-field profile gating", () => {
     expect(row.completedRenewals).toBeNull();
     expect(row.renewalFieldsSkipped).toBe(true);
     expect(row.issues.some((i) => i.severity === "warning")).toBe(true);
-    // the row itself must still be importable for its universal fields — a rejected
-    // renewal mapping must not block the generic target/result import.
-    expect(row.action).toBe("create");
+    // the row itself must still be resolvable for its universal fields — a
+    // rejected renewal mapping adds no ERROR. Unmatched rows now park on
+    // "skip" (never auto-created); creation is an explicit per-row choice.
+    expect(row.action).toBe("skip");
+    expect(row.issues.some((i) => i.severity === "error")).toBe(false);
   });
 
   it("warns the same way for an unassigned team (no team resolved at all)", () => {
@@ -78,10 +80,11 @@ describe("processRows — unresolved-team warning must match what applyImport ac
     expect(warning?.message).not.toContain("ללא שיוך צוות");
   });
 
-  it("tells the truth for a row that will CREATE a new rep: it really is saved unassigned", () => {
+  it("tells the truth for an UNMATCHED row: parked on skip, and if explicitly created — saved unassigned", () => {
     const rows = [{ "שם": "New Person", "צוות": "Sales Nrth", "יעד": 100, "ביצוע": 85, "תאריך": "2026-08-01" }];
     const [row] = processRows(rows, universalMapping, [existingRep], teams);
-    expect(row.action).toBe("create");
+    // Never auto-created — creation is an explicit per-row choice (§B).
+    expect(row.action).toBe("skip");
     expect(row.teamId).toBeNull();
     const warning = row.issues.find((i) => i.severity === "warning");
     expect(warning?.message).toContain("ללא שיוך צוות");

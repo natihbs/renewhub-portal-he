@@ -93,11 +93,26 @@ function PrivacyNotice() {
 }
 
 function downloadTemplate(kind: "xlsx" | "csv") {
-  const headers = ["שם הנציג", "צוות", "יעד חודשי", "ביצוע נוכחי", "תאריך עדכון"];
+  // The full supported column set: identifier columns (מזהה נציג / אימייל) are
+  // optional but make matching rename-proof; the renewal columns are saved
+  // only for teams whose kpi_profile is "renewals"; תאריך עדכון also accepts
+  // a reporting month ("2026-08" or "08/2026").
+  const headers = [
+    "שם הנציג",
+    "מזהה נציג",
+    "אימייל",
+    "צוות",
+    "יעד חודשי",
+    "ביצוע נוכחי",
+    "תאריך עדכון",
+    "הזדמנויות חידוש",
+    "חידושים שבוצעו",
+  ];
+  const today = formatDateIL(new Date());
   const rows = [
-    ["דנה כהן", "צוות מכירות צפון", 120, 84, formatDateIL(new Date())],
-    ["איתי לוי", "צוות מכירות דרום", 90, 71, formatDateIL(new Date())],
-    ["מיה שטרן", "צוות מכירות צפון", 110, 45, formatDateIL(new Date())],
+    ["דנה כהן", "EMP-101", "dana@example.co.il", "צוות מכירות צפון", 120, 84, today, "", ""],
+    ["איתי לוי", "EMP-102", "", "צוות מכירות דרום", 90, 71, today, "", ""],
+    ["מיה שטרן", "", "mia@example.co.il", "חידושי רכב", 110, 45, today, 30, 22],
   ];
   if (kind === "csv") {
     const csv = Papa.unparse({ fields: headers, data: rows });
@@ -183,7 +198,7 @@ function DataImportPage() {
   );
   const matchCandidates = useMemo(
     () => (candidatesQuery.data?.candidates ?? []).map((c) => ({
-      id: c.id, name: c.name, externalRef: c.external_ref, active: c.active, teamId: c.team_id,
+      id: c.id, name: c.name, externalRef: c.external_ref, email: c.user_email, active: c.active, teamId: c.team_id,
     })),
     [candidatesQuery.data],
   );
@@ -447,6 +462,19 @@ function DataImportPage() {
       const status: ImportHistoryEntry["status"] =
         cloudFailed > 0 ? (updated + created === 0 ? "failed" : "partial") : (errs > 0 ? "partial" : "success");
 
+      // The reporting period this import applied to: recorded only when every
+      // applied row's own date agreed on one calendar month — a mixed-months
+      // file gets null, never a guessed month.
+      const appliedMonths = new Set(
+        processed
+          .filter(
+            (r) =>
+              r.action !== "skip" && !r.issues.some((i) => i.severity === "error") && r.updatedAt,
+          )
+          .map((r) => r.updatedAt!.slice(0, 7)),
+      );
+      const appliedPeriod = appliedMonths.size === 1 ? [...appliedMonths][0] : null;
+
       const entry = importStore.pushHistory({
         fileName: file?.name ?? "unknown",
         importedBy: importedByName,
@@ -457,6 +485,7 @@ function DataImportPage() {
         warnings: warns,
         errors: errs,
         status,
+        period: appliedPeriod,
         snapshot: { reps: snapshot, targetGoals: targetGoalSnapshot },
         errorReport,
       });
@@ -943,6 +972,20 @@ function PreviewStep({
           שורות אלו לא ייובאו כברירת מחדל. יש לבחור לכל שורה: הפעלה מחדש ועדכון, דילוג, או יצירת נציג נפרד — יצירה תייצר רשומה כפולה עם היסטוריה ריקה.
         </div>
       )}
+      {(() => {
+        const unmatchedCount = processed.filter(
+          (p) => !p.matchRepId && p.name && !p.issues.some((i) => i.severity === "error"),
+        ).length;
+        return unmatchedCount > 0 ? (
+          <div className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
+            {unmatchedCount === 1
+              ? "שורה אחת אינה תואמת נציג קיים."
+              : `${unmatchedCount} שורות אינן תואמות נציגים קיימים.`}{" "}
+            נציגים חדשים אינם נוצרים מייבוא באופן אוטומטי — שורות אלו ידולגו, אלא אם תבחרו "יצירת
+            נציג חדש" במפורש בשורה.
+          </div>
+        ) : null;
+      })()}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatChip label="שורות" value={processed.length} tone="muted" />
         <StatChip label="לעדכון" value={processed.filter((p) => p.action === "update").length} tone="success" />
@@ -1229,6 +1272,7 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                   <TableHead>תאריך</TableHead>
                   <TableHead>שעה</TableHead>
                   <TableHead>קובץ</TableHead>
+                  <TableHead>תקופה</TableHead>
                   <TableHead>נציגים עודכנו</TableHead>
                   <TableHead>אזהרות</TableHead>
                   <TableHead>שגיאות</TableHead>
@@ -1244,6 +1288,9 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                       <TableCell className="whitespace-nowrap">{date}</TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{time}</TableCell>
                       <TableCell className="max-w-[220px] truncate">{h.fileName}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                        {h.period ? formatMonthLabel(h.period) : "—"}
+                      </TableCell>
                       <TableCell>{h.rowsUpdated + h.rowsCreated}</TableCell>
                       <TableCell>
                         {h.warnings > 0

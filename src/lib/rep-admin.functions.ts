@@ -1312,6 +1312,9 @@ export type ImportMatchCandidateRow = {
   id: string;
   name: string;
   external_ref: string | null;
+  /** Login-account email (profiles.email) of a LINKED representative — for
+   * email-based import matching. Null when the rep has no login account. */
+  user_email: string | null;
   active: boolean;
   team_id: string | null;
 };
@@ -1344,8 +1347,43 @@ export const listRepresentativeMatchCandidates = createServerFn({ method: "GET" 
     }
     const { data, error } = await ctx.supabase
       .from("representatives")
-      .select("id, name, external_ref, active, team_id")
+      .select("id, name, external_ref, active, team_id, user_id")
       .order("name");
     if (error) throw new Error(error.message);
-    return { candidates: (data ?? []) as ImportMatchCandidateRow[] };
+    const rows = (data ?? []) as {
+      id: string;
+      name: string;
+      external_ref: string | null;
+      active: boolean;
+      team_id: string | null;
+      user_id: string | null;
+    }[];
+
+    // Attach login emails for email-based matching. The candidate set itself
+    // came through the CALLER's RLS-scoped read (a manager only ever received
+    // their own reps), so looking up emails for exactly those user_ids via the
+    // service client widens nothing — it resolves emails the caller's scope
+    // already covers, without depending on the narrowed profiles RLS.
+    const userIds = rows.map((r) => r.user_id).filter((v): v is string => !!v);
+    const emailByUserId = new Map<string, string>();
+    if (userIds.length > 0) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: profileRows } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email")
+        .in("id", userIds);
+      for (const p of (profileRows ?? []) as { id: string; email: string | null }[]) {
+        if (p.email) emailByUserId.set(p.id, p.email);
+      }
+    }
+
+    const candidates: ImportMatchCandidateRow[] = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      external_ref: r.external_ref,
+      user_email: r.user_id ? (emailByUserId.get(r.user_id) ?? null) : null,
+      active: r.active,
+      team_id: r.team_id,
+    }));
+    return { candidates };
   });

@@ -112,8 +112,8 @@ describe("isMetricEditAllowedForInactiveRep — source-aware, not blanket allow/
 // representative matched nothing, fell through to "create", and produced a
 // duplicate active record with zeroed history.
 describe("matchImportRow — precedence and inactive visibility", () => {
-  const active: ImportMatchCandidate = { id: "r-active", name: "דנה כהן", externalRef: "E-100", active: true, teamId: "t1" };
-  const inactive: ImportMatchCandidate = { id: "r-inactive", name: "יוסי לוי", externalRef: "E-200", active: false, teamId: "t1" };
+  const active: ImportMatchCandidate = { id: "r-active", name: "דנה כהן", externalRef: "E-100", email: null, active: true, teamId: "t1" };
+  const inactive: ImportMatchCandidate = { id: "r-inactive", name: "יוסי לוי", externalRef: "E-200", email: null, active: false, teamId: "t1" };
   const candidates = [active, inactive];
 
   it("matches an active representative by exact normalized name", () => {
