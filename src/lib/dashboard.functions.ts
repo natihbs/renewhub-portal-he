@@ -567,16 +567,33 @@ export const getPerformanceDataFreshness = createServerFn({ method: "POST" })
     const { data: kpiRows, error } = await q;
     if (error) throw new Error(error.message);
 
-    const { data: importRows, error: importErr } = await ctx.supabase
+    // The period column is additive (20260808120000) and a live database may
+    // not carry it yet — read without it rather than failing freshness.
+    type ImportFreshnessRow = { created_at: string; status: string; period?: string | null };
+    let importRow: ImportFreshnessRow | null = null;
+    const withPeriod = await ctx.supabase
       .from("import_history")
-      .select("created_at, status")
+      .select("created_at, status, period")
       .order("created_at", { ascending: false })
       .limit(1);
-    if (importErr) throw new Error(importErr.message);
+    if (!withPeriod.error) {
+      importRow = ((withPeriod.data ?? [])[0] as unknown as ImportFreshnessRow | undefined) ?? null;
+    } else {
+      const { data: bareRows, error: importErr } = await ctx.supabase
+        .from("import_history")
+        .select("created_at, status")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (importErr) throw new Error(importErr.message);
+      importRow = ((bareRows ?? [])[0] as ImportFreshnessRow | undefined) ?? null;
+    }
 
     return {
+      // The newest kpi_values.metric_date. For monthly data this is a PERIOD
+      // MARKER (always the first of the month), not an update timestamp.
       sourceDataDate: ((kpiRows ?? [])[0]?.metric_date as string | undefined) ?? null,
-      lastImportAt: ((importRows ?? [])[0]?.created_at as string | undefined) ?? null,
-      lastImportStatus: ((importRows ?? [])[0]?.status as string | undefined) ?? null,
+      lastImportAt: importRow?.created_at ?? null,
+      lastImportStatus: importRow?.status ?? null,
+      lastImportPeriod: importRow?.period ?? null,
     };
   });

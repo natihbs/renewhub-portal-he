@@ -43,9 +43,9 @@ describe("Issue A — data freshness bar is an operator concern", () => {
     expect(adminHome).toContain("<DataFreshnessBar");
   });
 
-  it("the freshness logic itself is untouched — the bar still says מצב הנתונים where it renders", () => {
+  it("the bar still says מצב הנתונים and computes freshness from a domain summary", () => {
     expect(homeCardsSrc).toContain("מצב הנתונים");
-    expect(homeCardsSrc).toContain("computeFreshness");
+    expect(homeCardsSrc).toContain("summariseMonthlyFreshness");
   });
 
   it("real loading/error states on the representative's personal cards survive", () => {
