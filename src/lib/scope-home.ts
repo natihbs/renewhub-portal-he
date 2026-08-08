@@ -203,10 +203,14 @@ const withTypeWord = (name: string, typeWord: string) =>
 /**
  * The grouping each scope level actually manages by:
  *   center    → flat team rows (the center IS the group);
- *   activity  → teams grouped by center, plus directly-attached teams;
+ *   activity  → teams grouped by center, then directly-attached teams, then
+ *               any covered team outside the hierarchy (e.g. also-owned via
+ *               teams.manager_id with no unit attachment);
  *   executive → activities, each with its centers as subgroups, plus teams
  *               outside the hierarchy (an executive covers ALL teams, and
  *               hiding the unattached ones would silently shrink the total).
+ * Every covered row appears in EXACTLY one group — nothing in scope may
+ * disappear from the grouped view while still being counted in aggregates.
  * Empty groups are dropped — a header over nothing is noise, not structure.
  */
 export function groupScopeRows(params: {
@@ -228,10 +232,12 @@ export function groupScopeRows(params: {
   if (kind === "activity") {
     const centers = units.filter((u) => u.unitType === "center");
     const groups: ScopeGroup[] = [];
+    const placed = new Set<string>();
     for (const center of centers) {
       const centerRows = rowsByUnit(center.id);
       if (centerRows.length > 0) {
         groups.push({ key: center.id, label: centerLabel(center), rows: centerRows });
+        for (const r of centerRows) placed.add(r.id);
       }
     }
     // Teams attached straight to the activity (legacy attachments): still in
@@ -242,6 +248,15 @@ export function groupScopeRows(params: {
     });
     if (direct.length > 0) {
       groups.push({ key: "direct", label: SCOPE_DIRECT_ACTIVITY_GROUP_LABEL, rows: direct });
+      for (const r of direct) placed.add(r.id);
+    }
+    // Covered teams with no hierarchy attachment — e.g. a team this manager
+    // ALSO owns via teams.manager_id that was never attached to a unit. It is
+    // in scope, in the switcher and in the aggregates, so hiding it from the
+    // grouped view would silently drop a team the numbers still count.
+    const unattached = rows.filter((r) => !placed.has(r.id));
+    if (unattached.length > 0) {
+      groups.push({ key: "unattached", label: SCOPE_UNATTACHED_GROUP_LABEL, rows: unattached });
     }
     return groups;
   }
