@@ -55,6 +55,7 @@ import {
   type AssignedRenewalRateResult,
 } from "@/lib/renewal-rate";
 import { useRepresentativeGoals, useTeamGoals, currentGoalMonth } from "@/lib/goals-hooks";
+import { useBusinessScope } from "@/lib/business-scope-hooks";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
@@ -345,6 +346,9 @@ function RepresentativePerformancePage() {
 function ManagerPerformancePage() {
   const { state } = useApp();
   const isManager = useIsManager();
+  // Visible business scope (היקף צפייה) near the header — resolved by the
+  // single business-scope rule set; display only, RLS enforces the same scope.
+  const { scope: businessScope } = useBusinessScope();
   const { open: openWorkspace } = useRepWorkspace();
   const teamOptions = useMemo(() => teamsFromReps(state.reps), [state.reps]);
   // Visible (not just active) teams — this page shows historical performance
@@ -541,6 +545,9 @@ function ManagerPerformancePage() {
                 There is no dedicated PDF renderer here, so this is the single
                 honest action, named for what the browser dialog actually
                 offers. */}
+            {businessScope?.scopeLabel && (
+              <span className="text-xs text-muted-foreground">{businessScope.scopeLabel}</span>
+            )}
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="ms-1 h-4 w-4" />הדפסה / שמירה כ-PDF
             </Button>

@@ -31,6 +31,7 @@ import {
   type AssignedRenewalRateResult,
 } from "@/lib/renewal-rate";
 import { useWorkspace, managerScopeLabel } from "@/lib/workspace-context";
+import { useBusinessScope } from "@/lib/business-scope-hooks";
 import {
   useTeamGoal,
   useRepresentativeGoal,
@@ -192,6 +193,11 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
       : role === "manager"
         ? managerScopeLabel({ workspace, managedTeams, ready })
         : me?.teamName || NO_TEAM_LABEL;
+  // The resolved BUSINESS scope (מנהל צוות / מנהל מוקד / מנהל פעילות /
+  // סמנכ"ל) — a manager-only "היקף צפייה" line. Admin keeps the system-
+  // administrator framing and never gets a business-executive label;
+  // representatives see only their own team name above.
+  const { scope: businessScope } = useBusinessScope();
 
   return (
     <div className="space-y-2">
@@ -199,6 +205,9 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">שלום, {displayName}</h1>
           <p className="text-sm text-muted-foreground mt-1">{scopeLine}</p>
+          {role === "manager" && businessScope?.scopeLabel && (
+            <p className="text-xs text-muted-foreground mt-0.5">{businessScope.scopeLabel}</p>
+          )}
         </div>
         {actions}
       </div>
