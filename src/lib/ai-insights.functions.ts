@@ -1,7 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateText, Output, NoObjectGeneratedError } from "ai";
-import { AI_INSIGHT_FRIENDLY_ERROR } from "@/lib/ai-insights-domain";
+import {
+  AI_INSIGHT_FRIENDLY_ERROR,
+  NO_DATA_INSIGHT,
+  normalizeInsightResult,
+  parseInsightFallback,
+  type InsightResultShape,
+} from "@/lib/ai-insights-domain";
 import { z } from "zod";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 import { currentMonthStart } from "@/lib/kpi-values";
@@ -125,9 +131,31 @@ const InsightSchema = z.object({
   ),
 });
 
-type InsightOutput = z.infer<typeof InsightSchema>;
+/**
+ * The JSON contract, repeated inside the USER prompt so the required English
+ * key names reach the model even if the gateway's instructions handling ever
+ * changes — the blank-insight incident showed the format spec must not live
+ * in one delivery channel only. Content stays Hebrew; keys stay English.
+ */
+export const PROMPT_JSON_CONTRACT = [
+  "החזר JSON בלבד, עם שמות המפתחות באנגלית בדיוק כפי שמופיעים כאן (התוכן עצמו בעברית):",
+  '{"summary": "סיכום קצר", "keyFindings": [{"title": "כותרת", "description": "תיאור"}], "recommendations": [{"action": "פעולה", "priority": "high|medium|low", "rationale": "נימוק"}]}',
+  "אל תחזיר מפתחות בעברית ואל תוסיף טקסט מחוץ ל-JSON.",
+];
 
-async function generateInsight(prompt: string, instructions: string): Promise<InsightOutput> {
+/**
+ * Post-generation quality gate + honest routing:
+ *  - a usable result (normalizeInsightResult) is returned as-is;
+ *  - an empty/unusable "success" over a scope that HAD data throws the
+ *    friendly retryable error — telling that user "אין נתונים" would be false;
+ *  - an empty result over a scope with genuinely nothing to analyze returns
+ *    the deliberate NO_DATA_INSIGHT content instead of blank cards.
+ */
+async function generateInsight(
+  prompt: string,
+  instructions: string,
+  hasData: boolean,
+): Promise<InsightResultShape> {
   const key = process.env["LOVABLE_API_KEY"];
   if (!key) {
     // Configuration detail stays in server logs; the user gets the calm line.
@@ -135,7 +163,13 @@ async function generateInsight(prompt: string, instructions: string): Promise<In
     throw new Error(AI_INSIGHT_FRIENDLY_ERROR);
   }
 
-  const gateway = createLovableAiGatewayProvider(key);
+  // structuredOutputs: strict json_schema instead of best-effort json_object —
+  // the gateway provider helper exposes exactly this switch, and it is what
+  // makes the model emit the English schema keys instead of improvised ones.
+  // The zod schema itself stays keyword-minimal (no minLength/minItems):
+  // strict validators reject unsupported keywords, so non-emptiness is
+  // enforced right below by normalizeInsightResult instead of on the wire.
+  const gateway = createLovableAiGatewayProvider(key, undefined, { structuredOutputs: true });
   const model = gateway("google/gemini-3.6-flash");
 
   try {
@@ -153,11 +187,17 @@ async function generateInsight(prompt: string, instructions: string): Promise<In
       providerOptions: { lovable: { instructions } },
       output: Output.object({ schema: InsightSchema }),
     });
-    return output;
+    const usable = normalizeInsightResult(output);
+    if (usable) return usable;
+    console.error("[ai-insights] model returned an empty/unusable insight object", output);
+    if (!hasData) return NO_DATA_INSIGHT;
+    throw new Error(AI_INSIGHT_FRIENDLY_ERROR);
   } catch (error) {
+    if (error instanceof Error && error.message === AI_INSIGHT_FRIENDLY_ERROR) throw error;
     if (NoObjectGeneratedError.isInstance(error)) {
-      const fallback = parseFallback(error.text);
+      const fallback = parseInsightFallback(error.text);
       if (fallback) return fallback;
+      if (!hasData) return NO_DATA_INSIGHT;
     }
     // Full technical detail server-side only — the user never sees raw
     // English provider text as their main message.
@@ -166,28 +206,10 @@ async function generateInsight(prompt: string, instructions: string): Promise<In
   }
 }
 
-function parseFallback(text: string | undefined): InsightOutput | null {
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") {
-      return {
-        summary: String(parsed.summary ?? parsed.overview ?? ""),
-        keyFindings: Array.isArray(parsed.keyFindings) ? parsed.keyFindings.map((f: any) => ({ title: String(f.title ?? ""), description: String(f.description ?? "") })) : [],
-        recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((r: any) => ({ action: String(r.action ?? ""), priority: String(r.priority ?? "medium"), rationale: String(r.rationale ?? "") })) : [],
-      };
-    }
-  } catch {
-    // ignore
-  }
-  return {
-    summary: text.slice(0, 500),
-    keyFindings: [],
-    recommendations: [],
-  };
-}
-
-function formatPerformancePrompt(ctx: Awaited<ReturnType<typeof fetchPerformanceContext>>): string {
+function formatPerformancePrompt(ctx: Awaited<ReturnType<typeof fetchPerformanceContext>>): {
+  prompt: string;
+  hasData: boolean;
+} {
   const { month, teams, reps, teamGoals, repGoals, kpiValues, scope } = ctx;
   const visibleTeams = scope.role === "admin" ? teams : teams.filter((t: any) => scope.teamIds.includes(t.id));
   const visibleReps = scope.role === "representative" && scope.repId
@@ -218,7 +240,7 @@ function formatPerformancePrompt(ctx: Awaited<ReturnType<typeof fetchPerformance
     return { name: t.name, active: t.active, totalResult, goal, achievement, repCount: teamReps.length };
   });
 
-  return [
+  const prompt = [
     "נתוני ביצוע לחודש " + month,
     "תפקיד הצופה: " + (scope.role === "admin" ? "מנהל מערכת" : scope.role === "manager" ? "מנהל צוות" : "נציג"),
     "",
@@ -231,12 +253,24 @@ function formatPerformancePrompt(ctx: Awaited<ReturnType<typeof fetchPerformance
     ...rows.map((r: { name: string; team: string; active: boolean; currentResult: number; goal: number | null; achievement: number | null }) =>
       `- ${r.name} (${r.team}) | פעיל: ${r.active ? "כן" : "לא"} | ביצוע: ${r.currentResult} | יעד אישי: ${r.goal ?? "לא הוגדר"} | אחוז: ${r.achievement ?? "N/A"}%`
     ),
+    ...(scope.role === "representative"
+      ? [
+          "",
+          "הצופה הוא נציג: נתח את ההתקדמות האישית שלו מול היעד — אחוז עמידה, פער ליעד וקצב נדרש, ככל שהנתונים מאפשרים.",
+        ]
+      : []),
     "",
-    "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש. אל תמציא נתונים או שמות שלא הוצגו.",
+    "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש בעברית והצע צעד מעשי אחד להמשך. אל תמציא נתונים או שמות שלא הוצגו.",
+    "",
+    ...PROMPT_JSON_CONTRACT,
   ].join("\n");
+  return { prompt, hasData: rows.length > 0 };
 }
 
-function formatFeedbackPrompt(ctx: Awaited<ReturnType<typeof fetchFeedbackContext>>): string {
+function formatFeedbackPrompt(ctx: Awaited<ReturnType<typeof fetchFeedbackContext>>): {
+  prompt: string;
+  hasData: boolean;
+} {
   const { since, feedback, reps, scope } = ctx;
   const visibleFeedback = scope.role === "representative" && scope.repId
     ? feedback.filter((f: any) => f.representative_id === scope.repId)
@@ -268,11 +302,25 @@ function formatFeedbackPrompt(ctx: Awaited<ReturnType<typeof fetchFeedbackContex
     }
   }
 
-  lines.push("", "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש. אל תמציא נתונים או שמות שלא הוצגו.");
-  return lines.join("\n");
+  if (scope.role === "representative") {
+    lines.push(
+      "",
+      "הצופה הוא נציג: סכם את הדפוסים החוזרים במשובים שפורסמו עבורו — מה עובד ומה לשפר.",
+    );
+  }
+  lines.push(
+    "",
+    "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש בעברית והצע צעד מעשי אחד להמשך. אל תמציא נתונים או שמות שלא הוצגו.",
+    "",
+    ...PROMPT_JSON_CONTRACT,
+  );
+  return { prompt: lines.join("\n"), hasData: visibleFeedback.length > 0 };
 }
 
-function formatGoalsPrompt(ctx: Awaited<ReturnType<typeof fetchPerformanceContext>>): string {
+function formatGoalsPrompt(ctx: Awaited<ReturnType<typeof fetchPerformanceContext>>): {
+  prompt: string;
+  hasData: boolean;
+} {
   const { month, teams, reps, teamGoals, repGoals, scope } = ctx;
   const visibleTeams = scope.role === "admin" ? teams : teams.filter((t: any) => scope.teamIds.includes(t.id));
   const visibleReps = scope.role === "representative" && scope.repId
@@ -298,10 +346,18 @@ function formatGoalsPrompt(ctx: Awaited<ReturnType<typeof fetchPerformanceContex
       const goal = repGoals.find((g: any) => g.representative_id === r.id)?.target_value ?? null;
       return `- ${r.name} | יעד נוכחי: ${goal ?? "לא הוגדר"} | ביצוע עד כה: ${r.current_result ?? 0}`;
     }),
+    ...(scope.role === "representative"
+      ? [
+          "",
+          "הצופה הוא נציג: תן 1-3 המלצות מעשיות לשיפור לקראת החודש הבא, על בסיס הנתונים האישיים שלו בלבד.",
+        ]
+      : []),
     "",
-    "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש. אל תמציא נתונים או שמות שלא הוצגו.",
+    "הנחה אתי: אם אין מספיק נתונים, ציין זאת במפורש בעברית והצע צעד מעשי אחד להמשך. אל תמציא נתונים או שמות שלא הוצגו.",
+    "",
+    ...PROMPT_JSON_CONTRACT,
   ];
-  return lines.join("\n");
+  return { prompt: lines.join("\n"), hasData: visibleReps.length > 0 };
 }
 
 const SYSTEM_PERFORMANCE = `אתה עוזר AI למערכת ניהול צוותי מכירות (Pulse/RenewHub). תפקידך לנתח נתוני ביצוע ולהפיק תובנות מעשיות בעברית.
@@ -348,8 +404,8 @@ export const generatePerformanceInsights = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const scope = await getScope(context as any);
     const ctx = await fetchPerformanceContext(context as any, scope);
-    const prompt = formatPerformancePrompt(ctx);
-    const result = await generateInsight(prompt, SYSTEM_PERFORMANCE);
+    const { prompt, hasData } = formatPerformancePrompt(ctx);
+    const result = await generateInsight(prompt, SYSTEM_PERFORMANCE, hasData);
     return result;
   });
 
@@ -358,8 +414,8 @@ export const generateFeedbackSummary = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const scope = await getScope(context as any);
     const ctx = await fetchFeedbackContext(context as any, scope);
-    const prompt = formatFeedbackPrompt(ctx);
-    const result = await generateInsight(prompt, SYSTEM_FEEDBACK);
+    const { prompt, hasData } = formatFeedbackPrompt(ctx);
+    const result = await generateInsight(prompt, SYSTEM_FEEDBACK, hasData);
     return result;
   });
 
@@ -368,7 +424,7 @@ export const generateGoalRecommendations = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const scope = await getScope(context as any);
     const ctx = await fetchPerformanceContext(context as any, scope);
-    const prompt = formatGoalsPrompt(ctx);
-    const result = await generateInsight(prompt, SYSTEM_GOALS);
+    const { prompt, hasData } = formatGoalsPrompt(ctx);
+    const result = await generateInsight(prompt, SYSTEM_GOALS, hasData);
     return result;
   });

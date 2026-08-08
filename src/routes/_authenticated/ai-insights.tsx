@@ -16,7 +16,11 @@ import {
 import { BarChart3, Headphones, Target, Sparkles, AlertTriangle, RefreshCw, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsManager } from "@/lib/store";
-import { friendlyAiInsightError } from "@/lib/ai-insights-domain";
+import {
+  AI_INSIGHT_FRIENDLY_ERROR,
+  friendlyAiInsightError,
+  normalizeInsightResult,
+} from "@/lib/ai-insights-domain";
 import Markdown from "react-markdown";
 
 export const Route = createFileRoute("/_authenticated/ai-insights")({
@@ -141,7 +145,18 @@ function AiInsightsPage() {
           : type === "feedback"
             ? await feedbackFn({ data: undefined })
             : await goalsFn({ data: undefined });
-      setResults((prev) => ({ ...prev, [type]: result as InsightResult }));
+      // Last line of defense against blank "success" cards: whatever arrives
+      // is validated for real content before it is ever stored or rendered.
+      // The server already applies the same gate — an unusable object here
+      // means something slipped through, and the honest answer is the error
+      // state, not an empty סיכום card.
+      const usable = normalizeInsightResult(result);
+      if (!usable) {
+        console.error("[ai-insights] unusable insight result reached the client", result);
+        setErrors((prev) => ({ ...prev, [type]: AI_INSIGHT_FRIENDLY_ERROR }));
+        return;
+      }
+      setResults((prev) => ({ ...prev, [type]: usable }));
     } catch (e) {
       // Raw provider/SDK text (English) goes to the console only; the user
       // sees our Hebrew messages, or the calm generic line.
