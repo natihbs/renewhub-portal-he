@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   resolveBusinessScope,
   importScopeNotice,
+  validateAttachTargetUnitType,
   type BusinessScopeGrant,
   type BusinessUnit,
   type ResolvedBusinessScope,
@@ -336,6 +337,23 @@ export const attachTeamToUnit = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
     await requireAdmin(ctx);
+    // Business rule: a team attaches to a CENTER only — the activity is
+    // inherited through the center (validated here for the friendly error,
+    // and enforced again by the teams trigger at the database).
+    if (data.unitId) {
+      const { data: unitRow, error: unitErr } = await ctx.supabase
+        .from("business_units")
+        .select("unit_type")
+        .eq("id", data.unitId)
+        .maybeSingle();
+      if (unitErr) throw hierarchyWriteError(unitErr.message);
+      if (!unitRow) throw new Error("היחידה המבוקשת לא נמצאה");
+      // Anything that is not a center — an activity or an unknown type —
+      // must fail the center-only rule.
+      validateAttachTargetUnitType(
+        (unitRow as { unit_type: string }).unit_type === "center" ? "center" : "activity",
+      );
+    }
     const { error } = await ctx.supabase
       .from("teams")
       .update({ business_unit_id: data.unitId })

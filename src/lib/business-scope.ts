@@ -72,6 +72,8 @@ export const BUSINESS_UNIT_TYPE_LABEL: Record<BusinessUnitType, string> = {
 };
 
 export const VIEW_SCOPE_PREFIX = "היקף צפייה";
+export const TEAM_ATTACH_CENTER_ONLY_MESSAGE =
+  "צוות ניתן לשייך למוקד בלבד. הפעילות נקבעת דרך המוקד.";
 export const MANAGE_SCOPE_TITLE = "היקף ניהול";
 export const AVAILABLE_TEAMS_PREFIX = "צוותים זמינים";
 export const IMPORT_SCOPE_LIMIT_LINE = "הייבוא מוגבל להיקף הניהול שלך";
@@ -201,6 +203,33 @@ export function resolveBusinessScope(params: {
     scopeLabel,
     teams: coveredTeams,
   };
+}
+
+// ---------------------------------------------------------- team attachment
+
+/**
+ * The business model attaches a TEAM to a CENTER only — the activity is
+ * inherited through the center, never assigned directly. Null detaches.
+ * Throws the friendly Hebrew rule for anything that is not a center.
+ */
+export function validateAttachTargetUnitType(unitType: BusinessUnitType | null): void {
+  if (unitType !== null && unitType !== "center") {
+    throw new Error(TEAM_ATTACH_CENTER_ONLY_MESSAGE);
+  }
+}
+
+/**
+ * "מוקד דירות וחידושים · פעילות אלמנטרי" — the attach-dropdown option label
+ * for a center: the center with its type word, then the parent activity for
+ * clarity. Type words are not doubled when a unit's name already carries one.
+ */
+export function centerOptionLabel(center: BusinessUnit, units: BusinessUnit[]): string {
+  const withTypeWord = (name: string, typeWord: string) =>
+    name.startsWith(typeWord) ? name : `${typeWord} ${name}`;
+  const centerLabel = withTypeWord(center.name, BUSINESS_UNIT_TYPE_LABEL.center);
+  const parent = center.parentId ? units.find((u) => u.id === center.parentId) : undefined;
+  if (!parent) return centerLabel;
+  return `${centerLabel} · ${withTypeWord(parent.name, BUSINESS_UNIT_TYPE_LABEL.activity)}`;
 }
 
 // ------------------------------------------------------------- UI notices

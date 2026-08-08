@@ -36,7 +36,7 @@ import {
   setUserBusinessScope,
   HIERARCHY_TABLES_MISSING_MESSAGE,
 } from "@/lib/business-scope.functions";
-import { BUSINESS_UNIT_TYPE_LABEL } from "@/lib/business-scope";
+import { centerOptionLabel } from "@/lib/business-scope";
 import { type KpiProfile, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, KPI_PROFILE_BADGE_CLASS } from "@/lib/performance-domain";
 
 export const Route = createFileRoute("/_authenticated/teams")({
@@ -1078,6 +1078,11 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
     teamsByUnit.set(t.businessUnitId, [...(teamsByUnit.get(t.businessUnitId) ?? []), t.name]);
   }
   const scopeUnitOptions = scopeType === "activity" ? activities : centers;
+  // Teams attached directly to an activity predate the centers-only rule and
+  // are surfaced for a manual admin fix (they keep working for scope until then).
+  const activityAttachedTeams = (view?.teams ?? []).filter(
+    (t) => t.businessUnitId !== null && activities.some((a) => a.id === t.businessUnitId),
+  );
 
   return (
     <Card>
@@ -1144,6 +1149,18 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
                       <span className="text-xs text-muted-foreground">ללא פעילות אב</span>
                     </div>
                   ))}
+              </div>
+            )}
+
+            {/* Legacy rows from before the centers-only rule: never rewritten
+                automatically — the admin moves each team to a center manually. */}
+            {activityAttachedTeams.length > 0 && (
+              <div className="flex items-start gap-2 rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2.5 text-xs text-warning-foreground">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>
+                  צוות ניתן לשייך למוקד בלבד — הפעילות נקבעת דרך המוקד. הצוותים הבאים משויכים ישירות
+                  לפעילות ויש להעבירם למוקד: {activityAttachedTeams.map((t) => t.name).join(", ")}
+                </span>
               </div>
             )}
 
@@ -1222,16 +1239,18 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>יחידה</Label>
+                {/* Teams attach to CENTERS only — the activity is inherited
+                    through the center, so activities are not offered here. */}
+                <Label>מוקד</Label>
                 <Select value={attachUnit} onValueChange={setAttachUnit}>
-                  <SelectTrigger aria-label="בחירת יחידה">
+                  <SelectTrigger aria-label="בחירת מוקד">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>ללא שיוך</SelectItem>
-                    {(view.units ?? []).map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {BUSINESS_UNIT_TYPE_LABEL[u.unitType]} · {u.name}
+                    {centers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {centerOptionLabel(c, view.units ?? [])}
                       </SelectItem>
                     ))}
                   </SelectContent>
