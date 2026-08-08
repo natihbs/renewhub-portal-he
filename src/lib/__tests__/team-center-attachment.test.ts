@@ -10,6 +10,14 @@ import {
   type BusinessUnit,
   type ScopeTeam,
 } from "@/lib/business-scope";
+import {
+  validateUnitDeletion,
+  UNIT_NAME_REQUIRED_MESSAGE,
+  DELETE_ACTIVITY_HAS_CENTERS_MESSAGE,
+  DELETE_ACTIVITY_HAS_TEAMS_MESSAGE,
+  DELETE_CENTER_HAS_TEAMS_MESSAGE,
+  DELETE_UNIT_HAS_SCOPES_MESSAGE,
+} from "@/lib/business-scope.functions";
 
 // ---------------------------------------------------------------------------
 // Teams attach to CENTERS only (live-QA product-model fix): a team's parent
@@ -169,6 +177,142 @@ describe("C — scope behavior unchanged", () => {
     expect(rep.teams).toEqual([]);
     const admin = resolveBusinessScope({ role: "admin", userId: "a", teams, units, grants: [] });
     expect(admin.roleLabel).toBe("מנהל מערכת");
+  });
+});
+
+// ------------------------------------------------- unit edit/delete (admin)
+describe("edit/delete business units — admin-only, guarded, never cascading", () => {
+  it("empty name is blocked with the Hebrew error", () => {
+    expect(UNIT_NAME_REQUIRED_MESSAGE).toBe("יש להזין שם יחידה");
+    expect(scopeFnsSrc).toContain("throw new Error(UNIT_NAME_REQUIRED_MESSAGE)");
+  });
+
+  it("editing changes the name only — the unit type is immutable", () => {
+    const fn = scopeFnsSrc.slice(
+      scopeFnsSrc.indexOf("export const updateBusinessUnit"),
+      scopeFnsSrc.indexOf("export const deleteBusinessUnit"),
+    );
+    expect(fn).toContain("await requireAdmin(ctx)");
+    expect(fn).toContain("const patch: Record<string, unknown> = { name: data.name };");
+    // No type write anywhere in the update patch.
+    expect(fn).not.toContain("patch.unit_type");
+    expect(fn).toContain('"business_unit.updated"');
+  });
+
+  it("a center's parent may change only to an activity", () => {
+    expect(scopeFnsSrc).toContain("פעילות אב חייבת להיות יחידת פעילות");
+    const fn = scopeFnsSrc.slice(
+      scopeFnsSrc.indexOf("export const updateBusinessUnit"),
+      scopeFnsSrc.indexOf("export const deleteBusinessUnit"),
+    );
+    expect(fn).toContain('existing.unit_type === "center"');
+  });
+
+  it("delete guards: an empty center passes", () => {
+    expect(() =>
+      validateUnitDeletion({
+        unitType: "center",
+        childCenters: 0,
+        linkedTeams: 0,
+        activeGrants: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it("delete guards: a center with linked teams is blocked", () => {
+    expect(() =>
+      validateUnitDeletion({
+        unitType: "center",
+        childCenters: 0,
+        linkedTeams: 2,
+        activeGrants: 0,
+      }),
+    ).toThrowError(DELETE_CENTER_HAS_TEAMS_MESSAGE);
+    expect(DELETE_CENTER_HAS_TEAMS_MESSAGE).toBe("לא ניתן למחוק מוקד שמשויכים אליו צוותים");
+  });
+
+  it("delete guards: a unit with active scope grants is blocked", () => {
+    expect(() =>
+      validateUnitDeletion({
+        unitType: "center",
+        childCenters: 0,
+        linkedTeams: 0,
+        activeGrants: 1,
+      }),
+    ).toThrowError(DELETE_UNIT_HAS_SCOPES_MESSAGE);
+    expect(() =>
+      validateUnitDeletion({
+        unitType: "activity",
+        childCenters: 0,
+        linkedTeams: 0,
+        activeGrants: 1,
+      }),
+    ).toThrowError(DELETE_UNIT_HAS_SCOPES_MESSAGE);
+    expect(DELETE_UNIT_HAS_SCOPES_MESSAGE).toBe("לא ניתן למחוק יחידה שיש לה היקפי ניהול פעילים");
+  });
+
+  it("delete guards: an activity with centers is blocked", () => {
+    expect(() =>
+      validateUnitDeletion({
+        unitType: "activity",
+        childCenters: 1,
+        linkedTeams: 0,
+        activeGrants: 0,
+      }),
+    ).toThrowError(DELETE_ACTIVITY_HAS_CENTERS_MESSAGE);
+    expect(DELETE_ACTIVITY_HAS_CENTERS_MESSAGE).toBe("לא ניתן למחוק פעילות שיש תחתיה מוקדים");
+  });
+
+  it("delete guards: an activity with legacy directly-linked teams is blocked too", () => {
+    expect(() =>
+      validateUnitDeletion({
+        unitType: "activity",
+        childCenters: 0,
+        linkedTeams: 1,
+        activeGrants: 0,
+      }),
+    ).toThrowError(DELETE_ACTIVITY_HAS_TEAMS_MESSAGE);
+  });
+
+  it("delete removes exactly one business_units row — never teams/reps/goals/feedback/performance", () => {
+    const fn = scopeFnsSrc.slice(scopeFnsSrc.indexOf("export const deleteBusinessUnit"));
+    expect(fn).toContain("await requireAdmin(ctx)");
+    expect(fn).toContain("validateUnitDeletion(");
+    expect(fn).toContain('"business_unit.deleted"');
+    // The whole module performs exactly two deletes: replacing a user's scope
+    // grants (setUserBusinessScope) and this single business_units row.
+    expect(scopeFnsSrc.match(/\.delete\(\)/g)).toHaveLength(2);
+    for (const table of [
+      "representatives",
+      "kpi_values",
+      "feedback",
+      "representative_goals",
+      "team_goals",
+      "import_history",
+    ]) {
+      expect(scopeFnsSrc).not.toContain(`from("${table}")`);
+    }
+  });
+
+  it("the UI carries the Hebrew edit/delete flows with confirmation", () => {
+    expect(teamsPageSrc).toContain("עריכת פעילות");
+    expect(teamsPageSrc).toContain("עריכת מוקד");
+    expect(teamsPageSrc).toContain("שמירת שינויים");
+    expect(teamsPageSrc).toContain("ביטול");
+    expect(teamsPageSrc).toContain("מחיקת פעילות");
+    expect(teamsPageSrc).toContain("מחיקת מוקד");
+    expect(teamsPageSrc).toContain(
+      "הפעולה תמחק את היחידה מההיררכיה העסקית. לא ניתן לבטל פעולה זו.",
+    );
+    expect(teamsPageSrc).toContain('aria-label="עריכה"');
+    expect(teamsPageSrc).toContain('aria-label="מחיקה"');
+  });
+
+  it("edit/delete are admin-only: server-checked, and the card itself is admin-gated", () => {
+    // Managers and representatives hit the same server rejection…
+    expect(scopeFnsSrc).toContain("רק מנהל מערכת יכול להגדיר את ההיררכיה העסקית");
+    // …and never see the controls (the hierarchy card renders for admin only).
+    expect(teamsPageSrc).toContain("{isAdmin && <BusinessHierarchyCard");
   });
 });
 
