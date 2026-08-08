@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { linkRepresentativeToUserCore } from "@/lib/rep-admin.functions";
+import { effectiveBusinessTitle } from "@/lib/business-scope";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeUserHealth, type UserHealth } from "@/lib/user-health";
 import { assertTeamIsActiveForNewAssignment, isNewTeamAssignment } from "@/lib/team-assignment-guards";
 
@@ -29,6 +31,78 @@ type UpdateInput = {
 };
 
 type Ctx = { supabase: any; userId: string; claims: any };
+
+export const EMAIL_REQUIRED_MESSAGE = "יש להזין כתובת אימייל";
+export const EMAIL_INVALID_MESSAGE = "כתובת האימייל אינה תקינה";
+export const EMAIL_TAKEN_MESSAGE = "כתובת האימייל כבר בשימוש על ידי משתמש אחר";
+
+/**
+ * Trim + lowercase + shape-validate an email. The login email lives in
+ * Supabase Auth, which is case-insensitive — normalizing here keeps
+ * profiles.email and the auth email byte-identical. Pure and unit-tested.
+ */
+type ScopeGrantForTitle = {
+  scopeType: "center" | "activity" | "executive";
+  unitName: string | null;
+};
+
+/**
+ * DISPLAY-ONLY read of business-scope grants for the /users effective titles
+ * (מנהל מוקד / מנהל פעילות / סמנכ"ל) — user_business_scopes joined to unit
+ * names. Drift-safe: an empty map when the hierarchy migration hasn't been
+ * applied, which resolves every manager to מנהל צוות exactly as before.
+ * Never used for authorization and never written from here.
+ */
+async function readScopeGrantsForTitles(
+  admin: SupabaseClient,
+): Promise<Map<string, ScopeGrantForTitle[]>> {
+  const byUser = new Map<string, ScopeGrantForTitle[]>();
+  const { data: grants, error: gErr } = await admin
+    .from("user_business_scopes")
+    .select("user_id, scope_type, business_unit_id");
+  if (gErr || !grants || grants.length === 0) return byUser;
+  const { data: units } = await admin.from("business_units").select("id, name");
+  const unitNameById = new Map(
+    ((units ?? []) as { id: string; name: string }[]).map((u) => [u.id, u.name]),
+  );
+  type GrantRow = { user_id: string; scope_type: string; business_unit_id: string | null };
+  for (const g of grants as GrantRow[]) {
+    const scopeType =
+      g.scope_type === "executive"
+        ? "executive"
+        : g.scope_type === "activity"
+          ? "activity"
+          : "center";
+    byUser.set(g.user_id, [
+      ...(byUser.get(g.user_id) ?? []),
+      {
+        scopeType,
+        unitName: g.business_unit_id ? (unitNameById.get(g.business_unit_id) ?? null) : null,
+      },
+    ]);
+  }
+  return byUser;
+}
+
+/**
+ * Literal-match pattern for the ILIKE duplicate check: in SQL LIKE/ILIKE,
+ * "_" matches any single character and "%" any sequence, so an unescaped
+ * address like john_doe@x.com would also match johnXdoe@x.com and could
+ * block a free address. Escaping \, % and _ keeps the comparison exact
+ * while staying case-insensitive. Pure and unit-tested.
+ */
+export function emailToIlikePattern(email: string): string {
+  return email.replace(/[\\%_]/g, "\\$&");
+}
+
+export function normalizeEmailInput(raw: string): string {
+  const email = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (!email) throw new Error(EMAIL_REQUIRED_MESSAGE);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(EMAIL_INVALID_MESSAGE);
+  return email;
+}
 
 async function assertAdmin(ctx: Ctx) {
   const { data, error } = await ctx.supabase
@@ -124,6 +198,8 @@ export const listUsers = createServerFn({ method: "GET" })
     if (aErr) throw new Error(aErr.message);
     if (repsErr) throw new Error(repsErr.message);
 
+    const scopeGrantsByUser = await readScopeGrantsForTitles(supabaseAdmin);
+
     const rolesByUser = new Map<string, AppRole[]>();
     for (const r of roles ?? []) {
       const arr = rolesByUser.get(r.user_id) ?? [];
@@ -160,6 +236,10 @@ export const listUsers = createServerFn({ method: "GET" })
         return {
           ...p,
           roles,
+          business_title: effectiveBusinessTitle({
+            roles,
+            grants: scopeGrantsByUser.get(p.id) ?? [],
+          }),
           auth_last_sign_in_at: authByUser.get(p.id)?.last_sign_in_at ?? null,
           representative_link: rep ? { id: rep.id, name: rep.name } : null,
           health,
@@ -382,6 +462,84 @@ export const updateUser = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+/**
+ * Admin-only email correction (e.g. a typo at account creation). Changes
+ * EXACTLY two things, kept in sync: the Supabase Auth login email
+ * (auth.admin.updateUserById) and profiles.email. Nothing else moves —
+ * user_roles, the representative link, the password and
+ * must_change_password are untouched, and the user is never
+ * deleted/recreated. If the profiles write fails after the auth email
+ * already changed, the auth email is reverted (best-effort) so the two
+ * never stay out of sync.
+ */
+export const updateUserEmail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { user_id: string; email: string }) => {
+    if (!data.user_id) throw new Error("חסר מזהה משתמש");
+    return { user_id: data.user_id, email: normalizeEmailInput(data.email) };
+  })
+  .handler(async ({ data, context }) => {
+    const ctx = context as unknown as Ctx;
+    await assertAdmin(ctx);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email")
+      .eq("id", data.user_id)
+      .maybeSingle();
+    if (profileErr) throw new Error(profileErr.message);
+    if (!profile) throw new Error("המשתמש לא נמצא");
+    const previousEmail = (profile.email as string | null) ?? null;
+
+    if (previousEmail && previousEmail.trim().toLowerCase() === data.email) {
+      return { ok: true, email: data.email, unchanged: true };
+    }
+
+    // Another profile already using this address (case-insensitive).
+    const { data: taken, error: takenErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("email", emailToIlikePattern(data.email))
+      .neq("id", data.user_id)
+      .maybeSingle();
+    if (takenErr) throw new Error(takenErr.message);
+    if (taken) throw new Error(EMAIL_TAKEN_MESSAGE);
+
+    // Auth first — it is the login source of truth and the stricter write.
+    const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
+      email: data.email,
+      email_confirm: true,
+    });
+    if (authErr) throw new Error(authErr.message);
+
+    const { error: syncErr } = await supabaseAdmin
+      .from("profiles")
+      .update({ email: data.email })
+      .eq("id", data.user_id);
+    if (syncErr) {
+      // Keep auth and profile in sync: revert the auth email (best-effort)
+      // before surfacing the failure.
+      if (previousEmail) {
+        await supabaseAdmin.auth.admin
+          .updateUserById(data.user_id, { email: previousEmail, email_confirm: true })
+          .catch(() => {});
+      }
+      throw new Error(syncErr.message);
+    }
+
+    await logAudit(
+      supabaseAdmin,
+      ctx.userId,
+      ctx.claims?.email ?? null,
+      "user.email_updated",
+      data.user_id,
+      data.email,
+      { previous_email: previousEmail, new_email: data.email },
+    );
+    return { ok: true, email: data.email };
+  });
+
 export const resetPassword = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { user_id: string; new_password: string; must_change: boolean }) => {
@@ -577,7 +735,7 @@ export const getUserDetails = createServerFn({ method: "POST" })
     if (pErr) throw new Error(pErr.message);
     if (!profile) throw new Error("המשתמש לא נמצא");
 
-    const [{ data: roleRows }, authResult, { data: team }, { data: rep }, { data: managedTeams }, ownedRecords] = await Promise.all([
+    const [{ data: roleRows }, authResult, { data: team }, { data: rep }, { data: managedTeams }, ownedRecords, scopeGrantsByUser] = await Promise.all([
       supabaseAdmin.from("user_roles").select("role").eq("user_id", data.user_id),
       supabaseAdmin.auth.admin.getUserById(data.user_id),
       profile.team_id
@@ -586,9 +744,14 @@ export const getUserDetails = createServerFn({ method: "POST" })
       supabaseAdmin.from("representatives").select("id, name, active, team_id").eq("user_id", data.user_id).maybeSingle(),
       supabaseAdmin.from("teams").select("id, name").eq("manager_id", data.user_id),
       collectOwnedRecordCounts(supabaseAdmin, data.user_id),
+      readScopeGrantsForTitles(supabaseAdmin),
     ]);
 
     const roles = ((roleRows ?? []) as { role: AppRole }[]).map((r) => r.role);
+    const businessTitle = effectiveBusinessTitle({
+      roles,
+      grants: scopeGrantsByUser.get(data.user_id) ?? [],
+    });
 
     let repTeamName: string | null = null;
     if (rep?.team_id) {
@@ -606,6 +769,7 @@ export const getUserDetails = createServerFn({ method: "POST" })
       user: {
         ...profile,
         roles,
+        business_title: businessTitle,
         auth_last_sign_in_at: (authResult?.data?.user as any)?.last_sign_in_at ?? null,
         team_name: (team as { name: string } | null)?.name ?? null,
       },

@@ -35,12 +35,18 @@ import {
   listAuditLog,
   createUser,
   updateUser,
+  updateUserEmail,
   resetPassword,
   sendPasswordResetEmail,
   getUserDetails,
   getUserDeleteCheck,
   deleteUser,
 } from "@/lib/user-admin.functions";
+import {
+  CREATE_ROLE_OPTIONS,
+  CREATE_ROLE_HELPER_TEXT,
+  EDIT_SCOPE_HELPER_TEXT,
+} from "@/lib/business-scope";
 import { setUserTeam } from "@/lib/team-admin.functions";
 import { linkRepresentativeUser, listRepresentatives } from "@/lib/rep-admin.functions";
 import { useWorkspace, workspaceTeamId } from "@/lib/workspace-context";
@@ -75,6 +81,8 @@ type UserRow = {
   created_at: string;
   must_change_password: boolean;
   roles: AppRole[];
+  /** Effective business title (מנהל מוקד · <unit> etc.) — display only. */
+  business_title?: string;
   auth_last_sign_in_at: string | null;
   representative_link: RepLink;
   health: UserHealth;
@@ -467,8 +475,15 @@ function UserTableRow({
       <TableCell><HealthBadge health={user.health} /></TableCell>
       <TableCell>
         <div className="flex gap-1 flex-wrap">
-          {user.roles.length === 0 ? <Badge variant="outline">ללא</Badge> :
-            user.roles.map((r) => <Badge key={r} variant={r === "admin" ? "default" : "secondary"}>{roleLabel[r]}</Badge>)}
+          {/* The EFFECTIVE business title (מנהל מוקד · <unit> etc.), derived
+              server-side from user_business_scopes — never a stored role. */}
+          {user.roles.length === 0 ? (
+            <Badge variant="outline">ללא</Badge>
+          ) : (
+            <Badge variant={user.roles.includes("admin") ? "default" : "secondary"}>
+              {user.business_title ?? roleLabel[user.roles[0]]}
+            </Badge>
+          )}
         </div>
       </TableCell>
       <TableCell className="hidden md:table-cell">{teamName}</TableCell>
@@ -586,7 +601,15 @@ function UserDetailsDrawer({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Stat label="תפקיד" value={d.user.roles.length ? d.user.roles.map((r: AppRole) => roleLabel[r]).join(", ") : "ללא"} />
+              <Stat
+                label="תפקיד"
+                value={
+                  d.user.business_title ??
+                  (d.user.roles.length
+                    ? d.user.roles.map((r: AppRole) => roleLabel[r]).join(", ")
+                    : "ללא")
+                }
+              />
               <Stat label="סטטוס חשבון" value={d.user.active ? "פעיל" : "מושבת"} />
               <Stat label="צוות (שיוך פרופיל)" value={d.user.team_name ?? "—"} />
               <Stat label="נוצר בתאריך" value={formatDateIL(d.user.created_at)} />
@@ -956,7 +979,15 @@ function CreateUserDialog({ teams, managers, onDone }: { teams: Team[]; managers
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState(() => generateTempPassword());
-  const [role, setRole] = useState<AppRole>("representative");
+  // The visible "תפקיד" is a BUSINESS title; the technical role is derived
+  // from it (all managerial titles → manager). The actual center/activity/
+  // executive scope is assigned afterwards in the hierarchy card — no fake
+  // title is stored, and the role enum is untouched.
+  const [roleChoice, setRoleChoice] = useState("representative");
+  const roleOption =
+    CREATE_ROLE_OPTIONS.find((o) => o.value === roleChoice) ??
+    CREATE_ROLE_OPTIONS[CREATE_ROLE_OPTIONS.length - 1];
+  const role: AppRole = roleOption.role;
   const [teamId, setTeamId] = useState<string>("none");
   const [managerId, setManagerId] = useState<string>("none");
   const [repId, setRepId] = useState<string>("");
@@ -973,6 +1004,9 @@ function CreateUserDialog({ teams, managers, onDone }: { teams: Team[]; managers
       const url = typeof window !== "undefined" ? `${window.location.origin}/auth` : "/auth";
       setCreatedInfo({ email, password, url });
       toast.success("המשתמש נוצר בהצלחה");
+      // A managerial business title was chosen — the user exists as a plain
+      // manager until the admin assigns the scope in the hierarchy card.
+      if (roleOption.postCreateNotice) toast.info(roleOption.postCreateNotice, { duration: 10000 });
       onDone();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -1000,7 +1034,7 @@ function CreateUserDialog({ teams, managers, onDone }: { teams: Team[]; managers
 
   function reset() {
     setFullName(""); setEmail(""); setPassword(generateTempPassword());
-    setRole("representative"); setTeamId("none"); setManagerId("none"); setRepId("");
+    setRoleChoice("representative"); setTeamId("none"); setManagerId("none"); setRepId("");
     setMustChange(true); setCreatedInfo(null);
   }
 
@@ -1025,14 +1059,17 @@ function CreateUserDialog({ teams, managers, onDone }: { teams: Team[]; managers
               </div>
               <div className="space-y-1">
                 <Label>תפקיד *</Label>
-                <Select value={role} onValueChange={(v) => setRole(v as AppRole)}>
+                <Select value={roleChoice} onValueChange={setRoleChoice}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">מנהל מערכת</SelectItem>
-                    <SelectItem value="manager">מנהל צוות</SelectItem>
-                    <SelectItem value="representative">נציג</SelectItem>
+                    {CREATE_ROLE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">{CREATE_ROLE_HELPER_TEXT}</p>
               </div>
               <div className="space-y-1">
                 <Label>צוות</Label>
@@ -1126,6 +1163,7 @@ function EditUserDialog({
   open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void;
 }) {
   const [fullName, setFullName] = useState(user.full_name ?? "");
+  const [email, setEmail] = useState(user.email ?? "");
   const [role, setRole] = useState<AppRole>(user.roles[0] ?? "representative");
   const [teamId, setTeamId] = useState<string>(user.team_id ?? "none");
   const [managerId, setManagerId] = useState<string>(user.manager_id ?? "none");
@@ -1133,9 +1171,19 @@ function EditUserDialog({
   const [mustChange, setMustChange] = useState(user.must_change_password);
   const { state } = useApp();
   const updateFn = useServerFn(updateUser);
+  const updateEmailFn = useServerFn(updateUserEmail);
 
   const mut = useMutation({
-    mutationFn: updateFn,
+    // The email correction runs FIRST (it also rewrites the Supabase Auth
+    // login address) — if it is invalid or already taken, the edit fails
+    // before any other field changes.
+    mutationFn: async (vars: {
+      update: Parameters<typeof updateFn>[0];
+      newEmail: string | null;
+    }) => {
+      if (vars.newEmail) await updateEmailFn({ data: { user_id: user.id, email: vars.newEmail } });
+      return updateFn(vars.update);
+    },
     onSuccess: () => { toast.success("המשתמש עודכן"); onDone(); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -1143,16 +1191,21 @@ function EditUserDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (role === "representative" && !repId.trim()) return toast.error("יש לשייך נציג");
+    if (!email.trim()) return toast.error("יש להזין כתובת אימייל");
+    const emailChanged = email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase();
     const roleChanged = role !== (user.roles[0] ?? null);
     mut.mutate({
-      data: {
-        user_id: user.id,
-        full_name: fullName,
-        team_id: teamId === "none" ? null : teamId,
-        manager_id: managerId === "none" ? null : managerId,
-        representative_id: role === "representative" ? repId.trim() : null,
-        must_change_password: mustChange,
-        ...(roleChanged ? { role } : {}),
+      newEmail: emailChanged ? email.trim() : null,
+      update: {
+        data: {
+          user_id: user.id,
+          full_name: fullName,
+          team_id: teamId === "none" ? null : teamId,
+          manager_id: managerId === "none" ? null : managerId,
+          representative_id: role === "representative" ? repId.trim() : null,
+          must_change_password: mustChange,
+          ...(roleChanged ? { role } : {}),
+        },
       },
     });
   }
@@ -1167,7 +1220,18 @@ function EditUserDialog({
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1 col-span-2"><Label>שם מלא</Label><Input value={fullName} onChange={(e) => setFullName(e.target.value)} /></div>
-            <div className="space-y-1 col-span-2"><Label>אימייל</Label><Input dir="ltr" value={user.email ?? ""} disabled /></div>
+            <div className="space-y-1 col-span-2">
+              <Label>אימייל</Label>
+              <Input
+                dir="ltr"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                שינוי האימייל יעדכן גם את כתובת ההתחברות של המשתמש.
+              </p>
+            </div>
             <div className="space-y-1">
               <Label>תפקיד</Label>
               <Select value={role} onValueChange={(v) => setRole(v as AppRole)} disabled={roleLocked}>
@@ -1180,6 +1244,14 @@ function EditUserDialog({
               </Select>
               {roleLocked && <p className="text-xs text-muted-foreground">לא ניתן לשנות את התפקיד של החשבון שלך.</p>}
               {showLastAdminWarning && <p className="text-xs text-destructive">לא ניתן להסיר את התפקיד מהמנהל הפעיל האחרון.</p>}
+              {/* The EFFECTIVE business title comes from user_business_scopes
+                  and is managed in the hierarchy card — never from here. */}
+              {user.business_title && (
+                <p className="text-xs text-muted-foreground">
+                  תפקיד עסקי נוכחי: {user.business_title}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">{EDIT_SCOPE_HELPER_TEXT}</p>
             </div>
             <div className="space-y-1">
               <Label>צוות</Label>
