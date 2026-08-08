@@ -140,6 +140,98 @@ export type Database = {
         }
         Relationships: []
       }
+      business_units: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          parent_id: string | null
+          unit_type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          parent_id?: string | null
+          unit_type: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          parent_id?: string | null
+          unit_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_units_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "business_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      coaching_plans: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          focus_sections: string
+          id: string
+          notes: string
+          representative_id: string
+          review_on: string
+          review_schedule_id: string | null
+          target_score: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          focus_sections?: string
+          id?: string
+          notes?: string
+          representative_id: string
+          review_on: string
+          review_schedule_id?: string | null
+          target_score: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          focus_sections?: string
+          id?: string
+          notes?: string
+          representative_id?: string
+          review_on?: string
+          review_schedule_id?: string | null
+          target_score?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "coaching_plans_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: true
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "coaching_plans_review_schedule_id_fkey"
+            columns: ["review_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "listening_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       comms_messages: {
         Row: {
           body: string
@@ -290,6 +382,7 @@ export type Database = {
       competitions: {
         Row: {
           active: boolean
+          archived: boolean
           created_at: string
           created_by: string | null
           end_date: string
@@ -302,6 +395,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          archived?: boolean
           created_at?: string
           created_by?: string | null
           end_date?: string
@@ -314,6 +408,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          archived?: boolean
           created_at?: string
           created_by?: string | null
           end_date?: string
@@ -341,6 +436,7 @@ export type Database = {
           manager_summary: string
           next_task: string
           published: boolean
+          published_at: string | null
           representative_id: string
           schedule_id: string | null
           score: number
@@ -361,6 +457,7 @@ export type Database = {
           manager_summary?: string
           next_task?: string
           published?: boolean
+          published_at?: string | null
           representative_id: string
           schedule_id?: string | null
           score?: number
@@ -381,6 +478,7 @@ export type Database = {
           manager_summary?: string
           next_task?: string
           published?: boolean
+          published_at?: string | null
           representative_id?: string
           schedule_id?: string | null
           score?: number
@@ -400,6 +498,74 @@ export type Database = {
             columns: ["schedule_id"]
             isOneToOne: false
             referencedRelation: "listening_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      feedback_revisions: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          feedback_id: string
+          id: string
+          previous_call_id: string
+          previous_call_type: string
+          previous_criteria: Json
+          previous_feedback_date: string | null
+          previous_improve: string
+          previous_keep_doing: string
+          previous_listener: string
+          previous_manager_summary: string
+          previous_next_task: string
+          previous_published: boolean
+          previous_score: number
+          reason: string
+          was_published_at_change: boolean
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          feedback_id: string
+          id?: string
+          previous_call_id?: string
+          previous_call_type?: string
+          previous_criteria?: Json
+          previous_feedback_date?: string | null
+          previous_improve?: string
+          previous_keep_doing?: string
+          previous_listener?: string
+          previous_manager_summary?: string
+          previous_next_task?: string
+          previous_published?: boolean
+          previous_score?: number
+          reason?: string
+          was_published_at_change?: boolean
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          feedback_id?: string
+          id?: string
+          previous_call_id?: string
+          previous_call_type?: string
+          previous_criteria?: Json
+          previous_feedback_date?: string | null
+          previous_improve?: string
+          previous_keep_doing?: string
+          previous_listener?: string
+          previous_manager_summary?: string
+          previous_next_task?: string
+          previous_published?: boolean
+          previous_score?: number
+          reason?: string
+          was_published_at_change?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_revisions_feedback_id_fkey"
+            columns: ["feedback_id"]
+            isOneToOne: false
+            referencedRelation: "feedback"
             referencedColumns: ["id"]
           },
         ]
@@ -440,6 +606,7 @@ export type Database = {
           id: string
           imported_by: string | null
           imported_by_name: string
+          period: string | null
           rows_created: number
           rows_processed: number
           rows_skipped: number
@@ -457,6 +624,7 @@ export type Database = {
           id?: string
           imported_by?: string | null
           imported_by_name?: string
+          period?: string | null
           rows_created?: number
           rows_processed?: number
           rows_skipped?: number
@@ -474,6 +642,7 @@ export type Database = {
           id?: string
           imported_by?: string | null
           imported_by_name?: string
+          period?: string | null
           rows_created?: number
           rows_processed?: number
           rows_skipped?: number
@@ -668,6 +837,7 @@ export type Database = {
           created_at: string
           id: string
           task_key: string
+          team_id: string | null
           updated_at: string
           user_id: string
         }
@@ -677,6 +847,7 @@ export type Database = {
           created_at?: string
           id?: string
           task_key: string
+          team_id?: string | null
           updated_at?: string
           user_id: string
         }
@@ -686,10 +857,19 @@ export type Database = {
           created_at?: string
           id?: string
           task_key?: string
+          team_id?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "morning_checklist_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       morning_settings: {
         Row: {
@@ -737,6 +917,7 @@ export type Database = {
         Row: {
           body: string
           created_at: string
+          dedupe_key: string | null
           href: string | null
           id: string
           kind: string
@@ -748,6 +929,7 @@ export type Database = {
         Insert: {
           body?: string
           created_at?: string
+          dedupe_key?: string | null
           href?: string | null
           id?: string
           kind: string
@@ -759,6 +941,7 @@ export type Database = {
         Update: {
           body?: string
           created_at?: string
+          dedupe_key?: string | null
           href?: string | null
           id?: string
           kind?: string
@@ -862,6 +1045,7 @@ export type Database = {
       }
       rep_tasks: {
         Row: {
+          article_id: string | null
           created_at: string
           created_by: string | null
           done: boolean
@@ -873,6 +1057,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          article_id?: string | null
           created_at?: string
           created_by?: string | null
           done?: boolean
@@ -884,6 +1069,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          article_id?: string | null
           created_at?: string
           created_by?: string | null
           done?: boolean
@@ -895,6 +1081,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "rep_tasks_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rep_tasks_representative_id_fkey"
             columns: ["representative_id"]
@@ -998,6 +1191,50 @@ export type Database = {
           },
         ]
       }
+      team_achievement_snapshots: {
+        Row: {
+          achievement_pct: number | null
+          created_at: string
+          id: string
+          representative_count: number
+          result_value: number
+          snapshot_date: string
+          target_value: number | null
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          achievement_pct?: number | null
+          created_at?: string
+          id?: string
+          representative_count?: number
+          result_value: number
+          snapshot_date?: string
+          target_value?: number | null
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          achievement_pct?: number | null
+          created_at?: string
+          id?: string
+          representative_count?: number
+          result_value?: number
+          snapshot_date?: string
+          target_value?: number | null
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_achievement_snapshots_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_goals: {
         Row: {
           created_at: string
@@ -1042,6 +1279,7 @@ export type Database = {
       teams: {
         Row: {
           active: boolean
+          business_unit_id: string | null
           created_at: string
           department: string | null
           description: string | null
@@ -1053,6 +1291,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          business_unit_id?: string | null
           created_at?: string
           department?: string | null
           description?: string | null
@@ -1064,6 +1303,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          business_unit_id?: string | null
           created_at?: string
           department?: string | null
           description?: string | null
@@ -1073,7 +1313,15 @@ export type Database = {
           name?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "teams_business_unit_id_fkey"
+            columns: ["business_unit_id"]
+            isOneToOne: false
+            referencedRelation: "business_units"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       underwriting_issues: {
         Row: {
@@ -1125,6 +1373,38 @@ export type Database = {
           },
         ]
       }
+      user_business_scopes: {
+        Row: {
+          business_unit_id: string | null
+          created_at: string
+          id: string
+          scope_type: string
+          user_id: string
+        }
+        Insert: {
+          business_unit_id?: string | null
+          created_at?: string
+          id?: string
+          scope_type: string
+          user_id: string
+        }
+        Update: {
+          business_unit_id?: string | null
+          created_at?: string
+          id?: string
+          scope_type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_business_scopes_business_unit_id_fkey"
+            columns: ["business_unit_id"]
+            isOneToOne: false
+            referencedRelation: "business_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -1151,6 +1431,98 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_feedback_with_schedule_completion: {
+        Args: {
+          _call_id: string
+          _call_type: string
+          _created_by: string
+          _criteria: Json
+          _feedback_date: string
+          _improve: string
+          _keep_doing: string
+          _listener: string
+          _manager_summary: string
+          _next_task: string
+          _representative_id: string
+          _schedule_id: string
+          _score: number
+        }
+        Returns: {
+          feedback_id: string
+          schedule_completed: boolean
+        }[]
+      }
+      deliver_operational_notification: {
+        Args: {
+          _body: string
+          _dedupe_key: string
+          _href: string
+          _kind: string
+          _title: string
+          _user_id: string
+        }
+        Returns: {
+          out_created: boolean
+          out_notification_id: string
+        }[]
+      }
+      link_representative_to_user: {
+        Args: {
+          _check_expected: boolean
+          _expected_current_user_id: string
+          _rep_id: string
+          _user_id: string
+        }
+        Returns: {
+          new_user_id: string
+          previous_user_id: string
+          rep_id: string
+          rep_name: string
+          rep_team_id: string
+        }[]
+      }
+      record_team_achievement_snapshot: {
+        Args: {
+          _achievement_pct: number
+          _representative_count: number
+          _result_value: number
+          _snapshot_date: string
+          _target_value: number
+          _team_id: string
+        }
+        Returns: {
+          out_created: boolean
+          out_snapshot_id: string
+        }[]
+      }
+      set_feedback_published: {
+        Args: {
+          _changed_by: string
+          _feedback_id: string
+          _published: boolean
+          _reason: string
+        }
+        Returns: {
+          out_feedback_id: string
+          out_now_published: boolean
+          out_previous_published: boolean
+          out_published_at: string
+          out_representative_id: string
+        }[]
+      }
+      set_representative_active_with_profile_sync: {
+        Args: { _active: boolean; _rep_id: string; _sync_profile: boolean }
+        Returns: {
+          linked_user_id: string
+          previous_active: boolean
+          profile_active: boolean
+          profile_synced: boolean
+          rep_active: boolean
+          rep_deactivated_at: string
+          rep_id: string
+          rep_name: string
+        }[]
+      }
       set_user_team_with_representative_sync: {
         Args: { _team_id: string; _user_id: string }
         Returns: {
@@ -1159,7 +1531,78 @@ export type Database = {
           representative_id: string
         }[]
       }
+      toggle_morning_checklist_item: {
+        Args: {
+          _checklist_date: string
+          _task_key: string
+          _team_id: string
+          _user_id: string
+        }
+        Returns: {
+          out_checked: boolean
+          out_checklist_date: string
+          out_task_key: string
+        }[]
+      }
+      toggle_rep_task_done: {
+        Args: { _task_id: string }
+        Returns: {
+          done: boolean
+          previous_done: boolean
+          representative_id: string
+          task_id: string
+          title: string
+        }[]
+      }
       touch_last_login: { Args: never; Returns: undefined }
+      update_feedback_with_revision: {
+        Args: {
+          _call_id: string
+          _call_type: string
+          _changed_by: string
+          _criteria: Json
+          _expected_updated_at: string
+          _feedback_date: string
+          _feedback_id: string
+          _improve: string
+          _keep_doing: string
+          _listener: string
+          _manager_summary: string
+          _next_task: string
+          _reason: string
+          _score: number
+        }
+        Returns: {
+          out_feedback_id: string
+          out_new_updated_at: string
+          out_representative_id: string
+          out_was_published: boolean
+        }[]
+      }
+      update_representative_metrics_with_team_sync: {
+        Args: {
+          _apply_current_result: boolean
+          _apply_monthly_target: boolean
+          _apply_name: boolean
+          _apply_team: boolean
+          _current_result: number
+          _monthly_target: number
+          _name: string
+          _rep_id: string
+          _team_id: string
+        }
+        Returns: {
+          linked_user_id: string
+          new_current_result: number
+          new_team_id: string
+          previous_current_result: number
+          previous_team_id: string
+          profile_synced: boolean
+          rep_id: string
+          rep_name: string
+          team_changed: boolean
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "manager" | "representative"
