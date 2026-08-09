@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -115,13 +115,49 @@ const ROLE_SORT_RANK: Record<string, number> = { admin: 0, manager: 1, represent
 // scanning the table for problems wants to see at the top.
 const HEALTH_SORT_RANK: Record<UserHealth["status"], number> = { issue: 0, attention: 1, healthy: 2 };
 
+/**
+ * Every cache a user-admin mutation (create/update/email/role/link/unlink/
+ * delete) can make stale, in one awaited place — exported and unit-tested
+ * exactly like invalidateTeamAdminCaches in teams.tsx:
+ *   ["admin"]          prefix — the /users list (business_title + health are
+ *                      SERVER-derived in listUsers), the details drawer
+ *                      (["admin","user-details",id]), delete-checks, audit,
+ *                      and the home console counters.
+ *   ["representatives"] the store mirror (useCloudTeams/WorkspaceProvider,
+ *                      home dashboards) — a rep link/unlink or role change
+ *                      alters who appears there.
+ *   ["business-scope"]  the caller's own resolved scope (header identity,
+ *                      ManagerHome/targets overviews) — a role change can
+ *                      change it.
+ * Invalidation marks data stale so mounted screens refetch immediately;
+ * /users itself additionally refetches on every mount (see usersQ below).
+ */
+export function invalidateUserAdminCaches(qc: QueryClient): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["admin"] }),
+    qc.invalidateQueries({ queryKey: ["representatives"] }),
+    qc.invalidateQueries({ queryKey: ["business-scope"] }),
+  ]);
+}
+
 function UsersPage() {
   const list = useServerFn(listUsers);
   const audit = useServerFn(listAuditLog);
   const qc = useQueryClient();
   const { user: me } = useAuth();
 
-  const usersQ = useQuery({ queryKey: ["admin", "users"], queryFn: () => list() });
+  // refetchOnMount "always": every visit to /users re-reads the list from the
+  // server, even if a cached copy exists and even if some other screen (with
+  // its own staleTime) recently marked it fresh. business_title and health
+  // are SERVER-derived from user_business_scopes — a snapshot cached while an
+  // admin was mid-way through configuring scopes on /teams showed wrong
+  // titles here until a hard refresh. The cached rows still render instantly;
+  // this only guarantees the correcting refetch always fires.
+  const usersQ = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: () => list(),
+    refetchOnMount: "always",
+  });
   const auditQ = useQuery({ queryKey: ["admin", "audit"], queryFn: () => audit() });
 
   const users = (usersQ.data?.users ?? []) as UserRow[];
@@ -202,7 +238,7 @@ function UsersPage() {
   const activeAdmins = users.filter((u) => u.active && u.roles.includes("admin"));
 
   function invalidateAll() {
-    qc.invalidateQueries({ queryKey: ["admin"] });
+    return invalidateUserAdminCaches(qc);
   }
   function closeAction() {
     setAction(null);

@@ -108,7 +108,16 @@ export function invalidateTeamAdminCaches(qc: QueryClient): Promise<unknown> {
     qc.invalidateQueries({ queryKey: ["admin", "users"] }),
     qc.invalidateQueries({ queryKey: ["admin", "audit"] }),
     qc.invalidateQueries({ queryKey: ["admin", "team-details"] }),
+    // The /users details drawer caches per-user rows whose business_title and
+    // health are derived from teams.manager_id + user_business_scopes — a
+    // team-manager change or a hierarchy/scope mutation (the hierarchy card's
+    // refresh() routes through this function) must stale them too, or the
+    // drawer keeps a pre-mutation title until a hard refresh.
+    qc.invalidateQueries({ queryKey: ["admin", "user-details"] }),
     qc.invalidateQueries({ queryKey: ["representatives"] }),
+    // The caller's own resolved scope (header identity line, ManagerHome and
+    // /targets overviews) also keys off teams.manager_id ownership.
+    qc.invalidateQueries({ queryKey: ["business-scope"] }),
   ]);
 }
 
