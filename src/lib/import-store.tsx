@@ -84,6 +84,39 @@ export const UNSUPPORTED_FIELDS: ImportFieldKey[] = [
 
 export const UNSUPPORTED_FIELD_REASON = "השדה מוצג להתאמה עתידית בלבד — הערכים בעמודה זו אינם נשמרים במערכת כיום.";
 
+/**
+ * The fields every team uses, renewals and generic alike — the import is a
+ * general performance import first; renewals columns are an optional add-on
+ * for renewals-profile teams, never a requirement.
+ */
+export const CORE_FIELDS: ImportFieldKey[] = [
+  "name",
+  "externalRef",
+  "email",
+  "team",
+  "currentResult",
+  "updatedAt",
+];
+
+/** The import model in one line — shown next to the upload/mapping area. */
+export const IMPORT_MODEL_HELPER_LINE =
+  "הצוות נקבע לפי עמודת ״צוות״ בקובץ. ניתן לייבא כמה צוותים באותו קובץ, והייבוא מוגבל לצוותים שבהיקף הניהול שלך.";
+
+export const GENERIC_TEAM_RENEWALS_HINT =
+  "אם אתם מייבאים צוות רגיל, אין צורך למפות את עמודות החידושים.";
+
+/**
+ * The mapping dropdown's visual grouping — pure presentation over the SAME
+ * field keys and category lists defined above (nothing here changes which
+ * fields exist, which are required, or how any of them is persisted).
+ */
+export const FIELD_GROUPS: { label: string; fields: ImportFieldKey[] }[] = [
+  { label: "שדות ליבה — לכל סוגי הצוותים", fields: CORE_FIELDS },
+  { label: "יעד רשמי — דורש אישור נפרד", fields: ["monthlyTarget"] },
+  { label: "שדות חידושים — רק לצוותי חידושים", fields: RENEWAL_FIELDS },
+  { label: "לא נתמכים כרגע", fields: UNSUPPORTED_FIELDS },
+];
+
 export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   name: "שם הנציג",
   externalRef: "מזהה נציג (התאמה מדויקת, אופציונלי)",
@@ -92,8 +125,8 @@ export const FIELD_LABEL: Record<ImportFieldKey, string> = {
   monthlyTarget: "יעד חודשי (אופציונלי — עדכון יעדים רשמיים דורש אישור נפרד)",
   currentResult: "ביצוע נוכחי",
   updatedAt: "תאריך עדכון",
-  renewalOpportunities: "מיועדות חודשיות (רק לצוותי חידושים)",
-  completedRenewals: "חידושים שנסגרו (רק לצוותי חידושים)",
+  renewalOpportunities: "מיועדות חודשיות (אופציונלי — רק לצוותי חידושים)",
+  completedRenewals: "חידושים שנסגרו (אופציונלי — רק לצוותי חידושים)",
   prevMonthResult: "ביצוע חודש קודם (לא נשמר כרגע)",
   listeningCount: "מספר האזנות (לא נשמר כרגע)",
   lastListeningScore: "ציון האזנה אחרון (לא נשמר כרגע)",
