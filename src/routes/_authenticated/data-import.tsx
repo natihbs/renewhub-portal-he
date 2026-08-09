@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
@@ -32,8 +32,9 @@ import { writeRepresentativeKpiValue } from "@/lib/kpi.functions";
 import { setRepresentativeGoals, restoreRepresentativeGoals } from "@/lib/goals.functions";
 import {
   useImport, autoMap, detectPii, PII_LABEL, type PiiHit,
-  FIELD_LABEL, REQUIRED_FIELDS, UNSUPPORTED_FIELDS, UNSUPPORTED_FIELD_REASON,
+  FIELD_LABEL, FIELD_GROUPS, REQUIRED_FIELDS, UNSUPPORTED_FIELDS, UNSUPPORTED_FIELD_REASON,
   RENEWAL_FIELDS, RENEWAL_FIELDS_WRONG_PROFILE_REASON,
+  IMPORT_MODEL_HELPER_LINE, GENERIC_TEAM_RENEWALS_HINT,
   type ImportFieldKey, type ImportHistoryEntry, type TargetGoalSnapshotEntry,
 } from "@/lib/import-store";
 import { processRows, type ProcessedRow, type ResolvedAction, type RawRow } from "@/lib/import-processing";
@@ -147,6 +148,19 @@ function downloadTemplate(kind: "xlsx" | "csv") {
     triggerDownload(blob, "renewhub-import-template.csv");
   } else {
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    // The two renewal columns (last, deliberately after all the generic
+    // columns) carry a cell note so they never read as required — a generic
+    // team's file simply leaves them out. CSV cannot carry notes.
+    for (const addr of ["H1", "I1"]) {
+      const cell = ws[addr] as { c?: unknown } | undefined;
+      if (cell) {
+        const comments: { a: string; t: string }[] & { hidden?: boolean } = [
+          { a: "Pulse", t: "אופציונלי — רק לצוותי חידושים" },
+        ];
+        comments.hidden = true;
+        cell.c = comments;
+      }
+    }
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "template");
     const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -798,6 +812,7 @@ function UploadStep({ onFile, busy, inputRef }: { onFile: (f: File) => void; bus
       <div className="text-xs text-muted-foreground">
         נתמכים: .xlsx, .csv &middot; העיבוד מתבצע בדפדפן, הקובץ אינו נשלח לשרת
       </div>
+      <div className="max-w-xl text-xs text-muted-foreground">{IMPORT_MODEL_HELPER_LINE}</div>
     </div>
   );
 }
@@ -824,6 +839,16 @@ function MappingStep({
 
   return (
     <div className="space-y-4">
+      {/* The import model up front: it serves EVERY team; renewals columns
+          are an optional add-on. Without this line the renewals fields in the
+          list made the whole import read as renewals-only. */}
+      <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-1">
+        <div>{IMPORT_MODEL_HELPER_LINE}</div>
+        <div className="text-muted-foreground">
+          צוותים רגילים משתמשים בשדות הליבה בלבד; צוותי חידושים יכולים למפות בנוסף את עמודות
+          החידושים. {GENERIC_TEAM_RENEWALS_HINT}
+        </div>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           התאימו כל עמודה מהקובץ לשדה במערכת. שדות חובה: {REQUIRED_FIELDS.map((f) => FIELD_LABEL[f]).join(", ")}.
@@ -860,11 +885,20 @@ function MappingStep({
                   >
                     <SelectTrigger className="h-9 w-64"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {(Object.keys(FIELD_LABEL) as ImportFieldKey[]).map((f) => (
-                        <SelectItem key={f} value={f}
-                          disabled={(f !== "__skip__" && f !== mapping[h] && usedFields.has(f)) || UNSUPPORTED_FIELDS.includes(f)}>
-                          {FIELD_LABEL[f]} {REQUIRED_FIELDS.includes(f) && f !== "__skip__" && <span className="text-primary">*</span>}
-                        </SelectItem>
+                      {/* Same field keys, same disable rules — only grouped so
+                          core fields read as "for every team" and renewals
+                          fields as an optional add-on. */}
+                      <SelectItem value="__skip__">{FIELD_LABEL.__skip__}</SelectItem>
+                      {FIELD_GROUPS.map((group) => (
+                        <SelectGroup key={group.label}>
+                          <SelectLabel>{group.label}</SelectLabel>
+                          {group.fields.map((f) => (
+                            <SelectItem key={f} value={f}
+                              disabled={(f !== mapping[h] && usedFields.has(f)) || UNSUPPORTED_FIELDS.includes(f)}>
+                              {FIELD_LABEL[f]} {REQUIRED_FIELDS.includes(f) && <span className="text-primary">*</span>}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       ))}
                     </SelectContent>
                   </Select>
@@ -933,21 +967,23 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
     <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">מה יקרה לכל עמודה בייבוא</div>
       <div>
-        <span className="font-medium text-success-foreground">יישמרו במערכת:</span>{" "}
+        <span className="font-medium text-success-foreground">יישמרו לכל סוגי הצוותים:</span>{" "}
         {persisted.length > 0 ? persisted.join(", ") : "—"}
       </div>
       {targetMapped && (
         <div>
-          <span className="font-medium text-primary">יעד חודשי — לא יישמר אוטומטית:</span>{" "}
+          <span className="font-medium text-primary">יעד רשמי — רק אם תאשרו עדכון יעדים:</span>{" "}
           הערכים יוצגו בבדיקת הנתונים, אך היעד הרשמי של נציג משתנה רק אם תאשרו זאת מפורשות בשלב האישור.
           ביצוע נוכחי מתעדכן תמיד, ללא תלות באפשרות זו.
         </div>
       )}
       {renewal.length > 0 && (
         <div>
-          <span className="font-medium text-primary">יישמרו כנתוני חידוש — רק לשורות בצוות "חידושים":</span>{" "}
+          <span className="font-medium text-primary">שדות חידושים — רק לצוותי חידושים:</span>{" "}
           {renewal.join(", ")}
-          <div className="text-xs text-muted-foreground">{RENEWAL_FIELDS_WRONG_PROFILE_REASON}</div>
+          <div className="text-xs text-muted-foreground">
+            {RENEWAL_FIELDS_WRONG_PROFILE_REASON} {GENERIC_TEAM_RENEWALS_HINT}
+          </div>
         </div>
       )}
       <div>
@@ -956,7 +992,7 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
       </div>
       {unsupported.length > 0 && (
         <div>
-          <span className="font-medium text-warning-foreground">לא ייכתבו למערכת:</span> {unsupported.join(", ")}
+          <span className="font-medium text-warning-foreground">לא נתמכים כרגע:</span> {unsupported.join(", ")}
           <div className="text-xs text-muted-foreground">{UNSUPPORTED_FIELD_REASON}</div>
         </div>
       )}
