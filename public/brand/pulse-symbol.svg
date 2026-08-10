@@ -1,9 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="pulse-symbol-title">
   <title id="pulse-symbol-title">Pulse</title>
-  <g fill="#4C1D95">
-    <rect x="9" y="64" width="15" height="26" rx="7.5" opacity="0.4"/>
-    <rect x="30.5" y="44" width="15" height="46" rx="7.5" opacity="0.6"/>
-    <rect x="52" y="22" width="15" height="68" rx="7.5" opacity="0.85"/>
-  </g>
-  <rect x="73.5" y="2" width="15" height="88" rx="7.5" fill="#0891B2"/>
+  <path d="M6 62 H22 L38 28 L58 78 L72 48 H79" fill="none" stroke="#4C1D95" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="91" cy="48" r="7.5" fill="#0891B2"/>
 </svg>

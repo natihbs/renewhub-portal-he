@@ -28,7 +28,7 @@ import {
   Pencil, Plus, Search,
   Users, CheckCircle2, AlertTriangle, Target, Gauge, LineChart as LineChartIcon,
   FileSpreadsheet, Printer, Headphones, StickyNote, Lightbulb,
-  Sparkles,
+  Sparkles, Award, CalendarClock,
 } from "lucide-react";
 import {
   formatNum,
@@ -61,7 +61,12 @@ import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { InitialsAvatar } from "@/components/dashboard/Surfaces";
+import {
+  InitialsAvatar,
+  ProgressRing,
+  RankedRow,
+  StatusSegmentBar,
+} from "@/components/dashboard/Surfaces";
 import { cn } from "@/lib/utils";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
@@ -514,6 +519,12 @@ function ManagerPerformancePage() {
         .slice(0, 5),
     [targetedEnriched]
   );
+  // Same population and math as the table/insights — just the top of the
+  // ranking, for the people card in the analytics band.
+  const topPerformers = useMemo(
+    () => [...targetedEnriched].sort((a, b) => b.pct - a.pct).slice(0, 3),
+    [targetedEnriched]
+  );
 
   const exportCsv = () => {
     const rows = [
@@ -541,62 +552,195 @@ function ManagerPerformancePage() {
         description={isManager
           ? "מרכז ניהול ביצועים חודשי - איתור מובילים, נציגים בקצב ואלו הזקוקים לליווי"
           : "מעקב אחר היעד החודשי שלך - קצב, פער ותחזית"}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={exportCsv}>
-              <FileSpreadsheet className="ms-1 h-4 w-4" />ייצוא ל-Excel
-            </Button>
-            {/* §P3: "ייצוא ל-PDF" and "הדפסה" were two separate buttons both
-                calling window.print() — presenting one capability as two.
-                There is no dedicated PDF renderer here, so this is the single
-                honest action, named for what the browser dialog actually
-                offers. */}
-            {businessScope?.scopeLabel && (
-              <span className="text-xs text-muted-foreground">{businessScope.scopeLabel}</span>
-            )}
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
-              <Printer className="ms-1 h-4 w-4" />הדפסה / שמירה כ-PDF
-            </Button>
-            <ManagerOnly>
-              <RepFormDialog trigger={<Button variant="outline" size="sm"><Plus className="ms-1 h-4 w-4" />הוספת נציג</Button>} />
-            </ManagerOnly>
-            <ManagerOnly>
-              <ManualPerformanceDialog
-                sourceScreen="performance-header"
-                trigger={
-                  <Button size="sm">
-                    <PenLine className="ms-1 h-4 w-4" />
-                    עדכון ביצועים ידני
-                  </Button>
-                }
-              />
-            </ManagerOnly>
-          </div>
-        }
       />
 
-      {/* Summary bar — team-wide aggregates, meaningless when scoped to a single
-          representative's own row, so this is manager/admin only. */}
+      {/* Command bar — one surface for the page's context (month, business
+          scope), the table filters and every page action, replacing the old
+          split between header-actions and filters buried in the table card.
+          Everything here is the SAME state and the SAME handlers as before —
+          only the placement changed. */}
       {isManager && (
-        <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          <SummaryCard tone="neutral" icon={Users} label="סך נציגים" value={formatNum(summary.total)} sub="בכלל הצוותים" />
-          <SummaryCard tone="success" icon={CheckCircle2} label="מעל היעד" value={formatNum(summary.above)} sub="נציגים מקדימים" />
-          <SummaryCard tone="warning" icon={Gauge} label="בקצב" value={formatNum(summary.onpace)} sub="עומדים בקצב הצפוי" />
-          <SummaryCard tone="danger" icon={AlertTriangle} label="דורש טיפול" value={formatNum(summary.attention)} sub="מתחת לקצב הנדרש" />
-          <SummaryCard
-            tone="neutral"
-            icon={Target}
-            label="ממוצע עמידה"
-            value={summary.avgPct === null ? "אין יעדים" : formatPct(summary.avgPct)}
-            sub={`מתוך ${summary.targetedCount} נציגים עם יעד מוגדר`}
-          />
-          <SummaryCard
-            tone={summary.forecastPct === null ? "neutral" : summary.forecastPct >= 100 ? "success" : summary.forecastPct >= 90 ? "warning" : "danger"}
-            icon={LineChartIcon}
-            label="תחזית סוף חודש"
-            value={formatNum(summary.teamForecast)}
-            sub={summary.forecastPct === null ? "אין יעדים מוגדרים לחישוב תחזית" : `מתוך סך יעדים ${formatNum(summary.teamTarget)} · ${formatPct(summary.forecastPct)}`}
-          />
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card p-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">
+            <CalendarClock className="h-3.5 w-3.5" />
+            {formatMonthIL(currentGoalMonth())}
+          </span>
+          {businessScope?.scopeLabel && (
+            <span className="inline-flex items-center rounded-full bg-surface-subtle px-3 py-1.5 text-xs text-muted-foreground">
+              {businessScope.scopeLabel}
+            </span>
+          )}
+          <span className="hidden flex-1 lg:block" />
+          <div className="relative w-full sm:w-52">
+            <Search className="absolute inset-y-0 end-2 my-auto h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="חיפוש נציג לפי שם"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-9 pe-8"
+            />
+          </div>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+            <SelectTrigger className="h-9 w-full sm:w-40" aria-label="סינון לפי סטטוס">
+              <SelectValue placeholder="סטטוס" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">כל הסטטוסים</SelectItem>
+              <SelectItem value="above">מעל היעד</SelectItem>
+              <SelectItem value="onpace">בקצב</SelectItem>
+              <SelectItem value="attention">דורש טיפול</SelectItem>
+              <SelectItem value="no_target">לא הוגדר יעד</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+            <SelectTrigger className="h-9 w-full sm:w-52" aria-label="מיון">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pct_desc">מיון: אחוז - גבוה לנמוך</SelectItem>
+              <SelectItem value="pct_asc">מיון: אחוז - נמוך לגבוה</SelectItem>
+              <SelectItem value="target">מיון: יעד אישי</SelectItem>
+              <SelectItem value="result">מיון: ביצוע נוכחי</SelectItem>
+              <SelectItem value="name">מיון: שם הנציג</SelectItem>
+            </SelectContent>
+          </Select>
+          <span aria-hidden className="hidden h-6 w-px bg-border/70 sm:block" />
+          <Button variant="outline" size="sm" onClick={exportCsv}>
+            <FileSpreadsheet className="ms-1 h-4 w-4" />ייצוא ל-Excel
+          </Button>
+          {/* §P3: "ייצוא ל-PDF" and "הדפסה" were two separate buttons both
+              calling window.print() — presenting one capability as two.
+              There is no dedicated PDF renderer here, so this is the single
+              honest action, named for what the browser dialog actually
+              offers. */}
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="ms-1 h-4 w-4" />הדפסה / שמירה כ-PDF
+          </Button>
+          <ManagerOnly>
+            <RepFormDialog trigger={<Button variant="outline" size="sm"><Plus className="ms-1 h-4 w-4" />הוספת נציג</Button>} />
+          </ManagerOnly>
+          <ManagerOnly>
+            <ManualPerformanceDialog
+              sourceScreen="performance-header"
+              trigger={
+                <Button size="sm">
+                  <PenLine className="ms-1 h-4 w-4" />
+                  עדכון ביצועים ידני
+                </Button>
+              }
+            />
+          </ManagerOnly>
+        </div>
+      )}
+
+      {/* Analytics band — replaces the six equal summary tiles with one
+          deliberate visual order: the primary attainment surface (ring +
+          aggregate figures), the status distribution and a people card.
+          Every figure comes from the exact same `summary`, `targetedEnriched`
+          and `coaching` values that already power the table below — no new
+          derivations, no fabricated trends. */}
+      {isManager && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="surface-tile flex items-center justify-center gap-6 p-5">
+            <ProgressRing value={summary.avgPct} caption="ממוצע עמידה" size={132} />
+            <div className="min-w-0 space-y-2.5 text-sm">
+              <div>
+                <div className="text-xs text-muted-foreground">נציגים עם יעד</div>
+                <div className="num font-display text-lg font-bold">
+                  {formatNum(summary.targetedCount)} מתוך {formatNum(summary.total)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">סך יעדים חודשי</div>
+                <div className="num font-display text-lg font-bold">{formatNum(summary.teamTarget)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">תחזית סוף חודש</div>
+                <div
+                  className={cn(
+                    "num font-display text-lg font-bold",
+                    summary.forecastPct !== null && summary.forecastPct >= 100 && "text-success-foreground",
+                    summary.forecastPct !== null && summary.forecastPct < 90 && "text-primary",
+                  )}
+                >
+                  {summary.forecastPct === null ? "—" : formatNum(summary.teamForecast)}
+                  {summary.forecastPct !== null && (
+                    <span className="ms-1 text-xs font-semibold">({formatPct(summary.forecastPct)})</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">התפלגות סטטוס</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <StatusSegmentBar
+                segments={[
+                  { label: "מעל היעד", count: summary.above, color: "var(--color-success)" },
+                  { label: "בקצב", count: summary.onpace, color: "var(--color-warning)" },
+                  { label: "דורש טיפול", count: summary.attention, color: "var(--color-primary)" },
+                  { label: "לא הוגדר יעד", count: missingTargetCount, color: "var(--color-muted-foreground)" },
+                ]}
+                onSelect={(i) => {
+                  const values: StatusFilter[] = ["above", "onpace", "attention", "no_target"];
+                  const next = values[i];
+                  setStatusFilter((cur) => (cur === next ? "all" : next));
+                }}
+              />
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                לחיצה על סטטוס מסננת את טבלת הנציגים; לחיצה נוספת מבטלת.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Award className="h-4 w-4 text-primary" />
+                מובילים וטעוני ליווי
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {topPerformers.length === 0 ? (
+                <EmptyState
+                  icon={Award}
+                  title="אין נציגים עם יעד מוגדר"
+                  description="דירוג אפשרי רק מול יעד אישי רשמי."
+                  compact
+                />
+              ) : (
+                topPerformers.map((e, i) => (
+                  <RankedRow
+                    key={e.rep.id}
+                    rank={i + 1}
+                    name={e.rep.name}
+                    value={formatPct(e.pct)}
+                    barPct={e.pct}
+                    tone={e.pct >= 100 ? "success" : "primary"}
+                  />
+                ))
+              )}
+              {coaching.length > 0 && (
+                <>
+                  <div className="pt-1 text-xs font-semibold text-muted-foreground">טעוני ליווי</div>
+                  {coaching.slice(0, 2).map((e) => (
+                    <button
+                      key={e.rep.id}
+                      onClick={() => openWorkspace(e.rep.id)}
+                      className="flex w-full items-center gap-2.5 rounded-xl border border-[color:var(--warning)]/30 bg-[color:var(--warning)]/8 p-2.5 text-start transition-colors hover:bg-[color:var(--warning)]/15"
+                    >
+                      <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{e.rep.name}</span>
+                      <span className="num text-sm font-bold text-warning-foreground">{formatPct(e.pct)}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -747,39 +891,8 @@ function ManagerPerformancePage() {
               </div>
             )}
           </div>
-          {isManager && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            <div className="relative">
-              <Search className="absolute inset-y-0 end-2 my-auto h-4 w-4 text-muted-foreground pointer-events-none" />
-              <Input
-                placeholder="חיפוש נציג לפי שם"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="pe-8"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-              <SelectTrigger><SelectValue placeholder="סטטוס" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל הסטטוסים</SelectItem>
-                <SelectItem value="above">מעל היעד</SelectItem>
-                <SelectItem value="onpace">בקצב</SelectItem>
-                <SelectItem value="attention">דורש טיפול</SelectItem>
-                <SelectItem value="no_target">לא הוגדר יעד</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pct_desc">מיון: אחוז - גבוה לנמוך</SelectItem>
-                <SelectItem value="pct_asc">מיון: אחוז - נמוך לגבוה</SelectItem>
-                <SelectItem value="target">מיון: יעד אישי</SelectItem>
-                <SelectItem value="result">מיון: ביצוע נוכחי</SelectItem>
-                <SelectItem value="name">מיון: שם הנציג</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          )}
+          {/* Search/status/sort moved to the command bar above — the table
+              card is now purely the drill-down layer. */}
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
