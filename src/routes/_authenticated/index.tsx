@@ -39,6 +39,7 @@ import {
   isScopedManagerKind,
   managerHeaderPrimaryLine,
   missingTargetsByTeam,
+  SCOPE_METRIC_LABELS,
   SCOPE_SELECT_TEAM_HINT,
   SCOPE_SELECTED_TEAM_SECTION_TITLE,
   SCOPE_TARGETS_ACTION_LABEL,
