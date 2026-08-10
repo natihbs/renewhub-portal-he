@@ -535,18 +535,26 @@ function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
                 to={n.to}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium transition-colors",
-                  active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                  "relative flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium transition-colors duration-150",
+                  active ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {/* Color alone reads weakly on the tinted bar — an explicit
-                    top indicator makes the active tab unmistakable. */}
+                {/* Color alone reads weakly on the tinted bar — a top indicator
+                    plus a soft icon pill makes the active tab unmistakable. */}
                 {active && (
                   <span aria-hidden className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-primary" />
                 )}
-                <Icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.4]")} />
+                <span
+                  className={cn(
+                    "grid h-7 w-11 place-items-center rounded-full transition-colors duration-150",
+                    active && "bg-primary/10",
+                  )}
+                >
+                  <Icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.4]")} />
+                </span>
                 <span className="w-full truncate text-center leading-none">{navLabel(n, role)}</span>
               </Link>
+
 
             </li>
           );
