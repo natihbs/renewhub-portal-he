@@ -188,6 +188,13 @@
      no separate darker/lighter variant needed here, unlike light mode. */
   --success-foreground: var(--success);
   --warning-foreground: var(--warning);
+  --info: #5cbdb9;
+  --info-foreground: var(--info);
+  --surface-subtle: color-mix(in oklab, white 6%, transparent);
+  --chat-surface: #16241f;
+  --chat-bubble: #23302b;
+  --chat-meta: #6ee7b7;
+
   --border: var(--brand-border);
   --input: color-mix(in oklab, white 15%, transparent);
   --ring: var(--brand-primary-light);
