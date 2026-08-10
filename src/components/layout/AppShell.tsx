@@ -614,15 +614,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ModeToggle />
               </div>
             )}
-            <div className="hidden md:block">
-              <AboutDialog trigger={<Button variant="ghost" size="icon" aria-label="אודות"><span className="text-xs font-mono">i</span></Button>} />
-            </div>
             <NotificationBell />
-            <AdminViewSwitcher />
-            <WorkspaceSwitcher />
+            {/* Scope controls read as one "context" segment rather than two
+                unrelated selects. `empty:hidden` keeps the frame from showing
+                when neither switcher renders (non-admin, single workspace). */}
+            <div className="flex items-center gap-1 rounded-xl border bg-background/60 p-0.5 empty:hidden">
+              <AdminViewSwitcher />
+              <WorkspaceSwitcher />
+            </div>
             <RoleSwitcher />
             <UserMenu />
           </div>
+
         </header>
 
         <AdminViewBanner />
