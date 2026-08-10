@@ -990,22 +990,17 @@ function TopPerformersCard({ reps, goalsByRepId, isLoading, isError, className }
             compact
           />
         ) : top3.map((r, i) => (
-          <div key={r.id} className="flex items-center gap-3 rounded-xl border p-3">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground font-bold">
-              {i + 1}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-semibold truncate">{r.name}</div>
-                <Badge variant="secondary">{r.teamName}</Badge>
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <Progress value={Math.min(r.pct, 150)} className="h-2" />
-                <span className="text-xs text-muted-foreground w-14 text-end">{formatPct(r.pct)}</span>
-              </div>
-            </div>
-          </div>
+          <RankedRow
+            key={r.id}
+            rank={i + 1}
+            name={r.name}
+            meta={<Badge variant="secondary" className="shrink-0">{r.teamName}</Badge>}
+            value={formatPct(r.pct)}
+            barPct={r.pct}
+            tone={r.pct >= 100 ? "success" : "primary"}
+          />
         ))}
+
       </CardContent>
     </Card>
   );
