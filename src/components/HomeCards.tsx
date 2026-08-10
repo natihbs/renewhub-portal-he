@@ -37,6 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import { cn } from "@/lib/utils";
 
 import { useApp, visibleFeedback } from "@/lib/store";
