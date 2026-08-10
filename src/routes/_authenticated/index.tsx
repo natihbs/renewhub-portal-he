@@ -327,8 +327,27 @@ function AdminHome() {
     <div className="space-y-8">
       <HomeHeader
         role="admin"
+        metrics={
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:w-auto">
+            <HeroStat
+              label="חשבונות"
+              value={isDemo || usersState !== "ready" ? "—" : String(userRows.length)}
+              sub={isDemo ? "מצב הדגמה" : usersState === "ready" ? `${activeUsers} פעילים` : "לא נטען"}
+            />
+            <HeroStat
+              label="צוותים פעילים"
+              value={teamsState === "error" ? "—" : String(activeTeams)}
+              sub={`מתוך ${cloudTeams.length}`}
+            />
+            <HeroStat
+              label="נציגים"
+              value={repsState === "error" ? "—" : String(reps.length)}
+              sub="פעילים בארגון"
+            />
+          </div>
+        }
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             <Button asChild variant="outline" size="sm">
               <Link to="/users"><Users2 className="ms-1 h-4 w-4" />ניהול משתמשים</Link>
             </Button>
@@ -338,42 +357,46 @@ function AdminHome() {
             <Button asChild size="sm">
               <Link to="/admin"><Settings className="ms-1 h-4 w-4" />ניהול המערכת</Link>
             </Button>
-          </div>
+          </>
         }
       />
 
       <DataFreshnessBar teamId={null} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KPICard
-          icon={Users}
-          label="חשבונות משתמשים"
-          value={isDemo ? "—" : String(userRows.length)}
-          sub={isDemo ? "לא נטען במצב הדגמה" : `${activeUsers} פעילים`}
-          state={usersState}
-          to="/users"
-        />
-        <KPICard
-          icon={UsersRound}
-          label="צוותים פעילים"
-          value={String(activeTeams)}
-          sub={`מתוך ${cloudTeams.length} סה"כ`}
-          state={teamsState}
-          to="/teams"
-        />
-        <KPICard
-          icon={Users2}
-          label="נציגים"
-          value={String(reps.length)}
-          sub="פעילים בארגון"
-          state={repsState}
-          to="/representatives"
-        />
+      <div className="space-y-3">
+        <SectionHeading title="מצב המערכת" hint="לחיצה על כרטיס פותחת את מסך הניהול המתאים" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <KPICard
+            icon={Users}
+            label="חשבונות משתמשים"
+            value={isDemo ? "—" : String(userRows.length)}
+            sub={isDemo ? "לא נטען במצב הדגמה" : `${activeUsers} פעילים`}
+            state={usersState}
+            to="/users"
+          />
+          <KPICard
+            icon={UsersRound}
+            label="צוותים פעילים"
+            value={String(activeTeams)}
+            sub={`מתוך ${cloudTeams.length} סה"כ`}
+            state={teamsState}
+            to="/teams"
+          />
+          <KPICard
+            icon={Users2}
+            label="נציגים"
+            value={String(reps.length)}
+            sub="פעילים בארגון"
+            state={repsState}
+            to="/representatives"
+          />
+        </div>
       </div>
 
       <SystemGapsCard reps={reps} teams={cloudTeams} teamsLoading={teamsLoading} teamsError={teamsError} />
 
       <AdminShortcutsGrid />
+
 
       <RecentActivityCard />
     </div>
