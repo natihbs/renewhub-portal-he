@@ -211,6 +211,144 @@ export function StatTile({
   );
 }
 
+// ------------------------------------------------------------ metric card
+
+/**
+ * Rich KPI card for the primary metric row: icon chip, label, hero-weight
+ * figure and an optional real secondary line. `tone` colors the accent edge
+ * and icon chip semantically; it never invents a trend — callers pass only
+ * values that already exist.
+ */
+export function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  tone = "primary",
+  className,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "primary" | "accent" | "success" | "warning";
+  className?: string;
+}) {
+  const chip =
+    tone === "success"
+      ? "bg-[color:var(--success)]/12 text-success-foreground"
+      : tone === "warning"
+        ? "bg-[color:var(--warning)]/15 text-warning-foreground"
+        : tone === "accent"
+          ? "bg-[color:var(--info)]/12 text-[color:var(--info-foreground)]"
+          : "bg-primary/10 text-primary";
+  const edge =
+    tone === "success"
+      ? "before:bg-[color:var(--success)]"
+      : tone === "warning"
+        ? "before:bg-[color:var(--warning)]"
+        : tone === "accent"
+          ? "before:bg-[color:var(--info)]"
+          : "before:bg-primary";
+  return (
+    <div
+      className={cn(
+        "surface-tile relative overflow-hidden p-4 sm:p-5",
+        // Semantic accent edge on the reading (start) side.
+        "before:absolute before:inset-y-3 before:start-0 before:w-1 before:rounded-e-full",
+        edge,
+        className,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 text-xs font-medium text-muted-foreground">{label}</div>
+        <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", chip)}>
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+      <div className="num mt-2 truncate font-display text-3xl font-extrabold tracking-tight">
+        {value}
+      </div>
+      {sub && <div className="mt-1 truncate text-xs text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+// -------------------------------------------------------- status segments
+
+export type StatusSegment = {
+  label: string;
+  count: number;
+  /** CSS color value (semantic token var), e.g. "var(--color-success)". */
+  color: string;
+};
+
+/**
+ * Horizontal distribution bar + legend for a small set of mutually exclusive
+ * statuses. Renders exactly the counts it is handed — an all-zero input
+ * renders an empty track, never an invented split. `onSelect` is optional
+ * drill-down wiring to an EXISTING filter at the call site.
+ */
+export function StatusSegmentBar({
+  segments,
+  onSelect,
+  className,
+}: {
+  segments: StatusSegment[];
+  onSelect?: (index: number) => void;
+  className?: string;
+}) {
+  const total = segments.reduce((s, x) => s + x.count, 0);
+  return (
+    <div className={cn("space-y-3", className)}>
+      <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+        {total > 0 &&
+          segments
+            .filter((s) => s.count > 0)
+            .map((s) => (
+              <div
+                key={s.label}
+                className="h-full"
+                style={{ width: `${(s.count / total) * 100}%`, backgroundColor: s.color }}
+              />
+            ))}
+      </div>
+      <ul className="space-y-1.5">
+        {segments.map((s, i) => {
+          const row = (
+            <>
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: s.color }}
+                />
+                <span className="truncate text-sm">{s.label}</span>
+              </span>
+              <span className="num text-sm font-bold">{s.count}</span>
+            </>
+          );
+          return (
+            <li key={s.label}>
+              {onSelect ? (
+                <button
+                  type="button"
+                  onClick={() => onSelect(i)}
+                  className="flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-start transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {row}
+                </button>
+              ) : (
+                <div className="flex items-center justify-between gap-2 px-1.5 py-1">{row}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- people
 
 /** Hebrew-safe initials: first letters of the first two name parts. */

@@ -3,28 +3,25 @@ import { cn } from "@/lib/utils";
 export type PulseLogoVariant = "full" | "symbol" | "light" | "dark" | "compact";
 
 /**
- * Pulse mark — four ascending "rhythm bars" (performance pulse), deliberately
- * NOT the old ECG/heartbeat trace, which read as healthcare rather than sales
- * performance. Keep geometry in sync with public/brand/pulse-symbol.svg,
- * pulse-logo.svg, pulse-logo-light.svg and public/favicon.svg; those static
- * files exist for contexts that need a real asset URL (favicon links,
- * `<img>`/download, external use) rather than an inline component.
+ * Pulse mark — one continuous abstract signal waveform with a cyan "live"
+ * node at its end. Replaces the previous four-vertical-bar mark, which real
+ * desktop QA flagged as readable as a raised-finger silhouette. The trace is
+ * deliberately smooth-jointed and asymmetric so it reads as a performance
+ * signal, not a hospital ECG. Keep geometry in sync with
+ * public/brand/pulse-symbol.svg, pulse-logo.svg, pulse-logo-light.svg and
+ * public/favicon.svg; those static files exist for contexts that need a real
+ * asset URL (favicon links, `<img>`/download, external use) rather than an
+ * inline component.
  *
- * The three lower bars render in `currentColor` at stepped opacity, so the
- * mark inherits whatever text color its container sets and works on light,
- * dark and sidebar surfaces without a per-surface asset. Only the tallest bar
- * is fixed to the brand accent (cyan) as the single highlight.
+ * The trace renders in `currentColor`, so the mark inherits whatever text
+ * color its container sets and works on light, dark and sidebar surfaces
+ * without a per-surface asset. Only the end node is fixed to the brand accent
+ * (cyan) as the single highlight.
  */
-const BARS: { x: number; h: number; opacity: number }[] = [
-  { x: 9, h: 26, opacity: 0.4 },
-  { x: 30.5, h: 46, opacity: 0.6 },
-  { x: 52, h: 68, opacity: 0.85 },
-];
-const BAR_W = 15;
-const BAR_R = 7.5;
-const BASELINE = 90;
-/** The tallest, highlighted bar. */
-const ACCENT_BAR = { x: 73.5, h: 88 };
+const WAVE_PATH = "M6 62 H22 L38 28 L58 78 L72 48 H79";
+const WAVE_STROKE = 12;
+/** The accent "live signal" node at the end of the trace. */
+const ACCENT_NODE = { cx: 91, cy: 48, r: 7.5 };
 
 const ACCENT_ON_LIGHT = "#0891B2"; // cyan-600 — >=4.5:1 on white
 const ACCENT_ON_DARK = "#22D3EE"; // cyan-400
@@ -68,26 +65,15 @@ export function PulseLogo({
         aria-label={showWordmark ? undefined : title}
       >
         {!showWordmark && <title>{title}</title>}
-        {BARS.map((b) => (
-          <rect
-            key={b.x}
-            x={b.x}
-            y={BASELINE - b.h}
-            width={BAR_W}
-            height={b.h}
-            rx={BAR_R}
-            fill="currentColor"
-            opacity={b.opacity}
-          />
-        ))}
-        <rect
-          x={ACCENT_BAR.x}
-          y={BASELINE - ACCENT_BAR.h}
-          width={BAR_W}
-          height={ACCENT_BAR.h}
-          rx={BAR_R}
-          fill={accent}
+        <path
+          d={WAVE_PATH}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={WAVE_STROKE}
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
+        <circle cx={ACCENT_NODE.cx} cy={ACCENT_NODE.cy} r={ACCENT_NODE.r} fill={accent} />
       </svg>
       {showWordmark && (
         <span

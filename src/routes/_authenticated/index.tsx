@@ -78,10 +78,12 @@ import {
 import {
   HeroPanel,
   HeroStat,
+  MetricCard,
   ProgressRing,
   RankedRow,
   SectionHeading,
 } from "@/components/dashboard/Surfaces";
+import { PulseLogo } from "@/components/PulseLogo";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
@@ -206,11 +208,18 @@ function HomeHeader({
   role,
   actions,
   metrics,
+  heroActions,
 }: {
   role: AppRole;
   actions?: React.ReactNode;
   /** Hero-weight figures rendered beside the greeting on wide screens. */
   metrics?: React.ReactNode;
+  /**
+   * Quick actions rendered INSIDE the hero surface (below the greeting and
+   * figures, above a hairline) so the hero reads as one command area instead
+   * of a dark panel with unrelated buttons floating under it.
+   */
+  heroActions?: React.ReactNode;
 }) {
   const { profile, user } = useAuth();
   const { workspace, ready } = useWorkspace();
@@ -254,8 +263,13 @@ function HomeHeader({
       <HeroPanel>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
-              {ROLE_EYEBROW[role]}
+            {/* Brand + role eyebrow on one line: the hero is the one surface
+                that carries Pulse identity inside the app shell. */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                {ROLE_EYEBROW[role]}
+              </div>
+              <PulseLogo variant="light" className="h-5 shrink-0 opacity-90" />
             </div>
             <h1 className="mt-1.5 font-display text-2xl font-extrabold tracking-tight md:text-3xl">
               שלום, {displayName}
@@ -267,6 +281,11 @@ function HomeHeader({
           </div>
           {metrics}
         </div>
+        {heroActions && (
+          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/15 pt-4">
+            {heroActions}
+          </div>
+        )}
       </HeroPanel>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       {role === "admin" && workspace.type === "team" && (
@@ -507,6 +526,15 @@ function AdminShortcutsGrid() {
 // ============================================================================
 // Team Manager
 // ============================================================================
+
+// Quick-action styles for buttons living INSIDE the dark hero: quiet actions
+// are translucent white pills; the one primary CTA is the cyan brand accent
+// with navy text (the same accent the hero's progress ring uses).
+const HERO_ACTION_QUIET =
+  "border border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white";
+const HERO_ACTION_PRIMARY =
+  "bg-brand-accent text-brand-navy hover:bg-brand-accent/90";
+
 function ManagerHome() {
   const { state } = useApp();
   const { reps, announcements, competitions } = state;
@@ -627,6 +655,9 @@ function ManagerHome() {
       ? (heroPrimary?.kpiProfile ?? DEFAULT_KPI_PROFILE)
       : (profileByTeamId.get(workspaceTeamId ?? "") ?? DEFAULT_KPI_PROFILE)
   ];
+  // Calendar context for the KPI row — same helpers the rep home uses.
+  const wdRemaining = workdaysRemaining();
+  const wdTotal = workdaysInMonth();
 
   return (
     <div className="space-y-8">
@@ -660,21 +691,24 @@ function ManagerHome() {
             </div>
           </div>
         }
-        actions={
+        heroActions={
           <>
             <ManualPerformanceDialog
               sourceScreen="manager-home"
               trigger={
-                <Button variant="outline" size="sm">
+                <Button size="sm" className={HERO_ACTION_QUIET}>
                   <TrendingUp className="ms-1 h-4 w-4" />
                   עדכון ביצועים ידני
                 </Button>
               }
             />
-            <Button asChild variant="outline" size="sm">
-              <Link to="/feedback"><Headphones className="ms-1 h-4 w-4" />הוספת האזנה</Link>
+            <Button asChild size="sm" className={HERO_ACTION_QUIET}>
+              <Link to="/feedback">
+                <Headphones className="ms-1 h-4 w-4" />
+                הוספת האזנה
+              </Link>
             </Button>
-            <Button asChild variant="outline" size="sm">
+            <Button asChild size="sm" className={HERO_ACTION_QUIET}>
               {/* One selected team is a team-manager assumption — a scope
                   manager sets targets across teams, so the label says so. */}
               <Link to="/targets">
@@ -682,13 +716,15 @@ function ManagerHome() {
                 {scopedManager ? SCOPE_TARGETS_ACTION_LABEL : TEAM_TARGETS_ACTION_LABEL}
               </Link>
             </Button>
-            <Button asChild size="sm">
-              <Link to="/competitions"><Trophy className="ms-1 h-4 w-4" />יצירת תחרות</Link>
+            <Button asChild size="sm" className={HERO_ACTION_PRIMARY}>
+              <Link to="/competitions">
+                <Trophy className="ms-1 h-4 w-4" />
+                יצירת תחרות
+              </Link>
             </Button>
           </>
         }
       />
-
 
       {/* §Simplification (progressive disclosure): the first screen answers
           only the manager's four operating questions — how fresh is the data,
@@ -698,112 +734,170 @@ function ManagerHome() {
           removed. */}
       <DataFreshnessBar teamId={workspaceTeamId} />
 
-      {/* A business-scope manager's PRIMARY view is the teams in their scope
+      {/* Primary KPI row — the same four figures the hero and cards below
+          already own (official target, month-to-date result, remainder and
+          the calendar), promoted to rich metric cards. Nothing here is
+          derived beyond max(0, target − result); a missing target stays a
+          dash, never a fabricated number or trend. */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+        <MetricCard
+          icon={Target}
+          label={heroLabels.target}
+          value={heroTarget == null ? "—" : formatNum(heroTarget)}
+          sub={`יעד ${formatMonthIL(currentGoalMonth())}`}
+          tone="primary"
+        />
+        <MetricCard
+          icon={Gauge}
+          label={heroLabels.result}
+          value={formatNum(heroCompleted)}
+          sub={heroPct == null ? undefined : `${formatPct(heroPct)} ${heroCaption}`}
+          tone="accent"
+        />
+        <MetricCard
+          icon={TrendingUp}
+          label="נותר ליעד"
+          value={heroTarget == null ? "—" : formatNum(Math.max(0, heroTarget - heroCompleted))}
+          sub={
+            scopedManager && heroPrimary
+              ? `${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
+              : heroTarget != null && heroCompleted >= heroTarget
+                ? "היעד הושג"
+                : undefined
+          }
+          tone={heroTarget != null && heroCompleted >= heroTarget ? "success" : "primary"}
+        />
+        <MetricCard
+          icon={CalendarClock}
+          label="ימי עבודה שנותרו"
+          value={String(wdRemaining)}
+          sub={`מתוך ${wdTotal} בחודש`}
+          tone="warning"
+        />
+      </div>
+
+      {/* Dashboard zone: on desktop the page stops being one flat stack —
+          team status and operational sections form the wide work column,
+          while people/insights/activity live in a persistent attention
+          rail. Below xl everything stacks in the same order as before. */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <div className="min-w-0 space-y-6 xl:col-span-2">
+          {/* A business-scope manager's PRIMARY view is the teams in their scope
           — grouped by their level, labeled by each team's own KPI profile —
           with missing targets broken down by team. The per-rep pace detail
           becomes a drill-down into the selected team below. A plain team
           manager keeps the exact single-team layout. */}
-      {scopedManager && (
-        <>
-          <ScopeOverviewCard
-            groups={scopeGroups}
-            aggregates={scopeAggregates}
-            isLoading={scopeCardsLoading}
-            isError={scopeCardsError}
-            onSelectTeam={setWorkspaceTeam}
-          />
-          <ScopeMissingTargetsCard
-            rows={scopeMissing}
-            isLoading={scopeCardsLoading}
-            isError={scopeCardsError}
-          />
-        </>
-      )}
-
-      {!scopedManager && workspace.type === "team" && (
-        <TeamCard
-          teamName={workspace.teamName}
-          teamActive={cloudTeams.find((t) => t.id === workspace.teamId)?.active ?? true}
-          reps={scopedReps}
-          teamTarget={teamGoal.targetValue}
-          targetsLoading={teamGoal.isLoading || teamsLoading}
-          targetsError={teamGoal.isError || teamsError}
-          kpiProfile={profileByTeamId.get(workspace.teamId) ?? DEFAULT_KPI_PROFILE}
-          renewal={renewal}
-        />
-      )}
-
-      {!scopedManager && (
-        <TeamPaceCard
-          reps={scopedReps}
-          goalsByRepId={repGoals.goalsByRepId}
-          isLoading={state.repsLoading || repGoals.isLoading}
-          isError={!!state.repsError || repGoals.isError}
-        />
-      )}
-
-      {/* For a scope manager the per-rep pace detail is SECONDARY: it lives
-          behind the selected-team fold, not on the first screen. */}
-      {scopedManager && (
-        <CollapsibleSection title={SCOPE_SELECTED_TEAM_SECTION_TITLE}>
-          {workspace.type === "team" ? (
-            <div className="space-y-4">
-              <TeamCard
-                teamName={workspace.teamName}
-                teamActive={cloudTeams.find((t) => t.id === workspace.teamId)?.active ?? true}
-                reps={scopedReps}
-                teamTarget={teamGoal.targetValue}
-                targetsLoading={teamGoal.isLoading || teamsLoading}
-                targetsError={teamGoal.isError || teamsError}
-                kpiProfile={profileByTeamId.get(workspace.teamId) ?? DEFAULT_KPI_PROFILE}
-                renewal={renewal}
+          {scopedManager && (
+            <>
+              <ScopeOverviewCard
+                groups={scopeGroups}
+                aggregates={scopeAggregates}
+                isLoading={scopeCardsLoading}
+                isError={scopeCardsError}
+                onSelectTeam={setWorkspaceTeam}
               />
-              <TeamPaceCard
-                reps={scopedReps}
-                goalsByRepId={repGoals.goalsByRepId}
-                isLoading={state.repsLoading || repGoals.isLoading}
-                isError={!!state.repsError || repGoals.isError}
+              <ScopeMissingTargetsCard
+                rows={scopeMissing}
+                isLoading={scopeCardsLoading}
+                isError={scopeCardsError}
               />
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
-              {SCOPE_SELECT_TEAM_HINT}
-            </div>
+            </>
           )}
-        </CollapsibleSection>
-      )}
 
-      <CollapsibleSection title="שגרת בוקר מלאה">
-        <MorningRoutine />
-      </CollapsibleSection>
+          {!scopedManager && workspace.type === "team" && (
+            <TeamCard
+              teamName={workspace.teamName}
+              teamActive={cloudTeams.find((t) => t.id === workspace.teamId)?.active ?? true}
+              reps={scopedReps}
+              teamTarget={teamGoal.targetValue}
+              targetsLoading={teamGoal.isLoading || teamsLoading}
+              targetsError={teamGoal.isError || teamsError}
+              kpiProfile={profileByTeamId.get(workspace.teamId) ?? DEFAULT_KPI_PROFILE}
+              renewal={renewal}
+            />
+          )}
 
-      <CollapsibleSection title="תובנות ומצטיינים">
-        <InsightsCard
-          reps={scopedReps}
-          repGoalsByRepId={repGoals.goalsByRepId}
-          isLoading={state.repsLoading || repGoals.isLoading}
-          isError={!!state.repsError || repGoals.isError}
-        />
-        <TopPerformersCard
-          reps={scopedReps}
-          goalsByRepId={repGoals.goalsByRepId}
-          isLoading={state.repsLoading || repGoals.isLoading}
-          isError={!!state.repsError || repGoals.isError}
-        />
-      </CollapsibleSection>
+          {!scopedManager && (
+            <TeamPaceCard
+              reps={scopedReps}
+              goalsByRepId={repGoals.goalsByRepId}
+              isLoading={state.repsLoading || repGoals.isLoading}
+              isError={!!state.repsError || repGoals.isError}
+            />
+          )}
 
-      <CollapsibleSection title="משוב, תחרויות והודעות">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <TeamFeedbackCard repIds={scopedRepIds} reps={scopedReps} className="lg:col-span-2" />
-          <TeamCompetitionsCard reps={scopedReps} />
+          {/* For a scope manager the per-rep pace detail is SECONDARY: it lives
+          behind the selected-team fold, not on the first screen. */}
+          {scopedManager && (
+            <CollapsibleSection title={SCOPE_SELECTED_TEAM_SECTION_TITLE}>
+              {workspace.type === "team" ? (
+                <div className="space-y-4">
+                  <TeamCard
+                    teamName={workspace.teamName}
+                    teamActive={cloudTeams.find((t) => t.id === workspace.teamId)?.active ?? true}
+                    reps={scopedReps}
+                    teamTarget={teamGoal.targetValue}
+                    targetsLoading={teamGoal.isLoading || teamsLoading}
+                    targetsError={teamGoal.isError || teamsError}
+                    kpiProfile={profileByTeamId.get(workspace.teamId) ?? DEFAULT_KPI_PROFILE}
+                    renewal={renewal}
+                  />
+                  <TeamPaceCard
+                    reps={scopedReps}
+                    goalsByRepId={repGoals.goalsByRepId}
+                    isLoading={state.repsLoading || repGoals.isLoading}
+                    isError={!!state.repsError || repGoals.isError}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+                  {SCOPE_SELECT_TEAM_HINT}
+                </div>
+              )}
+            </CollapsibleSection>
+          )}
+
+          <CollapsibleSection title="שגרת בוקר מלאה">
+            <MorningRoutine />
+          </CollapsibleSection>
+
+          <CollapsibleSection title="משוב, תחרויות והודעות">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <TeamFeedbackCard repIds={scopedRepIds} reps={scopedReps} className="lg:col-span-2" />
+              <TeamCompetitionsCard reps={scopedReps} />
+            </div>
+            <AnnouncementsCard announcements={announcements} isStaff />
+          </CollapsibleSection>
+
+          <CollapsibleSection title="קיצורי תוכן">
+            <ContentShortcutsRow
+              articleCount={state.articles.length}
+              activeCompetition={competitions.find((c) => c.active)?.name ?? null}
+            />
+          </CollapsibleSection>
         </div>
-        <AnnouncementsCard announcements={announcements} isStaff />
-      </CollapsibleSection>
 
-      <CollapsibleSection title="פעילות אחרונה וקיצורי תוכן">
-        <RecentActivityCard />
-        <ContentShortcutsRow articleCount={state.articles.length} activeCompetition={competitions.find((c) => c.active)?.name ?? null} />
-      </CollapsibleSection>
+        {/* Attention rail — people first: who leads, what stands out, what
+            happened. Previously all of this hid inside collapsed sections;
+            on desktop it is now permanently visible beside the work column.
+            Same components, same data, no new derivations. */}
+        <aside className="min-w-0 space-y-4">
+          <SectionHeading title="אנשים ותובנות" />
+          <TopPerformersCard
+            reps={scopedReps}
+            goalsByRepId={repGoals.goalsByRepId}
+            isLoading={state.repsLoading || repGoals.isLoading}
+            isError={!!state.repsError || repGoals.isError}
+          />
+          <InsightsCard
+            reps={scopedReps}
+            repGoalsByRepId={repGoals.goalsByRepId}
+            isLoading={state.repsLoading || repGoals.isLoading}
+            isError={!!state.repsError || repGoals.isError}
+          />
+          <RecentActivityCard />
+        </aside>
+      </div>
     </div>
   );
 }
@@ -1275,7 +1369,8 @@ function InsightsCard({ reps, repGoalsByRepId, teamGoalsByTeamId, isLoading, isE
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* Single column: this card now lives in the narrow attention rail. */}
+        <div className="grid grid-cols-1 gap-2.5">
           {insights.map((t, i) => (
             <div key={i} className="flex items-start gap-3 rounded-xl border p-3 bg-accent/30">
               <Sparkles className="h-4 w-4 text-primary mt-0.5 shrink-0" />
