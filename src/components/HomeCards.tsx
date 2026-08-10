@@ -205,21 +205,26 @@ function PaceList({
         {title} · {rows.length}
       </div>
       <ul className="space-y-1">
-        {rows.slice(0, 5).map((r) => (
-          <li
-            key={r.repId}
-            className="flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-1.5"
-          >
-            <span className="truncate text-sm">{r.repName || repNameOf(reps, r.repId)}</span>
-            <Badge
-              variant="outline"
-              className={cn("shrink-0 text-xs", ACHIEVEMENT_BADGE_CLASS[tone])}
+        {rows.slice(0, 5).map((r) => {
+          const name = r.repName || repNameOf(reps, r.repId);
+          return (
+            <li
+              key={r.repId}
+              className="flex items-center gap-2 rounded-lg bg-surface-subtle px-2.5 py-1.5"
             >
-              {r.achievementPct !== null ? formatPct(r.achievementPct) : "—"}
-            </Badge>
-          </li>
-        ))}
+              <InitialsAvatar name={name} className="h-7 w-7 text-[10px]" />
+              <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
+              <Badge
+                variant="outline"
+                className={cn("shrink-0 text-xs", ACHIEVEMENT_BADGE_CLASS[tone])}
+              >
+                {r.achievementPct !== null ? formatPct(r.achievementPct) : "—"}
+              </Badge>
+            </li>
+          );
+        })}
       </ul>
+
       {rows.length > 5 && (
         <div className="text-xs text-muted-foreground">ועוד {rows.length - 5} נציגים</div>
       )}
