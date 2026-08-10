@@ -38,6 +38,19 @@ import {
   type ImportFieldKey, type ImportHistoryEntry, type TargetGoalSnapshotEntry,
 } from "@/lib/import-store";
 import { processRows, type ProcessedRow, type ResolvedAction, type RawRow } from "@/lib/import-processing";
+import {
+  filterImportPreviewRows,
+  getImportPreviewFilterCounts,
+  paginateImportPreviewRows,
+  pickDefaultImportPreviewFilter,
+  IMPORT_CONFIRM_INCLUDES_HIDDEN_NOTE,
+  IMPORT_PREVIEW_DEFAULT_PAGE_SIZE,
+  IMPORT_PREVIEW_DISPLAY_FILTER_NOTE,
+  IMPORT_PREVIEW_FILTER_LABEL,
+  IMPORT_PREVIEW_FILTERS,
+  IMPORT_PREVIEW_PAGE_SIZES,
+  type ImportPreviewFilter,
+} from "@/lib/import-preview";
 
 import type { Rep } from "@/lib/seed";
 import { formatDateIL } from "@/lib/format";
@@ -1018,7 +1031,25 @@ function PreviewStep({
   criticalCount: number; warnCount: number;
 }) {
   const matchNameById = matchNames;
-  const shown = processed.slice(0, 20);
+  // Display-only filtering/search/pagination over the ALREADY-processed rows
+  // (see import-preview.ts). The confirm step and every count above the table
+  // keep reading the FULL processed array; rows keep their original
+  // row.index, so actions always target the right row regardless of what the
+  // table currently shows.
+  const [filter, setFilter] = useState<ImportPreviewFilter>(() =>
+    pickDefaultImportPreviewFilter(processed),
+  );
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(IMPORT_PREVIEW_DEFAULT_PAGE_SIZE);
+  const filterCounts = useMemo(() => getImportPreviewFilterCounts(processed), [processed]);
+  const filteredRows = useMemo(
+    () => filterImportPreviewRows(processed, filter, search, matchNameById),
+    [processed, filter, search, matchNameById],
+  );
+  const pag = paginateImportPreviewRows(filteredRows, page, pageSize);
+  const shown = pag.pageRows;
+  const isFilteredView = filter !== "all" || search.trim() !== "";
   const inactiveMatchCount = processed.filter((p) => p.matchedInactive).length;
   const showRenewalColumns = processed.some(
     (p) => p.renewalOpportunities != null || p.completedRenewals != null || p.renewalFieldsSkipped,
@@ -1065,7 +1096,42 @@ function PreviewStep({
         </Alert>
       )}
 
-      <div className="text-xs text-muted-foreground">מוצגות 20 השורות הראשונות מתוך {processed.length}.</div>
+      {/* Filter chips — zero-count filters are hidden to reduce noise;
+          "הכול" always stays so the full list is one click away. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {IMPORT_PREVIEW_FILTERS.filter((f) => f === "all" || filterCounts[f] > 0).map((f) => (
+          <Button
+            key={f}
+            type="button"
+            size="sm"
+            variant={filter === f ? "default" : "outline"}
+            className="h-8"
+            onClick={() => {
+              setFilter(f);
+              setPage(1);
+            }}
+          >
+            {IMPORT_PREVIEW_FILTER_LABEL[f]} ({filterCounts[f]})
+          </Button>
+        ))}
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          placeholder="חיפוש לפי שם נציג או צוות"
+          className="h-8 w-56"
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>
+          מוצגות שורות {pag.from}–{pag.to} מתוך {pag.total}
+          {isFilteredView && ` · מסונן מתוך ${processed.length} שורות`}
+        </span>
+        {isFilteredView && <span>{IMPORT_PREVIEW_DISPLAY_FILTER_NOTE}</span>}
+      </div>
 
       <div className="overflow-x-auto rounded-lg border">
         <Table>
@@ -1156,6 +1222,62 @@ function PreviewStep({
         </Table>
       </div>
 
+      {pag.total === 0 && (
+        <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+          אין שורות התואמות את הסינון הנוכחי.
+        </div>
+      )}
+
+      {/* Client-side pagination over the filtered rows. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            disabled={pag.page <= 1}
+            onClick={() => setPage(pag.page - 1)}
+          >
+            <ArrowRight className="me-1 h-3.5 w-3.5" /> הקודם
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            עמוד {pag.page} מתוך {pag.totalPages}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            disabled={pag.page >= pag.totalPages}
+            onClick={() => setPage(pag.page + 1)}
+          >
+            הבא <ArrowLeft className="ms-1 h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground">שורות בעמוד</Label>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => {
+              setPageSize(Number(v));
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {IMPORT_PREVIEW_PAGE_SIZES.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack}><ArrowRight className="me-1 h-4 w-4" /> חזרה</Button>
         <Button onClick={onNext}>המשך לאישור <ArrowLeft className="ms-1 h-4 w-4" /></Button>
@@ -1224,8 +1346,9 @@ function ConfirmStep({
         <CheckCircle2 className="h-4 w-4" />
         <AlertTitle>סיכום לפני ייבוא</AlertTitle>
         <AlertDescription>
-          קובץ: <b>{fileName}</b>. סה"כ {processed.length} שורות · {warnCount} אזהרות · {criticalCount} שגיאות.
-          פעולה זו לא תשנה הערות מנהל, האזנות, משימות, מאמרים או תחרויות.
+          קובץ: <b>{fileName}</b>. סה"כ {processed.length} שורות · {warnCount} אזהרות ·{" "}
+          {criticalCount} שגיאות. פעולה זו לא תשנה הערות מנהל, האזנות, משימות, מאמרים או תחרויות.
+          <div className="mt-1">{IMPORT_CONFIRM_INCLUDES_HIDDEN_NOTE}</div>
         </AlertDescription>
       </Alert>
 
