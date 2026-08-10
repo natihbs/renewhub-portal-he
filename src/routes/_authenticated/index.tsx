@@ -599,12 +599,70 @@ function ManagerHome() {
       })()
     : null;
 
+  // Hero figures: the primary KPI profile for a scope manager, the selected
+  // team for a plain team manager. Nothing new is derived — these are the
+  // same values the cards below already render, promoted to hero weight so
+  // the month's headline is visible before any scrolling. A missing target
+  // stays a dash and a null ring, never a fabricated 0%.
+  const heroPrimary = scopedManager ? (scopeAggregates[0] ?? null) : null;
+  const heroTarget = scopedManager
+    ? (heroPrimary?.target ?? null)
+    : (teamGoal.targetValue ?? null);
+  const heroCompleted = scopedManager
+    ? (heroPrimary?.completed ?? 0)
+    : scopedReps.reduce((a, r) => a + r.currentResult, 0);
+  const heroPct = scopedManager
+    ? (heroPrimary?.pct ?? null)
+    : heroTarget !== null && heroTarget > 0
+      ? calculateAchievement(heroCompleted, heroTarget)
+      : null;
+  const heroCaption = scopedManager
+    ? heroPrimary
+      ? SCOPE_METRIC_LABELS[heroPrimary.kpiProfile].rate
+      : "אחוז עמידה"
+    : (profileByTeamId.get(workspaceTeamId ?? "") ?? DEFAULT_KPI_PROFILE) === "renewals"
+      ? "אחוז חידוש"
+      : "אחוז עמידה";
+  const heroLabels = SCOPE_METRIC_LABELS[
+    scopedManager
+      ? (heroPrimary?.kpiProfile ?? DEFAULT_KPI_PROFILE)
+      : (profileByTeamId.get(workspaceTeamId ?? "") ?? DEFAULT_KPI_PROFILE)
+  ];
+
   return (
     <div className="space-y-8">
       <HomeHeader
         role="manager"
+        metrics={
+          <div className="flex items-center gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+            <ProgressRing value={heroPct} caption={heroCaption} tone="onDark" />
+            <div className="min-w-0 space-y-2 text-sm">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-white/60">
+                  {heroLabels.target}
+                </div>
+                <div className="num font-display text-lg font-bold">
+                  {heroTarget == null ? "—" : formatNum(heroTarget)}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-white/60">
+                  {heroLabels.result}
+                </div>
+                <div className="num font-display text-lg font-bold">{formatNum(heroCompleted)}</div>
+              </div>
+              <div className="text-xs text-white/60">
+                {scopedManager
+                  ? heroPrimary
+                    ? `${KPI_PROFILE_LABEL[heroPrimary.kpiProfile]} · ${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
+                    : "אין צוותים בהיקף"
+                  : `יעד ${formatMonthIL(currentGoalMonth())}`}
+              </div>
+            </div>
+          </div>
+        }
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             <ManualPerformanceDialog
               sourceScreen="manager-home"
               trigger={
@@ -628,9 +686,10 @@ function ManagerHome() {
             <Button asChild size="sm">
               <Link to="/competitions"><Trophy className="ms-1 h-4 w-4" />יצירת תחרות</Link>
             </Button>
-          </div>
+          </>
         }
       />
+
 
       {/* §Simplification (progressive disclosure): the first screen answers
           only the manager's four operating questions — how fresh is the data,
