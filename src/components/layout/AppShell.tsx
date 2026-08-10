@@ -53,21 +53,31 @@ function NavRow({ item, label, active, onClick }: { item: NavItem; label: string
       <Link
         to={item.to}
         onClick={onClick}
+        aria-current={active ? "page" : undefined}
         className={cn(
-          "flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-[9px] py-2.5 text-sm font-medium transition-colors sm:pe-9 border-s-[3px]",
+          "relative flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-3 py-2.5 text-sm transition-[background-color,color,box-shadow] duration-150 ease-out sm:pe-9",
           active
-            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-soft border-s-brand-accent"
-            : "border-s-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            ? "bg-sidebar-primary font-semibold text-sidebar-primary-foreground shadow-soft"
+            : "font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         )}
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        {/* Shape + accent bar, not color alone: the active row stays legible
+            for color-vision differences and on the dim navy surface. */}
+        {active && (
+          <span
+            aria-hidden
+            className="absolute inset-block-2 start-0 w-1 rounded-full bg-brand-accent"
+            style={{ top: 8, bottom: 8 }}
+          />
+        )}
+        <Icon className={cn("h-4 w-4 shrink-0", active && "stroke-[2.4]")} />
         <span className="truncate">{label}</span>
       </Link>
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.to); }}
         className={cn(
-          "absolute end-1 top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-md transition-opacity sm:end-2 sm:h-6 sm:w-6",
+          "absolute end-1 top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-md transition-opacity duration-150 sm:end-2 sm:h-6 sm:w-6",
           pinned ? "opacity-100" : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
           active
             ? "text-sidebar-primary-foreground/80 hover:text-sidebar-primary-foreground"
@@ -81,6 +91,7 @@ function NavRow({ item, label, active, onClick }: { item: NavItem; label: string
     </div>
   );
 }
+
 
 const GROUP_TITLE: Record<AppRole, string> = {
   admin: "ניהול מערכת",
