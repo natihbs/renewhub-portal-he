@@ -679,7 +679,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <AdminViewBanner />
 
-        <main className="flex-1 p-4 pb-24 md:p-6 lg:p-8 lg:pb-8 min-w-0">{children}</main>
+        <main className="flex-1 p-4 pb-24 md:p-6 lg:p-8 lg:pb-8 min-w-0">
+          {/* Keyed by pathname so navigation replays the entrance once per
+              route; ultra-wide screens get a centered reading column instead
+              of edge-to-edge cards. */}
+          <div key={pathname} className="page-enter mx-auto w-full max-w-[1440px]">
+            {children}
+          </div>
+        </main>
       </div>
 
       <BottomNav onOpenMenu={() => setOpen(true)} />

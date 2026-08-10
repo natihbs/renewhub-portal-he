@@ -83,6 +83,7 @@ function CommsPage() {
     <div className="space-y-6">
       <PageHeader
         title="מרכז תקשורת"
+        icon={MessageSquare}
         description="יצירה אוטומטית של תקשורת ניהולית מבוססת נתוני הדשבורד - עדכונים, ברכות ומשוב מוכנים לשליחה"
         actions={<Badge variant="secondary" className="gap-1"><Sparkles className="h-3.5 w-3.5" /> מבוסס תבניות חכמות</Badge>}
       />

@@ -421,6 +421,39 @@
   background-color: color-mix(in oklab, var(--color-warning) 8%, var(--color-card));
 }
 
+/* Page identity band behind every route's PageHeader: a faint primary tint
+   over the card surface — related to the hero gradient but far quieter, so
+   the home hero stays the loudest surface in the product. */
+@utility surface-page-header {
+  border: 1px solid color-mix(in oklab, var(--color-primary) 14%, var(--color-border));
+  background-color: var(--color-card);
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--color-primary) 7%, var(--color-card)) 0%,
+    var(--color-card) 45%,
+    color-mix(in oklab, var(--color-brand-accent) 6%, var(--color-card)) 100%
+  );
+  box-shadow: var(--shadow-soft);
+}
+
+/* Route content entrance: one quiet fade-and-rise. Duration sits inside the
+   150-200ms micro-interaction budget and the global prefers-reduced-motion
+   override above collapses it to effectively zero. */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility page-enter {
+  animation: page-enter 0.2s ease-out both;
+}
+
 /* Section eyebrow rule used above dashboard groups. */
 @utility section-rule {
   display: inline-block;

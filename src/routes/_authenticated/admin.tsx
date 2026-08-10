@@ -61,6 +61,7 @@ function AdminPage() {
     <div className="space-y-6">
       <PageHeader
         title="ניהול המערכת"
+        icon={Sliders}
         description="אזור מרוכז לפעולות ניהול, תכנים ונציגים"
         actions={
           // Development-only utility: resetAll() only does anything in Demo Mode

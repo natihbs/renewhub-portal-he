@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import {
   Users2, Plus, Search, KeyRound, Pencil, UserCheck, UserX, Copy, Mail, ShieldAlert,
   MoreHorizontal, Eye, UsersRound, Link2, Unlink, Trash2, ChevronLeft, ChevronRight,
@@ -254,6 +255,7 @@ function UsersPage() {
     <div className="space-y-6" dir="rtl">
       <PageHeader
         title="ניהול משתמשים"
+        icon={Users2}
         description="מרכז ניהול משתמשים, תפקידים, צוותים וקישורי נציגים"
         actions={<CreateUserDialog teams={teams} managers={managers} onDone={invalidateAll} />}
       />
@@ -511,7 +513,12 @@ function UserTableRow({
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter") onOpenDetails(); }}
     >
-      <TableCell className="font-medium">{user.full_name || "—"}</TableCell>
+      <TableCell className="font-medium">
+        <div className="flex items-center gap-2.5">
+          <InitialsAvatar name={user.full_name || user.email || "?"} className="h-8 w-8" />
+          <span className="truncate">{user.full_name || "—"}</span>
+        </div>
+      </TableCell>
       <TableCell dir="ltr" className="text-right">{user.email}</TableCell>
       <TableCell><HealthBadge health={user.health} /></TableCell>
       <TableCell>
