@@ -173,8 +173,11 @@
 }
 
 .dark {
-  --brand-background: #15121b;
-  --brand-surface: #1e1a26;
+  --brand-background: #12111c;
+  --brand-surface: #1b1a29;
+  --brand-navy: #16152a;
+  --brand-accent: #67e8f9;
+  --brand-accent-strong: #22d3ee;
   --brand-text: #f3f4f6;
   --brand-muted: #a6a8b3;
   --brand-border: color-mix(in oklab, white 12%, transparent);
@@ -187,11 +190,11 @@
   --popover-foreground: var(--brand-text);
   --primary: var(--brand-primary-light);
   --primary-foreground: #ffffff;
-  --secondary: #2a2530;
+  --secondary: #272438;
   --secondary-foreground: var(--brand-text);
-  --muted: #2a2530;
+  --muted: #272438;
   --muted-foreground: var(--brand-muted);
-  --accent: #2e2438;
+  --accent: #2c2742;
   --accent-foreground: #e7dff5;
   --destructive: #f87171;
   --destructive-foreground: #ffffff;
@@ -201,7 +204,7 @@
      no separate darker/lighter variant needed here, unlike light mode. */
   --success-foreground: var(--success);
   --warning-foreground: var(--warning);
-  --info: #5cbdb9;
+  --info: #5cc9dd;
   --info-foreground: var(--info);
   --surface-subtle: color-mix(in oklab, white 6%, transparent);
   --chat-surface: #16241f;
@@ -213,18 +216,19 @@
   --ring: var(--brand-primary-light);
   --chart-1: var(--brand-primary-light);
   --chart-2: #8b5cf6;
-  --chart-3: var(--brand-accent);
+  --chart-3: var(--brand-accent-strong);
   --chart-4: #4ade80;
   --chart-5: #8892a0;
-  --sidebar: #2f1148;
-  --sidebar-foreground: #ffffff;
-  --sidebar-primary: var(--brand-primary-light);
+  --sidebar: var(--brand-navy);
+  --sidebar-foreground: #eef0f8;
+  --sidebar-primary: color-mix(in oklab, white 6%, var(--brand-primary-light));
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: color-mix(in oklab, white 14%, #2f1148);
+  --sidebar-accent: color-mix(in oklab, white 10%, var(--brand-navy));
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: color-mix(in oklab, white 14%, transparent);
-  --sidebar-ring: var(--brand-primary-light);
+  --sidebar-border: color-mix(in oklab, white 12%, transparent);
+  --sidebar-ring: var(--brand-accent-strong);
 }
+
 
 @layer base {
   * {
