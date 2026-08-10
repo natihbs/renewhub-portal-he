@@ -128,7 +128,7 @@ function AuthPage() {
       <div className="hidden lg:flex flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground">
         <PulseLogo variant="light" className="h-9" />
         <div className="max-w-sm">
-          <HeartbeatVisual />
+          <RhythmVisual />
           <p className="mt-8 text-3xl font-extrabold leading-snug text-balance">{APP_TAGLINE}</p>
           <p className="mt-3 text-sidebar-foreground/70">{APP_DESCRIPTOR} · מערכת לניהול צוותי מכירות</p>
         </div>
