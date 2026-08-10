@@ -78,11 +78,9 @@ import {
 import {
   HeroPanel,
   HeroStat,
-  InitialsAvatar,
   ProgressRing,
   RankedRow,
   SectionHeading,
-  StatTile,
 } from "@/components/dashboard/Surfaces";
 import { cn } from "@/lib/utils";
 
