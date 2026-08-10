@@ -644,17 +644,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ModeToggle />
               </div>
             )}
-            <NotificationBell />
             {/* Scope controls read as one "context" segment rather than two
                 unrelated selects. `empty:hidden` keeps the frame from showing
                 when neither switcher renders (non-admin, single workspace). */}
-            <div className="flex items-center gap-1 rounded-xl border bg-background/60 p-0.5 empty:hidden">
+            <div className="flex items-center gap-1 rounded-xl bg-surface-subtle p-1 empty:hidden">
               <AdminViewSwitcher />
               <WorkspaceSwitcher />
             </div>
             <RoleSwitcher />
+            {/* Quiet hairline separates "where am I looking" (context) from
+                "who am I" (account), instead of one long undifferentiated row. */}
+            <span aria-hidden className="hidden sm:block h-6 w-px bg-border/70" />
+            <NotificationBell />
             <UserMenu />
           </div>
+
 
         </header>
 
