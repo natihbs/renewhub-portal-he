@@ -188,7 +188,22 @@ function ErrorState({ message, onRetry, compact }: { message?: string; onRetry?:
  * console and offers the drill-down into that team's business view on
  * /performance, which does honor the workspace.
  */
-function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNode }) {
+const ROLE_EYEBROW: Record<AppRole, string> = {
+  admin: "קונסולת מערכת",
+  manager: "לוח הניהול שלי",
+  representative: "המסך שלי",
+};
+
+function HomeHeader({
+  role,
+  actions,
+  metrics,
+}: {
+  role: AppRole;
+  actions?: React.ReactNode;
+  /** Hero-weight figures rendered beside the greeting on wide screens. */
+  metrics?: React.ReactNode;
+}) {
   const { profile, user } = useAuth();
   const { workspace, ready } = useWorkspace();
   const { state } = useApp();
@@ -224,17 +239,28 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
         : me?.teamName || NO_TEAM_LABEL;
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">שלום, {displayName}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{scopeLine}</p>
-          {role === "manager" && businessScope?.scopeLabel && (
-            <p className="text-xs text-muted-foreground mt-0.5">{businessScope.scopeLabel}</p>
-          )}
+    <div className="space-y-3">
+      {/* Hero zone: identity and the month's headline figures on one dominant
+          brand surface, so the first screen has an obvious entry point
+          instead of an even stack of equal cards. */}
+      <HeroPanel>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+              {ROLE_EYEBROW[role]}
+            </div>
+            <h1 className="mt-1.5 font-display text-2xl font-extrabold tracking-tight md:text-3xl">
+              שלום, {displayName}
+            </h1>
+            <p className="mt-1 text-sm text-white/75">{scopeLine}</p>
+            {role === "manager" && businessScope?.scopeLabel && (
+              <p className="mt-0.5 text-xs text-white/60">{businessScope.scopeLabel}</p>
+            )}
+          </div>
+          {metrics}
         </div>
-        {actions}
-      </div>
+      </HeroPanel>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       {role === "admin" && workspace.type === "team" && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2.5 text-xs text-muted-foreground">
           <span>
@@ -251,6 +277,8 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
     </div>
   );
 }
+
+
 
 // ============================================================================
 // Administrator — system administration console.
