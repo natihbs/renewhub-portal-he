@@ -58,7 +58,8 @@ function CompetitionDateRange({ start, end, className }: { start: string; end: s
 }
 
 function CompetitionStatusBadge({ comp }: { comp: Competition }) {
-  if (comp.active) return <Badge className="bg-white/20 hover:bg-white/20 text-white border-0">פעילה</Badge>;
+  if (comp.active) return <Badge className="border-0 bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/20">פעילה</Badge>;
+
   if (comp.archived) return <Badge variant="secondary">בארכיון</Badge>;
   return <Badge variant="outline">הסתיימה</Badge>;
 }
@@ -553,9 +554,10 @@ function CompetitionDetailsSheet({ comp, onOpenChange, isManager }: {
 }
 
 function MedalIcon({ place }: { place: number }) {
-  if (place === 1) return <Medal className="h-6 w-6 text-yellow-500" />;
-  if (place === 2) return <Medal className="h-6 w-6 text-gray-400" />;
-  if (place === 3) return <Medal className="h-6 w-6 text-amber-700" />;
+  if (place === 1) return <Medal className="h-6 w-6 text-[color:var(--brand-accent)]" />;
+  if (place === 2) return <Medal className="h-6 w-6 text-muted-foreground" />;
+  if (place === 3) return <Medal className="h-6 w-6 text-warning-foreground" />;
+
   return <div className="grid h-6 w-6 place-items-center text-xs font-bold text-muted-foreground">{place}</div>;
 }
 

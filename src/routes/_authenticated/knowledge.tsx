@@ -120,7 +120,7 @@ function ArticleCard({ article, isManager }: { article: Article; isManager: bool
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-base leading-tight">{article.title}</CardTitle>
-          {article.important && <Star className="h-4 w-4 shrink-0 text-yellow-500 fill-yellow-500" />}
+          {article.important && <Star className="h-4 w-4 shrink-0 fill-current text-[color:var(--brand-accent)]" />}
         </div>
         <div className="flex items-center gap-2 flex-wrap mt-2">
           <Badge variant="secondary">{article.category}</Badge>
@@ -162,7 +162,7 @@ function ArticleCard({ article, isManager }: { article: Article; isManager: bool
           <div className="space-y-3">
             <div className="flex gap-2 flex-wrap">
               <Badge variant="secondary">{article.category}</Badge>
-              {article.important && <Badge className="bg-yellow-500 text-white">חשוב</Badge>}
+              {article.important && <Badge className="border-0 bg-[color:var(--warning)]/15 text-warning-foreground hover:bg-[color:var(--warning)]/15">חשוב</Badge>}
               <span className="text-xs text-muted-foreground">עודכן ב-{formatDateIL(article.updatedAt)}</span>
             </div>
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{article.body}</p>
