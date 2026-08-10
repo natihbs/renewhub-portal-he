@@ -841,7 +841,40 @@ function RepresentativeHome() {
 
   return (
     <div className="space-y-8">
-      <HomeHeader role="representative" />
+      <HomeHeader
+        role="representative"
+        metrics={
+          me && hasTarget ? (
+            <div className="flex items-center gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+              <ProgressRing
+                value={pct}
+                caption={isRenewals ? PERSONAL_RENEWAL_RATE_LABEL : "מהיעד"}
+                tone="onDark"
+              />
+              <div className="grid gap-2 text-sm">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/60">
+                    {isRenewals ? ASSIGNED_RENEWALS_LABEL : "היעד שלי"}
+                  </div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(myGoal.targetValue as number)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/60">נותר ליעד</div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(remaining ?? 0)}
+                  </div>
+                </div>
+                <div className="text-xs text-white/60">
+                  {wdRemaining} ימי עבודה נותרו מתוך {wdTotal}
+                </div>
+              </div>
+            </div>
+          ) : undefined
+        }
+      />
+
 
       {/* No freshness bar here — import freshness is an operator's concern
           (manager/admin homes keep it). A representative can't act on "טרם
