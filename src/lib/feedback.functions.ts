@@ -279,7 +279,8 @@ export const createFeedback = createServerFn({ method: "POST" })
         _improve: data.improve,
         _manager_summary: data.manager_summary,
         _next_task: data.next_task,
-        _schedule_id: data.schedule_id,
+        // Generated RPC types omit nullability for DEFAULT NULL params.
+        _schedule_id: data.schedule_id as string,
         _created_by: ctx.userId,
       })
       .single();
@@ -374,7 +375,7 @@ export const updateFeedback = createServerFn({ method: "POST" })
     const { data: result, error } = await supabaseAdmin
       .rpc("update_feedback_with_revision", {
         _feedback_id: data.feedback_id,
-        _expected_updated_at: data.expected_updated_at,
+        _expected_updated_at: data.expected_updated_at as string,
         _feedback_date: data.feedback_date,
         _call_id: data.call_id,
         _call_type: data.call_type,

@@ -256,7 +256,8 @@ export const toggleChecklistItem = createServerFn({ method: "POST" })
         _user_id: ctx.userId,
         _checklist_date: data.checklist_date,
         _task_key: data.task_key,
-        _team_id: data.team_id,
+        // Generated RPC types omit nullability for DEFAULT NULL params.
+        _team_id: data.team_id as string,
       })
       .single();
     if (error) throw new Error(error.message);

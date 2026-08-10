@@ -1152,13 +1152,15 @@ export const updateRepresentativeMetrics = createServerFn({ method: "POST" })
     const { data: result, error } = await supabaseAdmin
       .rpc("update_representative_metrics_with_team_sync", {
         _rep_id: data.rep_id,
-        _name: applyName ? (data.name as string) : null,
+        // Generated RPC types omit nullability for DEFAULT NULL params; the
+        // paired _apply_* flags are what decide whether a null is meaningful.
+        _name: (applyName ? (data.name as string) : null) as string,
         _apply_name: applyName,
-        _current_result: applyResult ? (data.current_result as number) : null,
+        _current_result: (applyResult ? (data.current_result as number) : null) as number,
         _apply_current_result: applyResult,
-        _monthly_target: applyTarget ? (data.monthly_target as number) : null,
+        _monthly_target: (applyTarget ? (data.monthly_target as number) : null) as number,
         _apply_monthly_target: applyTarget,
-        _team_id: applyTeam ? (data.team_id as string | null) : null,
+        _team_id: (applyTeam ? (data.team_id as string | null) : null) as string,
         _apply_team: applyTeam,
       })
       .single();
