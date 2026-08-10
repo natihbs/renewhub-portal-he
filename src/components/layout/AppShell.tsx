@@ -564,10 +564,13 @@ function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
             type="button"
             onClick={onOpenMenu}
             aria-label="פתיחת תפריט מלא"
-            className="flex w-full min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="flex w-full min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
           >
-            <Menu className="h-5 w-5 shrink-0" />
+            <span className="grid h-7 w-11 place-items-center">
+              <Menu className="h-5 w-5 shrink-0" />
+            </span>
             <span className="leading-none">עוד</span>
+
           </button>
         </li>
       </ul>
