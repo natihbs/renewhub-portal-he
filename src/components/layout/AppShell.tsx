@@ -66,10 +66,10 @@ function NavRow({ item, label, active, onClick }: { item: NavItem; label: string
         {active && (
           <span
             aria-hidden
-            className="absolute inset-block-2 start-0 w-1 rounded-full bg-brand-accent"
-            style={{ top: 8, bottom: 8 }}
+            className="absolute bottom-2 start-0 top-2 w-1 rounded-full bg-brand-accent"
           />
         )}
+
         <Icon className={cn("h-4 w-4 shrink-0", active && "stroke-[2.4]")} />
         <span className="truncate">{label}</span>
       </Link>
@@ -158,13 +158,14 @@ function Brand({ onDark = false }: { onDark?: boolean }) {
     <div className={cn("flex flex-col gap-1.5 px-5 py-5 border-b", onDark ? "border-sidebar-border" : "")}>
       <PulseLogo variant={onDark ? "light" : "dark"} className="h-8" />
       {subtitle && (
-        <div className={cn("text-xs", onDark ? "text-sidebar-foreground/65" : "text-muted-foreground")}>
+        <div className={cn("text-xs", onDark ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
           {subtitle}
         </div>
       )}
     </div>
   );
 }
+
 
 /**
  * Admin-only business-view switcher ("תצוגה") — presentation only, see
