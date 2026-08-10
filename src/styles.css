@@ -365,3 +365,71 @@
 }
 
 
+
+/* --------------------------------------------------------------------------
+ * Phase 2 — dashboard surface hierarchy.
+ * Four deliberate weights so a screen reads at a glance: hero (the one thing
+ * that matters now), standard (Card default), compact (dense stat tiles) and
+ * attention (something is off and needs a decision). Tokens only — no raw
+ * colors at call sites.
+ * ------------------------------------------------------------------------ */
+
+@utility surface-hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--brand-navy) 60%, transparent);
+  background-image: linear-gradient(
+    135deg,
+    var(--brand-navy) 0%,
+    color-mix(in oklab, var(--brand-primary) 70%, var(--brand-navy)) 55%,
+    color-mix(in oklab, var(--brand-primary-light) 60%, var(--brand-navy)) 100%
+  );
+  color: #ffffff;
+  box-shadow: var(--shadow-card);
+  &::after {
+    content: "";
+    position: absolute;
+    inset-block-start: -40%;
+    inset-inline-end: -10%;
+    width: 22rem;
+    height: 22rem;
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle,
+      color-mix(in oklab, var(--brand-accent) 32%, transparent) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+}
+
+/* Dense metric tile: quieter than a Card, still a defined surface. */
+@utility surface-tile {
+  border: 1px solid color-mix(in oklab, var(--color-border) 80%, transparent);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-card);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  &:hover {
+    box-shadow: var(--shadow-soft);
+    border-color: color-mix(in oklab, var(--color-border) 50%, var(--color-primary) 50%);
+  }
+}
+
+/* Something needs a decision — warm edge, never a full alarm fill. */
+@utility surface-attention {
+  border: 1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-border));
+  background-color: color-mix(in oklab, var(--color-warning) 8%, var(--color-card));
+}
+
+/* Section eyebrow rule used above dashboard groups. */
+@utility section-rule {
+  display: inline-block;
+  inline-size: 1.5rem;
+  block-size: 0.1875rem;
+  border-radius: 9999px;
+  background-image: linear-gradient(
+    to left,
+    var(--color-primary),
+    var(--color-brand-accent)
+  );
+}

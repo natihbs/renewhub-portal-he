@@ -39,6 +39,7 @@ import {
   isScopedManagerKind,
   managerHeaderPrimaryLine,
   missingTargetsByTeam,
+  SCOPE_METRIC_LABELS,
   SCOPE_SELECT_TEAM_HINT,
   SCOPE_SELECTED_TEAM_SECTION_TITLE,
   SCOPE_TARGETS_ACTION_LABEL,
@@ -74,6 +75,13 @@ import {
   DataFreshnessBar, TeamPaceCard, TeamFeedbackCard, TeamCompetitionsCard,
   MyFeedbackCard, MyCompetitionsCard, MyTasksCard,
 } from "@/components/HomeCards";
+import {
+  HeroPanel,
+  HeroStat,
+  ProgressRing,
+  RankedRow,
+  SectionHeading,
+} from "@/components/dashboard/Surfaces";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
@@ -188,7 +196,22 @@ function ErrorState({ message, onRetry, compact }: { message?: string; onRetry?:
  * console and offers the drill-down into that team's business view on
  * /performance, which does honor the workspace.
  */
-function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNode }) {
+const ROLE_EYEBROW: Record<AppRole, string> = {
+  admin: "קונסולת מערכת",
+  manager: "לוח הניהול שלי",
+  representative: "המסך שלי",
+};
+
+function HomeHeader({
+  role,
+  actions,
+  metrics,
+}: {
+  role: AppRole;
+  actions?: React.ReactNode;
+  /** Hero-weight figures rendered beside the greeting on wide screens. */
+  metrics?: React.ReactNode;
+}) {
   const { profile, user } = useAuth();
   const { workspace, ready } = useWorkspace();
   const { state } = useApp();
@@ -224,17 +247,28 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
         : me?.teamName || NO_TEAM_LABEL;
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">שלום, {displayName}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{scopeLine}</p>
-          {role === "manager" && businessScope?.scopeLabel && (
-            <p className="text-xs text-muted-foreground mt-0.5">{businessScope.scopeLabel}</p>
-          )}
+    <div className="space-y-3">
+      {/* Hero zone: identity and the month's headline figures on one dominant
+          brand surface, so the first screen has an obvious entry point
+          instead of an even stack of equal cards. */}
+      <HeroPanel>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">
+              {ROLE_EYEBROW[role]}
+            </div>
+            <h1 className="mt-1.5 font-display text-2xl font-extrabold tracking-tight md:text-3xl">
+              שלום, {displayName}
+            </h1>
+            <p className="mt-1 text-sm text-white/75">{scopeLine}</p>
+            {role === "manager" && businessScope?.scopeLabel && (
+              <p className="mt-0.5 text-xs text-white/60">{businessScope.scopeLabel}</p>
+            )}
+          </div>
+          {metrics}
         </div>
-        {actions}
-      </div>
+      </HeroPanel>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       {role === "admin" && workspace.type === "team" && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2.5 text-xs text-muted-foreground">
           <span>
@@ -251,6 +285,8 @@ function HomeHeader({ role, actions }: { role: AppRole; actions?: React.ReactNod
     </div>
   );
 }
+
+
 
 // ============================================================================
 // Administrator — system administration console.
@@ -290,8 +326,27 @@ function AdminHome() {
     <div className="space-y-8">
       <HomeHeader
         role="admin"
+        metrics={
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:w-auto">
+            <HeroStat
+              label="חשבונות"
+              value={isDemo || usersState !== "ready" ? "—" : String(userRows.length)}
+              sub={isDemo ? "מצב הדגמה" : usersState === "ready" ? `${activeUsers} פעילים` : "לא נטען"}
+            />
+            <HeroStat
+              label="צוותים פעילים"
+              value={teamsState === "error" ? "—" : String(activeTeams)}
+              sub={`מתוך ${cloudTeams.length}`}
+            />
+            <HeroStat
+              label="נציגים"
+              value={repsState === "error" ? "—" : String(reps.length)}
+              sub="פעילים בארגון"
+            />
+          </div>
+        }
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             <Button asChild variant="outline" size="sm">
               <Link to="/users"><Users2 className="ms-1 h-4 w-4" />ניהול משתמשים</Link>
             </Button>
@@ -301,42 +356,46 @@ function AdminHome() {
             <Button asChild size="sm">
               <Link to="/admin"><Settings className="ms-1 h-4 w-4" />ניהול המערכת</Link>
             </Button>
-          </div>
+          </>
         }
       />
 
       <DataFreshnessBar teamId={null} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KPICard
-          icon={Users}
-          label="חשבונות משתמשים"
-          value={isDemo ? "—" : String(userRows.length)}
-          sub={isDemo ? "לא נטען במצב הדגמה" : `${activeUsers} פעילים`}
-          state={usersState}
-          to="/users"
-        />
-        <KPICard
-          icon={UsersRound}
-          label="צוותים פעילים"
-          value={String(activeTeams)}
-          sub={`מתוך ${cloudTeams.length} סה"כ`}
-          state={teamsState}
-          to="/teams"
-        />
-        <KPICard
-          icon={Users2}
-          label="נציגים"
-          value={String(reps.length)}
-          sub="פעילים בארגון"
-          state={repsState}
-          to="/representatives"
-        />
+      <div className="space-y-3">
+        <SectionHeading title="מצב המערכת" hint="לחיצה על כרטיס פותחת את מסך הניהול המתאים" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <KPICard
+            icon={Users}
+            label="חשבונות משתמשים"
+            value={isDemo ? "—" : String(userRows.length)}
+            sub={isDemo ? "לא נטען במצב הדגמה" : `${activeUsers} פעילים`}
+            state={usersState}
+            to="/users"
+          />
+          <KPICard
+            icon={UsersRound}
+            label="צוותים פעילים"
+            value={String(activeTeams)}
+            sub={`מתוך ${cloudTeams.length} סה"כ`}
+            state={teamsState}
+            to="/teams"
+          />
+          <KPICard
+            icon={Users2}
+            label="נציגים"
+            value={String(reps.length)}
+            sub="פעילים בארגון"
+            state={repsState}
+            to="/representatives"
+          />
+        </div>
       </div>
 
       <SystemGapsCard reps={reps} teams={cloudTeams} teamsLoading={teamsLoading} teamsError={teamsError} />
 
       <AdminShortcutsGrid />
+
 
       <RecentActivityCard />
     </div>
@@ -422,7 +481,7 @@ function AdminShortcutsGrid() {
   ];
   return (
     <div className="space-y-3">
-      <div className="text-sm font-semibold">ניהול מערכת</div>
+      <SectionHeading title="ניהול מערכת" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {shortcuts.map((c) => {
           const Icon = c.icon;
@@ -539,12 +598,70 @@ function ManagerHome() {
       })()
     : null;
 
+  // Hero figures: the primary KPI profile for a scope manager, the selected
+  // team for a plain team manager. Nothing new is derived — these are the
+  // same values the cards below already render, promoted to hero weight so
+  // the month's headline is visible before any scrolling. A missing target
+  // stays a dash and a null ring, never a fabricated 0%.
+  const heroPrimary = scopedManager ? (scopeAggregates[0] ?? null) : null;
+  const heroTarget = scopedManager
+    ? (heroPrimary?.target ?? null)
+    : (teamGoal.targetValue ?? null);
+  const heroCompleted = scopedManager
+    ? (heroPrimary?.completed ?? 0)
+    : scopedReps.reduce((a, r) => a + r.currentResult, 0);
+  const heroPct = scopedManager
+    ? (heroPrimary?.pct ?? null)
+    : heroTarget !== null && heroTarget > 0
+      ? calculateAchievement(heroCompleted, heroTarget)
+      : null;
+  const heroCaption = scopedManager
+    ? heroPrimary
+      ? SCOPE_METRIC_LABELS[heroPrimary.kpiProfile].rate
+      : "אחוז עמידה"
+    : (profileByTeamId.get(workspaceTeamId ?? "") ?? DEFAULT_KPI_PROFILE) === "renewals"
+      ? "אחוז חידוש"
+      : "אחוז עמידה";
+  const heroLabels = SCOPE_METRIC_LABELS[
+    scopedManager
+      ? (heroPrimary?.kpiProfile ?? DEFAULT_KPI_PROFILE)
+      : (profileByTeamId.get(workspaceTeamId ?? "") ?? DEFAULT_KPI_PROFILE)
+  ];
+
   return (
     <div className="space-y-8">
       <HomeHeader
         role="manager"
+        metrics={
+          <div className="flex items-center gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+            <ProgressRing value={heroPct} caption={heroCaption} tone="onDark" />
+            <div className="min-w-0 space-y-2 text-sm">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-white/60">
+                  {heroLabels.target}
+                </div>
+                <div className="num font-display text-lg font-bold">
+                  {heroTarget == null ? "—" : formatNum(heroTarget)}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-white/60">
+                  {heroLabels.result}
+                </div>
+                <div className="num font-display text-lg font-bold">{formatNum(heroCompleted)}</div>
+              </div>
+              <div className="text-xs text-white/60">
+                {scopedManager
+                  ? heroPrimary
+                    ? `${KPI_PROFILE_LABEL[heroPrimary.kpiProfile]} · ${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
+                    : "אין צוותים בהיקף"
+                  : `יעד ${formatMonthIL(currentGoalMonth())}`}
+              </div>
+            </div>
+          </div>
+        }
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             <ManualPerformanceDialog
               sourceScreen="manager-home"
               trigger={
@@ -568,9 +685,10 @@ function ManagerHome() {
             <Button asChild size="sm">
               <Link to="/competitions"><Trophy className="ms-1 h-4 w-4" />יצירת תחרות</Link>
             </Button>
-          </div>
+          </>
         }
       />
+
 
       {/* §Simplification (progressive disclosure): the first screen answers
           only the manager's four operating questions — how fresh is the data,
@@ -721,7 +839,40 @@ function RepresentativeHome() {
 
   return (
     <div className="space-y-8">
-      <HomeHeader role="representative" />
+      <HomeHeader
+        role="representative"
+        metrics={
+          me && hasTarget ? (
+            <div className="flex items-center gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+              <ProgressRing
+                value={pct}
+                caption={isRenewals ? PERSONAL_RENEWAL_RATE_LABEL : "מהיעד"}
+                tone="onDark"
+              />
+              <div className="grid gap-2 text-sm">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/60">
+                    {isRenewals ? ASSIGNED_RENEWALS_LABEL : "היעד שלי"}
+                  </div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(myGoal.targetValue as number)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/60">נותר ליעד</div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(remaining ?? 0)}
+                  </div>
+                </div>
+                <div className="text-xs text-white/60">
+                  {wdRemaining} ימי עבודה נותרו מתוך {wdTotal}
+                </div>
+              </div>
+            </div>
+          ) : undefined
+        }
+      />
+
 
       {/* No freshness bar here — import freshness is an operator's concern
           (manager/admin homes keep it). A representative can't act on "טרם
@@ -837,22 +988,17 @@ function TopPerformersCard({ reps, goalsByRepId, isLoading, isError, className }
             compact
           />
         ) : top3.map((r, i) => (
-          <div key={r.id} className="flex items-center gap-3 rounded-xl border p-3">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground font-bold">
-              {i + 1}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-semibold truncate">{r.name}</div>
-                <Badge variant="secondary">{r.teamName}</Badge>
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <Progress value={Math.min(r.pct, 150)} className="h-2" />
-                <span className="text-xs text-muted-foreground w-14 text-end">{formatPct(r.pct)}</span>
-              </div>
-            </div>
-          </div>
+          <RankedRow
+            key={r.id}
+            rank={i + 1}
+            name={r.name}
+            meta={<Badge variant="secondary" className="shrink-0">{r.teamName}</Badge>}
+            value={formatPct(r.pct)}
+            barPct={r.pct}
+            tone={r.pct >= 100 ? "success" : "primary"}
+          />
         ))}
+
       </CardContent>
     </Card>
   );

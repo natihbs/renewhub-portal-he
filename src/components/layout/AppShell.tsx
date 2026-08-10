@@ -155,16 +155,31 @@ function Brand({ onDark = false }: { onDark?: boolean }) {
   const role = useResolvedRole();
   const subtitle = BRAND_SUBTITLE[role];
   return (
-    <div className={cn("flex flex-col gap-1.5 px-5 py-5 border-b", onDark ? "border-sidebar-border" : "")}>
+    // The brand block anchors the navy rail: a slightly lifted panel with an
+    // accent hairline under it, so the shell reads as branded chrome rather
+    // than a logo floating on a dark column.
+    <div
+      className={cn(
+        "relative flex flex-col gap-1.5 px-5 py-5 border-b",
+        onDark ? "border-sidebar-border bg-white/[0.04]" : "",
+      )}
+    >
       <PulseLogo variant={onDark ? "light" : "dark"} className="h-8" />
       {subtitle && (
         <div className={cn("text-xs", onDark ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
           {subtitle}
         </div>
       )}
+      {onDark && (
+        <span
+          aria-hidden
+          className="absolute inset-x-5 bottom-0 h-px bg-gradient-to-l from-brand-accent/70 to-transparent"
+        />
+      )}
     </div>
   );
 }
+
 
 
 /**
