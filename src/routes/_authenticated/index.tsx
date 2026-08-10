@@ -74,6 +74,15 @@ import {
   DataFreshnessBar, TeamPaceCard, TeamFeedbackCard, TeamCompetitionsCard,
   MyFeedbackCard, MyCompetitionsCard, MyTasksCard,
 } from "@/components/HomeCards";
+import {
+  HeroPanel,
+  HeroStat,
+  InitialsAvatar,
+  ProgressRing,
+  RankedRow,
+  SectionHeading,
+  StatTile,
+} from "@/components/dashboard/Surfaces";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
