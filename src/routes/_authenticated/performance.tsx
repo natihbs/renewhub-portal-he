@@ -822,9 +822,9 @@ function ManagerPerformancePage() {
                         )}
                       >
                         <TableCell className="font-semibold">
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex min-w-0 items-center gap-2.5">
                             <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
-                            <span className="truncate">{e.rep.name}</span>
+                            <span className="min-w-0 truncate">{e.rep.name}</span>
                           </div>
                         </TableCell>
                         <TableCell>

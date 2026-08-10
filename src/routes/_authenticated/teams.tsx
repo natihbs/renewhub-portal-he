@@ -338,12 +338,12 @@ function TeamsPage() {
                         <TableCell><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></TableCell>
                         <TableCell>
                           {t.manager_id ? (
-                            <span className="flex items-center gap-2">
+                            <span className="flex min-w-0 items-center gap-2">
                               <InitialsAvatar
                                 name={personName(peopleById.get(t.manager_id))}
                                 className="h-7 w-7 text-[10px]"
                               />
-                              <span className="truncate">
+                              <span className="min-w-0 truncate">
                                 {personName(peopleById.get(t.manager_id))}
                               </span>
                             </span>
