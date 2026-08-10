@@ -1106,7 +1106,7 @@ function PreviewStep({
             type="button"
             size="sm"
             variant={filter === f ? "default" : "outline"}
-            className="h-8"
+            className="h-8 rounded-full"
             onClick={() => {
               setFilter(f);
               setPage(1);
