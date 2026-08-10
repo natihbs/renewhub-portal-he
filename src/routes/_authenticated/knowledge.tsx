@@ -162,7 +162,7 @@ function ArticleCard({ article, isManager }: { article: Article; isManager: bool
           <div className="space-y-3">
             <div className="flex gap-2 flex-wrap">
               <Badge variant="secondary">{article.category}</Badge>
-              {article.important && <Badge className="bg-yellow-500 text-white">חשוב</Badge>}
+              {article.important && <Badge className="border-0 bg-[color:var(--warning)]/15 text-warning-foreground hover:bg-[color:var(--warning)]/15">חשוב</Badge>}
               <span className="text-xs text-muted-foreground">עודכן ב-{formatDateIL(article.updatedAt)}</span>
             </div>
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{article.body}</p>
