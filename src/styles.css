@@ -139,10 +139,10 @@
      this exact contrast problem before this token existed — reusing it here
      is a like-for-like consolidation, not a new color choice. */
   --warning-foreground: oklch(0.45 0.14 75);
-  /* Informational (neutral, non-alarming) status hue — previously improvised
-     per page with raw blue utilities. */
-  --info: #2d8a9e;
-  --info-foreground: #10566a;
+  /* Informational (neutral, non-alarming) status hue — cyan, the same family
+     as --brand-accent so highlights and info states read as one system. */
+  --info: #0e9bb8;
+  --info-foreground: #0d5f74;
   /* Quiet row/list surface, replaces ad-hoc bg-muted/40 at call sites. */
   --surface-subtle: color-mix(in oklab, var(--muted) 55%, transparent);
   /* Deliberate WhatsApp-style brand mock in /communications — tokenized so it
@@ -156,17 +156,20 @@
   --ring: var(--brand-primary-light);
   --chart-1: var(--brand-primary);
   --chart-2: var(--brand-primary-light);
-  --chart-3: var(--brand-accent);
+  --chart-3: var(--brand-accent-strong);
   --chart-4: var(--brand-success);
   --chart-5: #9aa5b1;
-  --sidebar: var(--brand-primary);
-  --sidebar-foreground: #ffffff;
-  --sidebar-primary: var(--brand-primary-light);
+  /* Navigation is navy-indigo, not flat brand purple — it separates the shell
+     from primary actions so the two stop competing. */
+  --sidebar: var(--brand-navy);
+  --sidebar-foreground: #eef0f8;
+  --sidebar-primary: color-mix(in oklab, white 12%, var(--brand-primary-light));
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: color-mix(in oklab, white 12%, var(--brand-primary));
+  --sidebar-accent: color-mix(in oklab, white 8%, var(--brand-navy));
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: color-mix(in oklab, white 14%, transparent);
-  --sidebar-ring: var(--brand-primary-light);
+  --sidebar-border: color-mix(in oklab, white 12%, transparent);
+  --sidebar-ring: var(--brand-accent);
+
 }
 
 .dark {
