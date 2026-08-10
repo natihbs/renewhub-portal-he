@@ -37,35 +37,35 @@ export const Route = createFileRoute("/auth")({
 
 
 /**
- * Ambient rhythm-bars visual for the desktop branded panel — the same
- * performance-pulse motif as the logo (the old ECG trace read medical, not
- * sales). Gently animated; respects reduced motion.
+ * Ambient signal waveform for the desktop branded panel — the canonical Pulse
+ * trace (see PulseLogo) stretched into a wide, quiet motif, replacing the old
+ * vertical rhythm-bars whose silhouette family the brand no longer uses. One
+ * smooth asymmetric trace in translucent white with the brand-accent "live"
+ * node at its end; the opacity breath reuses the existing pulse-line
+ * keyframes and is gated behind motion-safe, so prefers-reduced-motion gets a
+ * static trace.
  */
 function RhythmVisual() {
-  const bars = [
-    { x: 0, h: 22, delay: "0s", accent: false },
-    { x: 26, h: 38, delay: "0.15s", accent: false },
-    { x: 52, h: 30, delay: "0.3s", accent: false },
-    { x: 78, h: 56, delay: "0.45s", accent: true },
-    { x: 104, h: 34, delay: "0.6s", accent: false },
-    { x: 130, h: 44, delay: "0.75s", accent: false },
-  ];
   return (
-    <svg viewBox="0 0 148 64" className="h-16 w-auto" aria-hidden="true">
-      {bars.map((b) => (
-        <rect
-          key={b.x}
-          x={b.x}
-          y={64 - b.h}
-          width={14}
-          height={b.h}
-          rx={7}
-          fill={b.accent ? "var(--brand-accent)" : "#ffffff"}
-          opacity={b.accent ? 1 : 0.35}
-          className="motion-safe:animate-[pulse-line_2.6s_ease-in-out_infinite]"
-          style={{ animationDelay: b.delay }}
-        />
-      ))}
+    <svg viewBox="0 0 220 64" className="h-16 w-auto" aria-hidden="true">
+      <path
+        d="M4 40 H34 L52 18 L76 52 L94 32 H124 L142 22 L164 46 L178 40 H200"
+        fill="none"
+        stroke="#ffffff"
+        strokeWidth={7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.35}
+        className="motion-safe:animate-[pulse-line_2.6s_ease-in-out_infinite]"
+      />
+      <circle
+        cx={211}
+        cy={40}
+        r={5}
+        fill="var(--brand-accent)"
+        className="motion-safe:animate-[pulse-line_2.6s_ease-in-out_infinite]"
+        style={{ animationDelay: "0.45s" }}
+      />
     </svg>
   );
 }
