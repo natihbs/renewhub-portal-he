@@ -253,7 +253,15 @@
   }
 }
 
+/* KPI figures, table numbers and counters: lining tabular digits so columns
+   align in RTL tables and live values don't jitter as they change. */
+@utility num {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum", "lnum";
+}
+
 @utility card-interactive {
+
   transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
   &:hover {
     box-shadow: var(--shadow-card);
