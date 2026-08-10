@@ -60,6 +60,8 @@
   --color-brand-primary: var(--brand-primary);
   --color-brand-primary-light: var(--brand-primary-light);
   --color-brand-accent: var(--brand-accent);
+  --color-brand-accent-strong: var(--brand-accent-strong);
+  --color-brand-navy: var(--brand-navy);
   --color-brand-success: var(--brand-success);
   --color-brand-warning: var(--brand-warning);
   --color-brand-danger: var(--brand-danger);
@@ -70,6 +72,7 @@
   --color-brand-border: var(--brand-border);
   --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.04), 0 4px 16px oklch(0 0 0 / 0.05);
   --shadow-card: 0 1px 3px oklch(0 0 0 / 0.05), 0 8px 24px -8px oklch(0 0 0 / 0.08);
+
 }
 
 /*
