@@ -50,6 +50,13 @@
   --color-warning: var(--warning);
   --color-success-foreground: var(--success-foreground);
   --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-chat-surface: var(--chat-surface);
+  --color-chat-bubble: var(--chat-bubble);
+  --color-chat-meta: var(--chat-meta);
+
   --color-brand-primary: var(--brand-primary);
   --color-brand-primary-light: var(--brand-primary-light);
   --color-brand-accent: var(--brand-accent);
