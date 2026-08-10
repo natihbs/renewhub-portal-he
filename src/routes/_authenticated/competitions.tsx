@@ -58,7 +58,8 @@ function CompetitionDateRange({ start, end, className }: { start: string; end: s
 }
 
 function CompetitionStatusBadge({ comp }: { comp: Competition }) {
-  if (comp.active) return <Badge className="bg-white/20 hover:bg-white/20 text-white border-0">פעילה</Badge>;
+  if (comp.active) return <Badge className="border-0 bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/20">פעילה</Badge>;
+
   if (comp.archived) return <Badge variant="secondary">בארכיון</Badge>;
   return <Badge variant="outline">הסתיימה</Badge>;
 }
