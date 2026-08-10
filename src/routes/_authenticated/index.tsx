@@ -482,7 +482,7 @@ function AdminShortcutsGrid() {
   ];
   return (
     <div className="space-y-3">
-      <div className="text-sm font-semibold">ניהול מערכת</div>
+      <SectionHeading title="ניהול מערכת" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {shortcuts.map((c) => {
           const Icon = c.icon;
