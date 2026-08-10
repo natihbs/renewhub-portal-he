@@ -600,7 +600,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="min-h-14 lg:h-16 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 sticky top-0 z-30 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 pt-safe sm:gap-3 sm:px-4 md:px-6">
+        <header className="min-h-14 lg:h-16 border-b border-border/70 bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75 sticky top-0 z-30 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 pt-safe sm:gap-3 sm:px-4 md:px-6">
+
           <div className="flex items-center gap-2 min-w-0">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
