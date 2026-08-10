@@ -448,9 +448,10 @@ function Generator() {
 
 function WhatsAppPreview({ body }: { body: string }) {
   return (
-    <div className="rounded-xl bg-[#e8f0e6] p-4">
-      <div className="mx-auto max-w-md rounded-2xl bg-white p-3 shadow-soft">
-        <div className="mb-2 text-[11px] font-semibold text-emerald-700">Pulse · צוות ניהול</div>
+    <div className="rounded-xl bg-[color:var(--chat-surface)] p-4">
+      <div className="mx-auto max-w-md rounded-2xl bg-[color:var(--chat-bubble)] p-3 shadow-soft">
+        <div className="mb-2 text-[11px] font-semibold text-[color:var(--chat-meta)]">Pulse · צוות ניהול</div>
+
         <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground">
           {body}
         </div>
