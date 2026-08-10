@@ -268,7 +268,19 @@
     overflow-wrap: anywhere;
 
   }
+
+  /* Motion is decorative here (hover shadow/opacity/transform only) — nothing
+     in the UI depends on it, so it is safe to switch off entirely. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
+
 
 /* KPI figures, table numbers and counters: lining tabular digits so columns
    align in RTL tables and live values don't jitter as they change. */
