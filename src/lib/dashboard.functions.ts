@@ -256,7 +256,8 @@ export const toggleChecklistItem = createServerFn({ method: "POST" })
         _user_id: ctx.userId,
         _checklist_date: data.checklist_date,
         _task_key: data.task_key,
-        _team_id: data.team_id,
+        // Generated RPC types omit nullability for DEFAULT NULL params.
+        _team_id: data.team_id as string,
       })
       .single();
     if (error) throw new Error(error.message);
@@ -310,8 +311,8 @@ export const recordTeamAchievementSnapshot = createServerFn({ method: "POST" })
         _team_id: data.team_id,
         _snapshot_date: new Date().toISOString().slice(0, 10),
         _result_value: data.result_value,
-        _target_value: data.target_value,
-        _achievement_pct: data.achievement_pct,
+        _target_value: data.target_value as number,
+        _achievement_pct: data.achievement_pct as number,
         _representative_count: data.representative_count,
       })
       .single();
