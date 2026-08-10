@@ -286,7 +286,7 @@ export function TeamPaceCard({
                 <div key={bucket} className="rounded-xl border p-2.5">
                   <div
                     className={cn(
-                      "text-2xl font-bold",
+                      "num text-2xl font-bold",
                       bucket === "attention"
                         ? "text-primary"
                         : bucket === "above"

@@ -36,22 +36,40 @@ export const Route = createFileRoute("/auth")({
 });
 
 
-/** Wide, ambient heartbeat trace for the desktop branded panel. Gently animated; respects reduced motion. */
-function HeartbeatVisual() {
+/**
+ * Ambient rhythm-bars visual for the desktop branded panel — the same
+ * performance-pulse motif as the logo (the old ECG trace read medical, not
+ * sales). Gently animated; respects reduced motion.
+ */
+function RhythmVisual() {
+  const bars = [
+    { x: 0, h: 22, delay: "0s", accent: false },
+    { x: 26, h: 38, delay: "0.15s", accent: false },
+    { x: 52, h: 30, delay: "0.3s", accent: false },
+    { x: 78, h: 56, delay: "0.45s", accent: true },
+    { x: 104, h: 34, delay: "0.6s", accent: false },
+    { x: 130, h: 44, delay: "0.75s", accent: false },
+  ];
   return (
-    <svg viewBox="0 0 400 80" className="h-16 w-full max-w-sm" aria-hidden="true">
-      <path
-        d="M 0 40 L 60 40 L 78 12 L 100 68 L 122 24 L 138 40 L 400 40"
-        fill="none"
-        stroke="var(--brand-accent)"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="motion-safe:animate-[pulse-line_2.6s_ease-in-out_infinite]"
-      />
+    <svg viewBox="0 0 148 64" className="h-16 w-auto" aria-hidden="true">
+      {bars.map((b) => (
+        <rect
+          key={b.x}
+          x={b.x}
+          y={64 - b.h}
+          width={14}
+          height={b.h}
+          rx={7}
+          fill={b.accent ? "var(--brand-accent)" : "#ffffff"}
+          opacity={b.accent ? 1 : 0.35}
+          className="motion-safe:animate-[pulse-line_2.6s_ease-in-out_infinite]"
+          style={{ animationDelay: b.delay }}
+        />
+      ))}
     </svg>
   );
 }
+
 
 function AuthPage() {
   const navigate = useNavigate();
@@ -110,7 +128,7 @@ function AuthPage() {
       <div className="hidden lg:flex flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground">
         <PulseLogo variant="light" className="h-9" />
         <div className="max-w-sm">
-          <HeartbeatVisual />
+          <RhythmVisual />
           <p className="mt-8 text-3xl font-extrabold leading-snug text-balance">{APP_TAGLINE}</p>
           <p className="mt-3 text-sidebar-foreground/70">{APP_DESCRIPTOR} · מערכת לניהול צוותי מכירות</p>
         </div>

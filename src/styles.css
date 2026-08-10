@@ -60,6 +60,8 @@
   --color-brand-primary: var(--brand-primary);
   --color-brand-primary-light: var(--brand-primary-light);
   --color-brand-accent: var(--brand-accent);
+  --color-brand-accent-strong: var(--brand-accent-strong);
+  --color-brand-navy: var(--brand-navy);
   --color-brand-success: var(--brand-success);
   --color-brand-warning: var(--brand-warning);
   --color-brand-danger: var(--brand-danger);
@@ -70,6 +72,7 @@
   --color-brand-border: var(--brand-border);
   --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.04), 0 4px 16px oklch(0 0 0 / 0.05);
   --shadow-card: 0 1px 3px oklch(0 0 0 / 0.05), 0 8px 24px -8px oklch(0 0 0 / 0.08);
+
 }
 
 /*
@@ -80,9 +83,15 @@
  * places (charts, the login visual panel) that need the brand palette itself.
  */
 :root {
-  --brand-primary: #4b1d6d;
+  /* Indigo/violet brand family (Pulse Flow). --brand-accent is deliberately
+     cyan, NOT amber: the accent must never share a hue with --warning, or a
+     decorative highlight reads as a caution state. */
+  --brand-primary: #4c1d95;
   --brand-primary-light: #6d28d9;
-  --brand-accent: #ffc107;
+  --brand-accent: #22d3ee;
+  --brand-accent-strong: #0e7490;
+  /* Dark navy-indigo navigation surface. */
+  --brand-navy: #1c1836;
   --brand-success: #22c55e;
   --brand-warning: #f59e0b;
   --brand-danger: #ef4444;
@@ -90,8 +99,9 @@
   --brand-surface: #ffffff;
   --brand-text: #1f2937;
   --brand-muted: #667085;
-  --brand-border: #e5e7eb;
+  --brand-border: #e6e8ef;
 }
+
 
 :root {
   --radius: 0.875rem;
@@ -129,10 +139,10 @@
      this exact contrast problem before this token existed — reusing it here
      is a like-for-like consolidation, not a new color choice. */
   --warning-foreground: oklch(0.45 0.14 75);
-  /* Informational (neutral, non-alarming) status hue — previously improvised
-     per page with raw blue utilities. */
-  --info: #2d8a9e;
-  --info-foreground: #10566a;
+  /* Informational (neutral, non-alarming) status hue — cyan, the same family
+     as --brand-accent so highlights and info states read as one system. */
+  --info: #0e9bb8;
+  --info-foreground: #0d5f74;
   /* Quiet row/list surface, replaces ad-hoc bg-muted/40 at call sites. */
   --surface-subtle: color-mix(in oklab, var(--muted) 55%, transparent);
   /* Deliberate WhatsApp-style brand mock in /communications — tokenized so it
@@ -146,22 +156,28 @@
   --ring: var(--brand-primary-light);
   --chart-1: var(--brand-primary);
   --chart-2: var(--brand-primary-light);
-  --chart-3: var(--brand-accent);
+  --chart-3: var(--brand-accent-strong);
   --chart-4: var(--brand-success);
   --chart-5: #9aa5b1;
-  --sidebar: var(--brand-primary);
-  --sidebar-foreground: #ffffff;
-  --sidebar-primary: var(--brand-primary-light);
+  /* Navigation is navy-indigo, not flat brand purple — it separates the shell
+     from primary actions so the two stop competing. */
+  --sidebar: var(--brand-navy);
+  --sidebar-foreground: #eef0f8;
+  --sidebar-primary: color-mix(in oklab, white 12%, var(--brand-primary-light));
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: color-mix(in oklab, white 12%, var(--brand-primary));
+  --sidebar-accent: color-mix(in oklab, white 8%, var(--brand-navy));
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: color-mix(in oklab, white 14%, transparent);
-  --sidebar-ring: var(--brand-primary-light);
+  --sidebar-border: color-mix(in oklab, white 12%, transparent);
+  --sidebar-ring: var(--brand-accent);
+
 }
 
 .dark {
-  --brand-background: #15121b;
-  --brand-surface: #1e1a26;
+  --brand-background: #12111c;
+  --brand-surface: #1b1a29;
+  --brand-navy: #16152a;
+  --brand-accent: #67e8f9;
+  --brand-accent-strong: #22d3ee;
   --brand-text: #f3f4f6;
   --brand-muted: #a6a8b3;
   --brand-border: color-mix(in oklab, white 12%, transparent);
@@ -174,11 +190,11 @@
   --popover-foreground: var(--brand-text);
   --primary: var(--brand-primary-light);
   --primary-foreground: #ffffff;
-  --secondary: #2a2530;
+  --secondary: #272438;
   --secondary-foreground: var(--brand-text);
-  --muted: #2a2530;
+  --muted: #272438;
   --muted-foreground: var(--brand-muted);
-  --accent: #2e2438;
+  --accent: #2c2742;
   --accent-foreground: #e7dff5;
   --destructive: #f87171;
   --destructive-foreground: #ffffff;
@@ -188,7 +204,7 @@
      no separate darker/lighter variant needed here, unlike light mode. */
   --success-foreground: var(--success);
   --warning-foreground: var(--warning);
-  --info: #5cbdb9;
+  --info: #5cc9dd;
   --info-foreground: var(--info);
   --surface-subtle: color-mix(in oklab, white 6%, transparent);
   --chat-surface: #16241f;
@@ -200,18 +216,19 @@
   --ring: var(--brand-primary-light);
   --chart-1: var(--brand-primary-light);
   --chart-2: #8b5cf6;
-  --chart-3: var(--brand-accent);
+  --chart-3: var(--brand-accent-strong);
   --chart-4: #4ade80;
   --chart-5: #8892a0;
-  --sidebar: #2f1148;
-  --sidebar-foreground: #ffffff;
-  --sidebar-primary: var(--brand-primary-light);
+  --sidebar: var(--brand-navy);
+  --sidebar-foreground: #eef0f8;
+  --sidebar-primary: color-mix(in oklab, white 6%, var(--brand-primary-light));
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: color-mix(in oklab, white 14%, #2f1148);
+  --sidebar-accent: color-mix(in oklab, white 10%, var(--brand-navy));
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: color-mix(in oklab, white 14%, transparent);
-  --sidebar-ring: var(--brand-primary-light);
+  --sidebar-border: color-mix(in oklab, white 12%, transparent);
+  --sidebar-ring: var(--brand-accent-strong);
 }
+
 
 @layer base {
   * {
@@ -251,7 +268,19 @@
     overflow-wrap: anywhere;
 
   }
+
+  /* Motion is decorative here (hover shadow/opacity/transform only) — nothing
+     in the UI depends on it, so it is safe to switch off entirely. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
+
 
 /* KPI figures, table numbers and counters: lining tabular digits so columns
    align in RTL tables and live values don't jitter as they change. */

@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 100" role="img" aria-labelledby="pulse-logo-title">
   <title id="pulse-logo-title">Pulse</title>
-  <g>
-    <path d="M 80.53 69.07 A 36 36 0 1 1 80.53 30.93" fill="none" stroke="#4B1D6D" stroke-width="10" stroke-linecap="round"/>
-    <path d="M 8 50 L 31 50 L 40 28 L 51 74 L 61 34 L 68 50 L 92 50" fill="none" stroke="#FFC107" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#4C1D95">
+    <rect x="9" y="64" width="15" height="26" rx="7.5" opacity="0.4"/>
+    <rect x="30.5" y="44" width="15" height="46" rx="7.5" opacity="0.6"/>
+    <rect x="52" y="22" width="15" height="68" rx="7.5" opacity="0.85"/>
   </g>
-  <text x="112" y="68" font-family="Rubik, Heebo, ui-sans-serif, system-ui, sans-serif" font-size="52" font-weight="800" letter-spacing="-1" fill="#1F2937">Pulse</text>
+  <rect x="73.5" y="2" width="15" height="88" rx="7.5" fill="#0891B2"/>
+  <text x="108" y="68" font-family="Rubik, Heebo, ui-sans-serif, system-ui, sans-serif" font-size="52" font-weight="800" letter-spacing="-1" fill="#1F2937">Pulse</text>
 </svg>

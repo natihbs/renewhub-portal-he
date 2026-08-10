@@ -3,17 +3,33 @@ import { cn } from "@/lib/utils";
 export type PulseLogoVariant = "full" | "symbol" | "light" | "dark" | "compact";
 
 /**
- * Shared geometry — keep in sync with public/brand/pulse-symbol.svg,
- * pulse-logo.svg, pulse-logo-light.svg and public/favicon.svg if this ever
- * changes; those static files exist for contexts that need a real asset URL
- * (favicon links, `<img>`/download, external use) rather than an inline
- * component.
+ * Pulse mark — four ascending "rhythm bars" (performance pulse), deliberately
+ * NOT the old ECG/heartbeat trace, which read as healthcare rather than sales
+ * performance. Keep geometry in sync with public/brand/pulse-symbol.svg,
+ * pulse-logo.svg, pulse-logo-light.svg and public/favicon.svg; those static
+ * files exist for contexts that need a real asset URL (favicon links,
+ * `<img>`/download, external use) rather than an inline component.
+ *
+ * The three lower bars render in `currentColor` at stepped opacity, so the
+ * mark inherits whatever text color its container sets and works on light,
+ * dark and sidebar surfaces without a per-surface asset. Only the tallest bar
+ * is fixed to the brand accent (cyan) as the single highlight.
  */
-const RING_PATH = "M 80.53 69.07 A 36 36 0 1 1 80.53 30.93";
-const HEARTBEAT_PATH = "M 8 50 L 31 50 L 40 28 L 51 74 L 61 34 L 68 50 L 92 50";
-const HEARTBEAT_COLOR = "#FFC107"; // brand accent yellow — fixed across every variant
-const RING_COLOR_ON_LIGHT = "#4B1D6D"; // brand primary deep purple
-const RING_COLOR_ON_DARK = "#FFFFFF";
+const BARS: { x: number; h: number; opacity: number }[] = [
+  { x: 9, h: 26, opacity: 0.4 },
+  { x: 30.5, h: 46, opacity: 0.6 },
+  { x: 52, h: 68, opacity: 0.85 },
+];
+const BAR_W = 15;
+const BAR_R = 7.5;
+const BASELINE = 90;
+/** The tallest, highlighted bar. */
+const ACCENT_BAR = { x: 73.5, h: 88 };
+
+const ACCENT_ON_LIGHT = "#0891B2"; // cyan-600 — >=4.5:1 on white
+const ACCENT_ON_DARK = "#22D3EE"; // cyan-400
+const MARK_COLOR_ON_LIGHT = "#4C1D95"; // brand primary (violet-900)
+const MARK_COLOR_ON_DARK = "#FFFFFF";
 const TEXT_COLOR_ON_LIGHT = "#1F2937"; // brand-text
 const TEXT_COLOR_ON_DARK = "#FFFFFF";
 
@@ -26,7 +42,7 @@ export function PulseLogo({
    * full    — mark + wordmark, standard colors, roomy spacing (sidebar brand block, About dialog)
    * symbol  — mark only, no wordmark (favicon-style usage, avatars, tight square slots)
    * compact — mark + wordmark, tight spacing/smaller wordmark (mobile header bar)
-   * light   — mark + wordmark rendered in white, for placement on dark/purple backgrounds
+   * light   — mark + wordmark rendered in white, for placement on dark/navy backgrounds
    * dark    — mark + wordmark, standard (dark-on-light) colors — explicit alias of `full`,
    *           for call sites that want to be unambiguous about which background they expect
    */
@@ -35,7 +51,8 @@ export function PulseLogo({
   className?: string;
 }) {
   const onDark = variant === "light";
-  const ring = onDark ? RING_COLOR_ON_DARK : RING_COLOR_ON_LIGHT;
+  const mark = onDark ? MARK_COLOR_ON_DARK : MARK_COLOR_ON_LIGHT;
+  const accent = onDark ? ACCENT_ON_DARK : ACCENT_ON_LIGHT;
   const text = onDark ? TEXT_COLOR_ON_DARK : TEXT_COLOR_ON_LIGHT;
   const showWordmark = variant !== "symbol";
   const compact = variant === "compact";
@@ -45,25 +62,37 @@ export function PulseLogo({
       <svg
         viewBox="0 0 100 100"
         className="h-full w-auto shrink-0"
+        style={{ color: mark }}
         role={showWordmark ? undefined : "img"}
         aria-hidden={showWordmark ? true : undefined}
         aria-label={showWordmark ? undefined : title}
       >
         {!showWordmark && <title>{title}</title>}
-        <path d={RING_PATH} fill="none" stroke={ring} strokeWidth={10} strokeLinecap="round" />
-        <path
-          d={HEARTBEAT_PATH}
-          fill="none"
-          stroke={HEARTBEAT_COLOR}
-          strokeWidth={7}
-          strokeLinecap="round"
-          strokeLinejoin="round"
+        {BARS.map((b) => (
+          <rect
+            key={b.x}
+            x={b.x}
+            y={BASELINE - b.h}
+            width={BAR_W}
+            height={b.h}
+            rx={BAR_R}
+            fill="currentColor"
+            opacity={b.opacity}
+          />
+        ))}
+        <rect
+          x={ACCENT_BAR.x}
+          y={BASELINE - ACCENT_BAR.h}
+          width={BAR_W}
+          height={ACCENT_BAR.h}
+          rx={BAR_R}
+          fill={accent}
         />
       </svg>
       {showWordmark && (
         <span
           className={cn(
-            "whitespace-nowrap font-extrabold leading-none tracking-tight",
+            "whitespace-nowrap font-display font-extrabold leading-none tracking-tight",
             compact ? "text-base" : "text-xl",
           )}
           style={{ color: text }}

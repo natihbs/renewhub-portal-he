@@ -53,21 +53,31 @@ function NavRow({ item, label, active, onClick }: { item: NavItem; label: string
       <Link
         to={item.to}
         onClick={onClick}
+        aria-current={active ? "page" : undefined}
         className={cn(
-          "flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-[9px] py-2.5 text-sm font-medium transition-colors sm:pe-9 border-s-[3px]",
+          "relative flex min-h-11 items-center gap-3 rounded-xl pe-12 ps-3 py-2.5 text-sm transition-[background-color,color,box-shadow] duration-150 ease-out sm:pe-9",
           active
-            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-soft border-s-brand-accent"
-            : "border-s-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            ? "bg-sidebar-primary font-semibold text-sidebar-primary-foreground shadow-soft"
+            : "font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         )}
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        {/* Shape + accent bar, not color alone: the active row stays legible
+            for color-vision differences and on the dim navy surface. */}
+        {active && (
+          <span
+            aria-hidden
+            className="absolute bottom-2 start-0 top-2 w-1 rounded-full bg-brand-accent"
+          />
+        )}
+
+        <Icon className={cn("h-4 w-4 shrink-0", active && "stroke-[2.4]")} />
         <span className="truncate">{label}</span>
       </Link>
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.to); }}
         className={cn(
-          "absolute end-1 top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-md transition-opacity sm:end-2 sm:h-6 sm:w-6",
+          "absolute end-1 top-1/2 -translate-y-1/2 grid h-11 w-11 place-items-center rounded-md transition-opacity duration-150 sm:end-2 sm:h-6 sm:w-6",
           pinned ? "opacity-100" : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
           active
             ? "text-sidebar-primary-foreground/80 hover:text-sidebar-primary-foreground"
@@ -81,6 +91,7 @@ function NavRow({ item, label, active, onClick }: { item: NavItem; label: string
     </div>
   );
 }
+
 
 const GROUP_TITLE: Record<AppRole, string> = {
   admin: "ניהול מערכת",
@@ -147,13 +158,14 @@ function Brand({ onDark = false }: { onDark?: boolean }) {
     <div className={cn("flex flex-col gap-1.5 px-5 py-5 border-b", onDark ? "border-sidebar-border" : "")}>
       <PulseLogo variant={onDark ? "light" : "dark"} className="h-8" />
       {subtitle && (
-        <div className={cn("text-xs", onDark ? "text-sidebar-foreground/65" : "text-muted-foreground")}>
+        <div className={cn("text-xs", onDark ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
           {subtitle}
         </div>
       )}
     </div>
   );
 }
+
 
 /**
  * Admin-only business-view switcher ("תצוגה") — presentation only, see
@@ -523,18 +535,26 @@ function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
                 to={n.to}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium transition-colors",
-                  active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                  "relative flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium transition-colors duration-150",
+                  active ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {/* Color alone reads weakly on the tinted bar — an explicit
-                    top indicator makes the active tab unmistakable. */}
+                {/* Color alone reads weakly on the tinted bar — a top indicator
+                    plus a soft icon pill makes the active tab unmistakable. */}
                 {active && (
                   <span aria-hidden className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-primary" />
                 )}
-                <Icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.4]")} />
+                <span
+                  className={cn(
+                    "grid h-7 w-11 place-items-center rounded-full transition-colors duration-150",
+                    active && "bg-primary/10",
+                  )}
+                >
+                  <Icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.4]")} />
+                </span>
                 <span className="w-full truncate text-center leading-none">{navLabel(n, role)}</span>
               </Link>
+
 
             </li>
           );
@@ -544,10 +564,13 @@ function BottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
             type="button"
             onClick={onOpenMenu}
             aria-label="פתיחת תפריט מלא"
-            className="flex w-full min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="flex w-full min-h-14 flex-col items-center justify-center gap-1 px-1 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
           >
-            <Menu className="h-5 w-5 shrink-0" />
+            <span className="grid h-7 w-11 place-items-center">
+              <Menu className="h-5 w-5 shrink-0" />
+            </span>
             <span className="leading-none">עוד</span>
+
           </button>
         </li>
       </ul>
@@ -577,7 +600,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="min-h-14 lg:h-16 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 sticky top-0 z-30 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 pt-safe sm:gap-3 sm:px-4 md:px-6">
+        <header className="min-h-14 lg:h-16 border-b border-border/70 bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75 sticky top-0 z-30 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 pt-safe sm:gap-3 sm:px-4 md:px-6">
+
           <div className="flex items-center gap-2 min-w-0">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
@@ -620,17 +644,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ModeToggle />
               </div>
             )}
-            <NotificationBell />
             {/* Scope controls read as one "context" segment rather than two
                 unrelated selects. `empty:hidden` keeps the frame from showing
                 when neither switcher renders (non-admin, single workspace). */}
-            <div className="flex items-center gap-1 rounded-xl border bg-background/60 p-0.5 empty:hidden">
+            <div className="flex items-center gap-1 rounded-xl bg-surface-subtle p-1 empty:hidden">
               <AdminViewSwitcher />
               <WorkspaceSwitcher />
             </div>
             <RoleSwitcher />
+            {/* Quiet hairline separates "where am I looking" (context) from
+                "who am I" (account), instead of one long undifferentiated row. */}
+            <span aria-hidden className="hidden sm:block h-6 w-px bg-border/70" />
+            <NotificationBell />
             <UserMenu />
           </div>
+
 
         </header>
 

@@ -76,15 +76,15 @@ function ScopeTeamRowView({ row, onSelect }: { row: ScopeTeamRow; onSelect?: () 
       <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
         <div>
           <div className="text-muted-foreground">{labels.target}</div>
-          <div className="font-bold">{row.target == null ? "—" : formatNum(row.target)}</div>
+          <div className="num font-bold">{row.target == null ? "—" : formatNum(row.target)}</div>
         </div>
         <div>
           <div className="text-muted-foreground">{labels.result}</div>
-          <div className="font-bold">{formatNum(row.completed)}</div>
+          <div className="num font-bold">{formatNum(row.completed)}</div>
         </div>
         <div>
           <div className="text-muted-foreground">{labels.rate}</div>
-          <div className="font-bold">{row.pct == null ? "לא זמין" : formatPct(row.pct)}</div>
+          <div className="num font-bold">{row.pct == null ? "לא זמין" : formatPct(row.pct)}</div>
         </div>
       </div>
       {row.pct != null && <Progress value={Math.min(row.pct, 150)} className="mt-2 h-1.5" />}
@@ -114,15 +114,15 @@ function ProfileAggregates({ aggregates }: { aggregates: ScopeProfileAggregate[]
             <div className="grid grid-cols-3 gap-2 text-center">
               <div>
                 <div className="text-muted-foreground">{labels.target}</div>
-                <div className="font-bold">{agg.target == null ? "—" : formatNum(agg.target)}</div>
+                <div className="num font-bold">{agg.target == null ? "—" : formatNum(agg.target)}</div>
               </div>
               <div>
                 <div className="text-muted-foreground">{labels.result}</div>
-                <div className="font-bold">{formatNum(agg.completed)}</div>
+                <div className="num font-bold">{formatNum(agg.completed)}</div>
               </div>
               <div>
                 <div className="text-muted-foreground">{labels.rate}</div>
-                <div className="font-bold">{agg.pct == null ? "לא זמין" : formatPct(agg.pct)}</div>
+                <div className="num font-bold">{agg.pct == null ? "לא זמין" : formatPct(agg.pct)}</div>
               </div>
             </div>
           </div>
