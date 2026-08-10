@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, FileText } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/changelog")({
   head: () => ({
@@ -23,6 +23,7 @@ function ChangelogPage() {
     <div className="mx-auto max-w-3xl space-y-6" dir="rtl">
       <PageHeader
         title="יומן שינויים"
+        icon={FileText}
         description={
           <>
             כל התכולות והעדכונים ב-{APP_NAME}. גרסה נוכחית: <span className="font-mono">{APP_VERSION}</span>

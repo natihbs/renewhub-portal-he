@@ -50,6 +50,7 @@ function KnowledgePage() {
     <div className="space-y-6">
       <PageHeader
         title="מרכז ידע"
+        icon={BookOpen}
         description="מאמרים, תסריטי שיחה והדרכות לצוותי המכירות"
         actions={
           <ManagerOnly>

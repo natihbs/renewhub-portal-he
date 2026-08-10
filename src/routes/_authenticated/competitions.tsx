@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Trophy, Plus, Pencil, Trash2, Medal, X, MoreVertical, Archive, ArchiveRestore, RotateCcw } from "lucide-react";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import { formatDateIL, formatNum } from "@/lib/format";
 import { toast } from "sonner";
 import { ManagerOnly } from "@/components/ManagerOnly";
@@ -70,13 +71,17 @@ function Leaderboard({ comp, nameOf }: { comp: Competition; nameOf: (id: string)
   return (
     <div className="space-y-2">
       {leaderboard.map((row, i) => (
-        <div key={row.repId} className="flex items-center gap-3 rounded-xl border p-3">
+        <div
+          key={row.repId}
+          className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-surface-subtle"
+        >
           <MedalIcon place={i + 1} />
+          <InitialsAvatar name={nameOf(row.repId)} className="h-8 w-8" />
           <div className="flex-1 min-w-0">
             <div className="font-semibold truncate">{nameOf(row.repId)}</div>
             <div className="text-xs text-muted-foreground">מקום {i + 1}</div>
           </div>
-          <div className="text-lg font-extrabold text-primary">{formatNum(row.total)}</div>
+          <div className="num text-lg font-extrabold text-primary">{formatNum(row.total)}</div>
         </div>
       ))}
     </div>
@@ -97,6 +102,7 @@ function CompetitionsPage() {
     <div className="space-y-6">
       <PageHeader
         title="תחרויות"
+        icon={Trophy}
         description="מעקב תחרויות פעילות, ניקוד וטבלאות מובילים"
         actions={
           <ManagerOnly>

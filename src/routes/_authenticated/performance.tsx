@@ -61,6 +61,7 @@ import { ManagerOnly } from "@/components/ManagerOnly";
 import { useRepWorkspace } from "@/lib/rep-workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import { cn } from "@/lib/utils";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
@@ -207,7 +208,11 @@ function RepresentativePerformancePage() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      <PageHeader title="הביצועים שלי" description="מעקב אחר היעד החודשי שלך - קצב, פער ותחזית" />
+      <PageHeader
+        title="הביצועים שלי"
+        icon={Gauge}
+        description="מעקב אחר היעד החודשי שלך - קצב, פער ותחזית"
+      />
 
       {state.repsLoading || myGoals.isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -532,6 +537,7 @@ function ManagerPerformancePage() {
     <div className="space-y-6" dir="rtl">
       <PageHeader
         title={isManager ? "ביצועים" : "הביצועים שלי"}
+        icon={Gauge}
         description={isManager
           ? "מרכז ניהול ביצועים חודשי - איתור מובילים, נציגים בקצב ואלו הזקוקים לליווי"
           : "מעקב אחר היעד החודשי שלך - קצב, פער ותחזית"}
@@ -815,7 +821,12 @@ function ManagerPerformancePage() {
                           "hover:bg-accent/40"
                         )}
                       >
-                        <TableCell className="font-semibold">{e.rep.name}</TableCell>
+                        <TableCell className="font-semibold">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
+                            <span className="min-w-0 truncate">{e.rep.name}</span>
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="font-normal">{e.rep.teamName}</Badge>
                         </TableCell>
@@ -876,9 +887,14 @@ function ManagerPerformancePage() {
                     className="text-start rounded-xl border p-4 bg-card hover:bg-accent/30 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-semibold truncate">{e.rep.name}</div>
-                        <div className="text-xs text-muted-foreground mt-0.5">{e.rep.teamName}</div>
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{e.rep.name}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {e.rep.teamName}
+                          </div>
+                        </div>
                       </div>
                       <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium shrink-0", statusBadgeClass(e.status))}>
                         <StatusDot status={e.status} />

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import { UsersRound, Plus, Search, Pencil, Trash2, Power, UserPlus, UserMinus, AlertTriangle } from "lucide-react";
 import { requireRole } from "@/lib/require-role";
 import { formatDateIL } from "@/lib/format";
@@ -238,6 +239,7 @@ function TeamsPage() {
     <div className="space-y-6" dir="rtl">
       <PageHeader
         title="ניהול צוותים"
+        icon={UsersRound}
         description="יצירה, עריכה והשבתה של צוותים, שיוך מנהלים ונציגים"
         actions={canManage ? <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="ms-1 h-4 w-4" />הוספת צוות</Button> : undefined}
       />
@@ -336,7 +338,15 @@ function TeamsPage() {
                         <TableCell><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></TableCell>
                         <TableCell>
                           {t.manager_id ? (
-                            personName(peopleById.get(t.manager_id))
+                            <span className="flex min-w-0 items-center gap-2">
+                              <InitialsAvatar
+                                name={personName(peopleById.get(t.manager_id))}
+                                className="h-7 w-7 text-[10px]"
+                              />
+                              <span className="min-w-0 truncate">
+                                {personName(peopleById.get(t.manager_id))}
+                              </span>
+                            </span>
                           ) : t.member_count > 0 ? (
                             <Badge
                               variant="outline"

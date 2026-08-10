@@ -113,7 +113,11 @@ function RepresentativeTargetsView() {
   if (!me) {
     return (
       <>
-        <PageHeader title="היעד שלי" description="היעד האישי והצוותי שלך לחודש הנוכחי" />
+        <PageHeader
+          title="היעד שלי"
+          icon={Target}
+          description="היעד האישי והצוותי שלך לחודש הנוכחי"
+        />
         <Card><CardContent className="p-0"><EmptyState icon={Target} title="אין עדיין נתוני נציג" compact /></CardContent></Card>
       </>
     );
@@ -127,7 +131,11 @@ function RepresentativeTargetsView() {
 
   return (
     <>
-      <PageHeader title="היעד שלי" description={`${monthLabel(currentGoalMonth())} · ${me.teamName}`} />
+      <PageHeader
+        title="היעד שלי"
+        icon={Target}
+        description={`${monthLabel(currentGoalMonth())} · ${me.teamName}`}
+      />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
           <CardHeader><CardTitle className="text-base flex items-center gap-2"><Target className="h-4 w-4 text-primary" />יעד אישי</CardTitle></CardHeader>
@@ -202,6 +210,7 @@ function ManagerAdminTargetsView() {
     <>
       <PageHeader
         title="ניהול יעדים"
+        icon={Target}
         description={
           scopedManager
             ? "יעדים בהיקף — סטטוס היעדים של כל הצוותים בהיקף הניהול, ובחירת צוות לעריכה."

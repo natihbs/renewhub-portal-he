@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import { Users, Plus, Search, Pencil, Trash2, Power, Link2, Link2Off, ArrowLeftRight, Target, Send } from "lucide-react";
 import { requireRole } from "@/lib/require-role";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,7 @@ function RepresentativesPage() {
     <div className="space-y-6">
       <PageHeader
         title="ניהול נציגים"
+        icon={Users}
         description="יצירה, עריכה, השבתה, העברת צוות ומחיקה של נציגים"
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -184,8 +186,17 @@ function RepresentativesPage() {
                     {filtered.map((r) => (
                       <TableRow key={r.id}>
                         <TableCell className="font-semibold">
-                          {r.name}
-                          {r.external_ref ? <div className="text-xs text-muted-foreground">מזהה: {r.external_ref}</div> : null}
+                          <div className="flex items-center gap-2.5">
+                            <InitialsAvatar name={r.name} className="h-8 w-8" />
+                            <div className="min-w-0">
+                              {r.name}
+                              {r.external_ref ? (
+                                <div className="text-xs font-normal text-muted-foreground">
+                                  מזהה: {r.external_ref}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell>{r.team_name ?? "ללא צוות"}</TableCell>
                         <TableCell>
@@ -217,7 +228,10 @@ function RepresentativesPage() {
                 {filtered.map((r) => (
                   <div key={r.id} className="rounded-xl border p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-semibold break-words">{r.name}</div>
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <InitialsAvatar name={r.name} className="h-8 w-8" />
+                        <div className="font-semibold break-words">{r.name}</div>
+                      </div>
                       <Badge variant={r.active ? "default" : "secondary"}>{r.active ? "פעיל" : "מושבת"}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground">

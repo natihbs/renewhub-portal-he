@@ -568,6 +568,7 @@ function DataImportPage() {
     <div className="space-y-6">
       <PageHeader
         title="ייבוא נתונים"
+        icon={Upload}
         description="העלאת דוח ביצועים יומי ועדכון אוטומטי של הדשבורד"
 
         actions={

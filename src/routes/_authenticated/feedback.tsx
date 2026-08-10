@@ -35,6 +35,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
+import { InitialsAvatar } from "@/components/dashboard/Surfaces";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ManagerOnly } from "@/components/ManagerOnly";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
@@ -284,6 +285,7 @@ function ListeningCenter() {
     <div className="space-y-6">
       <PageHeader
         title="מרכז האזנות חכם"
+        icon={Headphones}
         description={isManager
           ? "ניהול איכות שיחות: תור עדיפויות, ניתוח מגמות, מפת חום צוותית ותוכניות אימון"
           : "צפייה בהיסטוריית ההאזנות והמשוב האישי שלך"}
@@ -561,21 +563,30 @@ function DashboardTab({ reps, feedback, openNewFor, onOpenSchedule, onView }: {
           <CardContent className="space-y-2">
             {criticalAlerts.length === 0 ? (
               <EmptyState icon={ShieldCheck} title="אין התראות פעילות" compact />
-            ) : criticalAlerts.map(({ r, last, avg, days }) => (
-              <button
-                key={r.id}
-                onClick={() => openNewFor(r.id)}
-                className="w-full text-start rounded-lg border p-3 hover:bg-accent/40 transition-colors"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold text-sm">{r.name}</div>
-                  <Badge variant="secondary" className="bg-primary/10 text-primary">{avg || "—"}</Badge>
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {!last ? "ללא האזנה" : `לפני ${days} ימים · ${avg < 60 ? "ציון נמוך" : "טעון רענון"}`}
-                </div>
-              </button>
-            ))}
+            ) : (
+              criticalAlerts.map(({ r, last, avg, days }) => (
+                <button
+                  key={r.id}
+                  onClick={() => openNewFor(r.id)}
+                  className="w-full text-start rounded-lg border p-3 hover:bg-accent/40 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <InitialsAvatar name={r.name} className="h-7 w-7 text-[10px]" />
+                      <div className="truncate font-semibold text-sm">{r.name}</div>
+                    </div>
+                    <Badge variant="secondary" className="bg-primary/10 text-primary">
+                      {avg || "—"}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {!last
+                      ? "ללא האזנה"
+                      : `לפני ${days} ימים · ${avg < 60 ? "ציון נמוך" : "טעון רענון"}`}
+                  </div>
+                </button>
+              ))
+            )}
             <Button size="sm" variant="ghost" className="w-full mt-2" onClick={onOpenSchedule}>
               <CalendarIcon className="ms-1 h-4 w-4" />תזמון האזנה
             </Button>

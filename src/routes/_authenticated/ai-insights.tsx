@@ -14,6 +14,7 @@ import {
   generateGoalRecommendations,
 } from "@/lib/ai-insights.functions";
 import { BarChart3, Headphones, Target, Sparkles, AlertTriangle, RefreshCw, Lightbulb } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 import { useIsManager } from "@/lib/store";
 import {
@@ -169,24 +170,20 @@ function AiInsightsPage() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-            {isManager ? "תובנות AI" : "התובנות שלי"}
-          </h1>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {isManager
+      <PageHeader
+        title={isManager ? "תובנות AI" : "התובנות שלי"}
+        icon={Sparkles}
+        description={
+          isManager
             ? "ניתוח מבוסס בינה מלאכותית של נתוני הביצוע, המשוב והיעדים — מותאם לתפקיד שלך במערכת."
-            : "ניתוח אישי מבוסס בינה מלאכותית של ההתקדמות והמשובים שלך."}
+            : "ניתוח אישי מבוסס בינה מלאכותית של ההתקדמות והמשובים שלך."
+        }
+      />
+      {!isManager && (
+        <p className="text-xs text-muted-foreground">
+          התובנות מבוססות על הנתונים האישיים שלך בלבד.
         </p>
-        {!isManager && (
-          <p className="text-xs text-muted-foreground">
-            התובנות מבוססות על הנתונים האישיים שלך בלבד.
-          </p>
-        )}
-      </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {insightDefs.map((insight) => {
