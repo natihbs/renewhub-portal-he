@@ -1618,8 +1618,9 @@ function StatChip({ label, value, tone }: { label: string; value: number; tone: 
   return (
     <div className="rounded-lg border p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={cn("mt-1 inline-flex items-center rounded-md px-2 py-0.5 text-lg font-semibold", toneClass)}>{value}</div>
+      <div className={cn("num mt-1 inline-flex items-center rounded-md px-2 py-0.5 text-lg font-semibold", toneClass)}>{value}</div>
     </div>
+
   );
 }
 
