@@ -33,8 +33,11 @@ import {
 import { useWorkspace, managerScopeLabel } from "@/lib/workspace-context";
 import { useBusinessScope } from "@/lib/business-scope-hooks";
 import {
+  activityStructureSummary,
   aggregateByProfile,
+  buildActivityCenterBoard,
   buildScopeTeamRows,
+  CENTER_TEAMS_TITLE,
   groupScopeRows,
   isScopedManagerKind,
   managerHeaderPrimaryLine,
@@ -47,7 +50,11 @@ import {
   type ScopedManagerKind,
   type ScopeHomeTeamInput,
 } from "@/lib/scope-home";
-import { ScopeMissingTargetsCard, ScopeOverviewCard } from "@/components/ScopeHomeCards";
+import {
+  ActivityCenterBoardCard,
+  ScopeMissingTargetsCard,
+  ScopeOverviewCard,
+} from "@/components/ScopeHomeCards";
 import {
   useTeamGoal,
   useTeamGoals,
@@ -67,6 +74,7 @@ import {
   Users2, TrendingUp, TrendingDown, Award, Trophy, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, Lightbulb, Sparkles, Users, Activity, BarChart3, FileText, MessageSquare,
   UsersRound, AlertTriangle, ShieldCheck, RefreshCw, ArrowLeft, Database, Upload, Settings,
+  Building2,
 } from "lucide-react";
 import { MorningRoutine } from "@/components/MorningRoutine";
 import { ManualPerformanceDialog } from "@/components/ManualPerformanceDialog";
@@ -659,37 +667,74 @@ function ManagerHome() {
   const wdRemaining = workdaysRemaining();
   const wdTotal = workdaysInMonth();
 
+  // Hierarchy level differentiation: the scope kind decides not only WHAT the
+  // manager sees but WHAT LEVEL they manage from. A center manager manages
+  // teams (team board); an activity manager manages centers (center board,
+  // structure-first hero); the executive keeps the existing grouped view.
+  const centerManager = scope?.kind === "center";
+  const activityManager = scope?.kind === "activity";
+  const activityBoard = useMemo(
+    () =>
+      activityManager && scope
+        ? buildActivityCenterBoard({ units: scope.units, rows: scopeRows })
+        : null,
+    [activityManager, scope, scopeRows],
+  );
+  const activityStructure = useMemo(
+    () => (activityBoard ? activityStructureSummary(activityBoard) : null),
+    [activityBoard],
+  );
+
   return (
     <div className="space-y-8">
       <HomeHeader
         role="manager"
         metrics={
-          <div className="flex items-center gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-            <ProgressRing value={heroPct} caption={heroCaption} tone="onDark" />
-            <div className="min-w-0 space-y-2 text-sm">
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-white/60">
-                  {heroLabels.target}
+          activityManager && activityStructure ? (
+            /* Structure-first hero: an activity manager commands CENTERS, so
+               the headline figures are how the activity is built — a single
+               performance ring over mixed KPI profiles would be a fabricated
+               unit. Per-profile performance lives on the board below. */
+            <div className="grid grid-cols-2 gap-3 lg:w-auto">
+              <HeroStat label="מוקדים" value={String(activityStructure.centerCount)} />
+              <HeroStat label="צוותים" value={String(activityStructure.teamCount)} />
+              <HeroStat label="נציגים" value={String(activityStructure.repCount)} />
+              <HeroStat
+                label="מוקדים ללא צוותים"
+                value={String(activityStructure.centersWithoutTeams)}
+                sub={activityStructure.centersWithoutTeams > 0 ? "דורש שיוך צוותים" : undefined}
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+              <ProgressRing value={heroPct} caption={heroCaption} tone="onDark" />
+              <div className="min-w-0 space-y-2 text-sm">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/60">
+                    {heroLabels.target}
+                  </div>
+                  <div className="num font-display text-lg font-bold">
+                    {heroTarget == null ? "—" : formatNum(heroTarget)}
+                  </div>
                 </div>
-                <div className="num font-display text-lg font-bold">
-                  {heroTarget == null ? "—" : formatNum(heroTarget)}
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/60">
+                    {heroLabels.result}
+                  </div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(heroCompleted)}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-white/60">
-                  {heroLabels.result}
+                <div className="text-xs text-white/60">
+                  {scopedManager
+                    ? heroPrimary
+                      ? `${KPI_PROFILE_LABEL[heroPrimary.kpiProfile]} · ${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
+                      : "אין צוותים בהיקף"
+                    : `יעד ${formatMonthIL(currentGoalMonth())}`}
                 </div>
-                <div className="num font-display text-lg font-bold">{formatNum(heroCompleted)}</div>
-              </div>
-              <div className="text-xs text-white/60">
-                {scopedManager
-                  ? heroPrimary
-                    ? `${KPI_PROFILE_LABEL[heroPrimary.kpiProfile]} · ${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
-                    : "אין צוותים בהיקף"
-                  : `יעד ${formatMonthIL(currentGoalMonth())}`}
               </div>
             </div>
-          </div>
+          )
         }
         heroActions={
           <>
@@ -734,47 +779,86 @@ function ManagerHome() {
           removed. */}
       <DataFreshnessBar teamId={workspaceTeamId} />
 
-      {/* Primary KPI row — the same four figures the hero and cards below
-          already own (official target, month-to-date result, remainder and
-          the calendar), promoted to rich metric cards. Nothing here is
-          derived beyond max(0, target − result); a missing target stays a
-          dash, never a fabricated number or trend. */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-        <MetricCard
-          icon={Target}
-          label={heroLabels.target}
-          value={heroTarget == null ? "—" : formatNum(heroTarget)}
-          sub={`יעד ${formatMonthIL(currentGoalMonth())}`}
-          tone="primary"
-        />
-        <MetricCard
-          icon={Gauge}
-          label={heroLabels.result}
-          value={formatNum(heroCompleted)}
-          sub={heroPct == null ? undefined : `${formatPct(heroPct)} ${heroCaption}`}
-          tone="accent"
-        />
-        <MetricCard
-          icon={TrendingUp}
-          label="נותר ליעד"
-          value={heroTarget == null ? "—" : formatNum(Math.max(0, heroTarget - heroCompleted))}
-          sub={
-            scopedManager && heroPrimary
-              ? `${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
-              : heroTarget != null && heroCompleted >= heroTarget
-                ? "היעד הושג"
-                : undefined
-          }
-          tone={heroTarget != null && heroCompleted >= heroTarget ? "success" : "primary"}
-        />
-        <MetricCard
-          icon={CalendarClock}
-          label="ימי עבודה שנותרו"
-          value={String(wdRemaining)}
-          sub={`מתוך ${wdTotal} בחודש`}
-          tone="warning"
-        />
-      </div>
+      {/* Primary KPI row. An activity manager leads with STRUCTURE (their
+          unit of management is centers, and mixed KPI profiles must never be
+          summed into one performance figure); every other manager keeps the
+          performance row — the same four figures the hero and cards below
+          already own. Nothing here is derived beyond max(0, target − result)
+          and structural counts; a missing target stays a dash, never a
+          fabricated number or trend. */}
+      {activityManager && activityStructure ? (
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <MetricCard
+            icon={Building2}
+            label="מוקדים בפעילות"
+            value={String(activityStructure.centerCount)}
+            sub={scope?.unitName ? `פעילות ${scope.unitName}` : undefined}
+            tone="primary"
+          />
+          <MetricCard
+            icon={UsersRound}
+            label="צוותים"
+            value={String(activityStructure.teamCount)}
+            sub="בכל מוקדי הפעילות"
+            tone="accent"
+          />
+          <MetricCard
+            icon={Users2}
+            label="נציגים"
+            value={String(activityStructure.repCount)}
+            sub="בכל צוותי הפעילות"
+            tone="primary"
+          />
+          <MetricCard
+            icon={AlertTriangle}
+            label="מוקדים ללא צוותים"
+            value={String(activityStructure.centersWithoutTeams)}
+            sub={
+              activityStructure.centersWithoutTeams > 0
+                ? "מבנה הדורש טיפול"
+                : "לכל המוקדים יש צוותים"
+            }
+            tone={activityStructure.centersWithoutTeams > 0 ? "warning" : "success"}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <MetricCard
+            icon={Target}
+            label={heroLabels.target}
+            value={heroTarget == null ? "—" : formatNum(heroTarget)}
+            sub={`יעד ${formatMonthIL(currentGoalMonth())}`}
+            tone="primary"
+          />
+          <MetricCard
+            icon={Gauge}
+            label={heroLabels.result}
+            value={formatNum(heroCompleted)}
+            sub={heroPct == null ? undefined : `${formatPct(heroPct)} ${heroCaption}`}
+            tone="accent"
+          />
+          <MetricCard
+            icon={TrendingUp}
+            label="נותר ליעד"
+            value={heroTarget == null ? "—" : formatNum(Math.max(0, heroTarget - heroCompleted))}
+            sub={
+              scopedManager && heroPrimary
+                ? `${heroPrimary.teamsWithTarget} מתוך ${heroPrimary.teamCount} צוותים עם יעד`
+                : heroTarget != null && heroCompleted >= heroTarget
+                  ? "היעד הושג"
+                  : undefined
+            }
+            tone={heroTarget != null && heroCompleted >= heroTarget ? "success" : "primary"}
+          />
+          <MetricCard
+            icon={CalendarClock}
+            label="ימי עבודה שנותרו"
+            value={String(wdRemaining)}
+            sub={`מתוך ${wdTotal} בחודש`}
+            tone="warning"
+          />
+        </div>
+      )}
 
       {/* Dashboard zone: on desktop the page stops being one flat stack —
           team status and operational sections form the wide work column,
@@ -787,7 +871,11 @@ function ManagerHome() {
           with missing targets broken down by team. The per-rep pace detail
           becomes a drill-down into the selected team below. A plain team
           manager keeps the exact single-team layout. */}
-          {scopedManager && (
+          {/* CENTER manager: team board (the center IS the scope — no
+              redundant center grouping). EXECUTIVE: unchanged grouped view.
+              ACTIVITY manager: center board — one surface per center UNIT
+              (empty centers included), teams one drill level down. */}
+          {scopedManager && !activityManager && (
             <>
               <ScopeOverviewCard
                 groups={scopeGroups}
@@ -795,6 +883,7 @@ function ManagerHome() {
                 isLoading={scopeCardsLoading}
                 isError={scopeCardsError}
                 onSelectTeam={setWorkspaceTeam}
+                title={centerManager ? CENTER_TEAMS_TITLE : undefined}
               />
               <ScopeMissingTargetsCard
                 rows={scopeMissing}
@@ -802,6 +891,14 @@ function ManagerHome() {
                 isError={scopeCardsError}
               />
             </>
+          )}
+          {activityManager && activityBoard && (
+            <ActivityCenterBoardCard
+              board={activityBoard}
+              isLoading={scopeCardsLoading}
+              isError={scopeCardsError}
+              onSelectTeam={setWorkspaceTeam}
+            />
           )}
 
           {!scopedManager && workspace.type === "team" && (
@@ -882,20 +979,39 @@ function ManagerHome() {
             on desktop it is now permanently visible beside the work column.
             Same components, same data, no new derivations. */}
         <aside className="min-w-0 space-y-4">
-          <SectionHeading title="אנשים ותובנות" />
-          <TopPerformersCard
-            reps={scopedReps}
-            goalsByRepId={repGoals.goalsByRepId}
-            isLoading={state.repsLoading || repGoals.isLoading}
-            isError={!!state.repsError || repGoals.isError}
-          />
-          <InsightsCard
-            reps={scopedReps}
-            repGoalsByRepId={repGoals.goalsByRepId}
-            isLoading={state.repsLoading || repGoals.isLoading}
-            isError={!!state.repsError || repGoals.isError}
-          />
-          <RecentActivityCard />
+          {activityManager ? (
+            /* An activity manager's attention layer is MANAGEMENT-level:
+               structural gaps and missing targets per team, not a ranking of
+               individual representatives across incompatible centers —
+               rep-level rankings live deeper, inside the center/team
+               drill-down. Same data sources as before, re-prioritized. */
+            <>
+              <SectionHeading title="תשומת לב ניהולית" />
+              <ScopeMissingTargetsCard
+                rows={scopeMissing}
+                isLoading={scopeCardsLoading}
+                isError={scopeCardsError}
+              />
+              <RecentActivityCard />
+            </>
+          ) : (
+            <>
+              <SectionHeading title="אנשים ותובנות" />
+              <TopPerformersCard
+                reps={scopedReps}
+                goalsByRepId={repGoals.goalsByRepId}
+                isLoading={state.repsLoading || repGoals.isLoading}
+                isError={!!state.repsError || repGoals.isError}
+              />
+              <InsightsCard
+                reps={scopedReps}
+                repGoalsByRepId={repGoals.goalsByRepId}
+                isLoading={state.repsLoading || repGoals.isLoading}
+                isError={!!state.repsError || repGoals.isError}
+              />
+              <RecentActivityCard />
+            </>
+          )}
         </aside>
       </div>
     </div>
