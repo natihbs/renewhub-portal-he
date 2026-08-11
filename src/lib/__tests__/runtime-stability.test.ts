@@ -116,10 +116,10 @@ describe("role resolution", () => {
 
   it("does not cache a failed roles query", async () => {
     const fetchRoles = vi
-      .fn<[string], Promise<("admin")[]>>()
-      .mockRejectedValueOnce(new Error("network"))
-      .mockResolvedValue(["admin"]);
+      .fn(async (_userId: string): Promise<("admin")[]> => ["admin"])
+      .mockRejectedValueOnce(new Error("network"));
     expect((await getCurrentRoles({ ...ok, fetchRoles })).status).toBe("unavailable");
+
     const second = await getCurrentRoles({ ...ok, fetchRoles });
     expect(second).toEqual({ status: "ok", userId: "u1", roles: ["admin"] });
     expect(fetchRoles).toHaveBeenCalledTimes(2);
