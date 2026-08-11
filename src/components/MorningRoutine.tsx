@@ -720,27 +720,36 @@ function PrioritiesCard({ underPace, noListening, noFeedback, openCalls, openUnd
         </div>
       ) : (
         <ul className="space-y-2">
-          {items.map((it, idx) => (
-            <li key={it.label}>
-              <Link
-                to={it.href.startsWith("#") ? "/" : it.href}
-                hash={it.href.startsWith("#") ? it.href.slice(1) : undefined}
-                className={cn(
-                  "flex items-center justify-between gap-2 rounded-lg border p-2.5 transition-colors hover:bg-accent/40",
-                  idx === 0 && "border-primary/40 bg-primary/5"
-                )}
-              >
+          {items.map((it, idx) => {
+            const target = resolveInternalLink(it.href);
+            const rowClass = cn(
+              "flex items-center justify-between gap-2 rounded-lg border p-2.5 transition-colors",
+              target && "hover:bg-accent/40",
+              idx === 0 && "border-primary/40 bg-primary/5"
+            );
+            const body = (
+              <>
                 <div className="flex items-center gap-2 text-sm">
                   <span className={cn("grid h-6 w-6 place-items-center rounded-md text-xs font-bold", idx === 0 ? "bg-primary text-primary-foreground" : "bg-accent text-primary")}>{idx + 1}</span>
                   <span className="font-medium">{it.label}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">{it.count}</Badge>
-                  <ArrowLeft className="h-3.5 w-3.5 text-muted-foreground" />
+                  {target && <ArrowLeft className="h-3.5 w-3.5 text-muted-foreground" />}
                 </div>
-              </Link>
-            </li>
-          ))}
+              </>
+            );
+            return (
+              <li key={it.label}>
+                {target ? (
+                  <Link to={target.to} hash={target.hash} className={rowClass}>{body}</Link>
+                ) : (
+                  <div className={rowClass}>{body}</div>
+                )}
+              </li>
+            );
+          })}
+
         </ul>
       )}
     </div>
