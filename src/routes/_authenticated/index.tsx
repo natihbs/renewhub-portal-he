@@ -676,7 +676,13 @@ function ManagerHome() {
   const activityBoard = useMemo(
     () =>
       activityManager && scope
-        ? buildActivityCenterBoard({ units: scope.units, rows: scopeRows })
+        ? buildActivityCenterBoard({
+            units: scope.units,
+            rows: scopeRows,
+            // scope.units is the org-wide hierarchy list; the resolved unit id
+            // narrows the board to THIS activity's centers by id.
+            activityUnitId: scope.unitId,
+          })
         : null,
     [activityManager, scope, scopeRows],
   );
@@ -799,7 +805,10 @@ function ManagerHome() {
             icon={UsersRound}
             label="צוותים"
             value={String(activityStructure.teamCount)}
-            sub="בכל מוקדי הפעילות"
+            // The count is the manager's FULL covered scope (center teams +
+            // directly-attached + unattached), so the label must not narrow it
+            // to "בכל מוקדי הפעילות".
+            sub="בהיקף הפעילות"
             tone="accent"
           />
           <MetricCard

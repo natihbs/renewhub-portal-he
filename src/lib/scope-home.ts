@@ -333,20 +333,34 @@ export type ActivityCenterBoard = {
 };
 
 /**
- * The activity manager's primary board: starts from the activity's center
+ * The activity manager's primary board: starts from the activity's OWN center
  * UNITS (so empty centers render), assigns each covered team row to exactly
  * one bucket (its center / directly-on-activity / unattached), and summarises
  * each center per KPI profile. Nothing in scope is dropped and nothing empty
  * is inflated into fake performance.
+ *
+ * `activityUnitId` is the manager's resolved activity unit (scope.unitId) and
+ * is what makes the board honest in a multi-activity organization: the units
+ * list handed in is the org-wide business_units table (authenticated-readable),
+ * so the board must select ONLY this activity's subtree — centers are matched
+ * by `parentId === activityUnitId`, never by name. A covered team pointing at
+ * a unit outside that subtree (another activity's center, or an unknown unit)
+ * is NOT silently attached to that foreign center; it falls into
+ * `unattachedRows`, where it stays visible and counted. Passing null (no
+ * resolved unit) yields no centers — every covered row is then unattached,
+ * which is the truthful reading of "we don't know this manager's activity".
  */
 export function buildActivityCenterBoard(params: {
   units: BusinessUnit[];
   rows: ScopeTeamRow[];
+  activityUnitId: string | null;
 }): ActivityCenterBoard {
-  const { units, rows } = params;
+  const { units, rows, activityUnitId } = params;
   const unitById = new Map(units.map((u) => [u.id, u]));
   const centers = units
-    .filter((u) => u.unitType === "center")
+    .filter(
+      (u) => u.unitType === "center" && activityUnitId !== null && u.parentId === activityUnitId,
+    )
     .map((center): ActivityCenterSummary => {
       const teams = rows.filter((r) => r.businessUnitId === center.id);
       return {
@@ -361,9 +375,12 @@ export function buildActivityCenterBoard(params: {
       };
     })
     .sort((a, b) => a.centerName.localeCompare(b.centerName, "he"));
+  // Direct attachments count only for THIS activity — a team hanging off some
+  // other activity unit is not "directly attached" from this manager's point
+  // of view, it is simply outside their hierarchy subtree.
   const directRows = rows.filter((r) => {
-    const unit = r.businessUnitId ? unitById.get(r.businessUnitId) : undefined;
-    return unit?.unitType === "activity";
+    if (!r.businessUnitId || r.businessUnitId !== activityUnitId) return false;
+    return unitById.get(r.businessUnitId)?.unitType === "activity";
   });
   const centerIds = new Set(centers.map((c) => c.centerId));
   const unattachedRows = rows.filter(
