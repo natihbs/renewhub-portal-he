@@ -22,6 +22,7 @@ import { AppModeProvider } from "@/lib/app-mode";
 import { AdminViewProvider } from "@/lib/admin-view";
 import { IdeasProvider } from "@/lib/ideas-store";
 import { AuthProvider } from "@/lib/auth";
+import { QueryIdentityBoundary } from "@/lib/query-identity";
 import { WorkspaceProvider } from "@/lib/workspace-context";
 
 import { RepWorkspace } from "@/components/RepWorkspace";
@@ -59,7 +60,6 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     console.error("[Pulse] root error boundary", error);
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
-
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4" dir="rtl">
@@ -163,34 +163,36 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AppModeProvider>
-          <AdminViewProvider>
-            <WorkspaceProvider>
-              <AppProvider>
-                <UxProvider>
-                  <IdeasProvider>
-                    <ImportProvider>
-                      <RepWorkspaceProvider>
-                        <MorningProvider>
-                          <CommsProvider>
-                            <ListeningProvider>
-                              <AppShell>
-                                <Outlet />
-                              </AppShell>
-                              <RepWorkspace />
-                              <IdeaFeedbackButton />
-                              <Toaster position="top-center" richColors />
-                            </ListeningProvider>
-                          </CommsProvider>
-                        </MorningProvider>
-                      </RepWorkspaceProvider>
-                    </ImportProvider>
-                  </IdeasProvider>
-                </UxProvider>
-              </AppProvider>
-            </WorkspaceProvider>
-          </AdminViewProvider>
-        </AppModeProvider>
+        <QueryIdentityBoundary>
+          <AppModeProvider>
+            <AdminViewProvider>
+              <WorkspaceProvider>
+                <AppProvider>
+                  <UxProvider>
+                    <IdeasProvider>
+                      <ImportProvider>
+                        <RepWorkspaceProvider>
+                          <MorningProvider>
+                            <CommsProvider>
+                              <ListeningProvider>
+                                <AppShell>
+                                  <Outlet />
+                                </AppShell>
+                                <RepWorkspace />
+                                <IdeaFeedbackButton />
+                                <Toaster position="top-center" richColors />
+                              </ListeningProvider>
+                            </CommsProvider>
+                          </MorningProvider>
+                        </RepWorkspaceProvider>
+                      </ImportProvider>
+                    </IdeasProvider>
+                  </UxProvider>
+                </AppProvider>
+              </WorkspaceProvider>
+            </AdminViewProvider>
+          </AppModeProvider>
+        </QueryIdentityBoundary>
       </AuthProvider>
     </QueryClientProvider>
   );
