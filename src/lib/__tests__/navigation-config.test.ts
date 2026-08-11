@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  accountIdentity,
+  TECHNICAL_ROLE_LABEL,
+  UNRESOLVED_MANAGER_LABEL,
+} from "../account-identity";
+import { BUSINESS_ROLE_LABEL } from "../business-scope";
+import {
   resolveAppRole,
   navItemsForRole,
   navLabel,
@@ -223,9 +229,27 @@ describe("role labels in AppShell", () => {
   const src = readFileSync(resolve(__dirname, "../../components/layout/AppShell.tsx"), "utf8");
 
   it("labels the roles מנהל מערכת / מנהל צוות / נציג in the profile and switcher", () => {
-    expect(src).toContain('"מנהל מערכת"');
-    expect(src).toContain('"מנהל צוות"');
+    // The rule is unchanged; its implementation moved. AppShell no longer maps
+    // a technical role to a business title inline — that mapping was what
+    // announced every center/activity/executive manager as "מנהל צוות" — so
+    // the labels now come from accountIdentity + BUSINESS_ROLE_LABEL, and this
+    // pins the same two things there: an admin is a SYSTEM administrator, and
+    // a bare "מנהל" is only ever the neutral fallback for a technical manager
+    // whose business scope has not resolved, never a business identity.
+    expect(src).toContain("accountIdentity({ roles, scope })");
     expect(src).not.toMatch(/\?\s*"מנהל"\s*:/);
+    expect(TECHNICAL_ROLE_LABEL.admin).toBe("מנהל מערכת");
+    expect(BUSINESS_ROLE_LABEL.team_manager).toBe("מנהל צוות");
+    expect(BUSINESS_ROLE_LABEL.admin).toBe("מנהל מערכת");
+    expect(accountIdentity({ roles: ["admin"], scope: null }).compact).toBe("מנהל מערכת");
+    expect(
+      accountIdentity({ roles: ["manager"], scope: { kind: "team_manager", title: "מנהל צוות" } })
+        .compact,
+    ).toBe("מנהל צוות");
+    expect(accountIdentity({ roles: ["representative"], scope: null }).compact).toBe("נציג");
+    // "מנהל" alone is the unresolved-scope fallback and nothing else.
+    expect(UNRESOLVED_MANAGER_LABEL).toBe("מנהל");
+    expect(accountIdentity({ roles: ["manager"], scope: null }).businessLabel).toBeNull();
   });
 
   it("titles the admin management group ניהול מערכת, not ניהול ארגוני", () => {
