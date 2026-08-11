@@ -61,7 +61,6 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
-
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4" dir="rtl">
       <div className="max-w-md text-center">
@@ -165,34 +164,34 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <QueryIdentityBoundary>
-        <AppModeProvider>
-          <AdminViewProvider>
-            <WorkspaceProvider>
-              <AppProvider>
-                <UxProvider>
-                  <IdeasProvider>
-                    <ImportProvider>
-                      <RepWorkspaceProvider>
-                        <MorningProvider>
-                          <CommsProvider>
-                            <ListeningProvider>
-                              <AppShell>
-                                <Outlet />
-                              </AppShell>
-                              <RepWorkspace />
-                              <IdeaFeedbackButton />
-                              <Toaster position="top-center" richColors />
-                            </ListeningProvider>
-                          </CommsProvider>
-                        </MorningProvider>
-                      </RepWorkspaceProvider>
-                    </ImportProvider>
-                  </IdeasProvider>
-                </UxProvider>
-              </AppProvider>
-            </WorkspaceProvider>
-          </AdminViewProvider>
-        </AppModeProvider>
+          <AppModeProvider>
+            <AdminViewProvider>
+              <WorkspaceProvider>
+                <AppProvider>
+                  <UxProvider>
+                    <IdeasProvider>
+                      <ImportProvider>
+                        <RepWorkspaceProvider>
+                          <MorningProvider>
+                            <CommsProvider>
+                              <ListeningProvider>
+                                <AppShell>
+                                  <Outlet />
+                                </AppShell>
+                                <RepWorkspace />
+                                <IdeaFeedbackButton />
+                                <Toaster position="top-center" richColors />
+                              </ListeningProvider>
+                            </CommsProvider>
+                          </MorningProvider>
+                        </RepWorkspaceProvider>
+                      </ImportProvider>
+                    </IdeasProvider>
+                  </UxProvider>
+                </AppProvider>
+              </WorkspaceProvider>
+            </AdminViewProvider>
+          </AppModeProvider>
         </QueryIdentityBoundary>
       </AuthProvider>
     </QueryClientProvider>
