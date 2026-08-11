@@ -60,11 +60,19 @@ export function NotificationBell() {
                     {!n.read && <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-primary" />}
                   </div>
                 );
+                const target = resolveInternalLink(n.href);
                 return (
                   <li key={n.id}>
-                    {n.href ? <Link to={n.href}>{Item}</Link> : Item}
+                    {target ? (
+                      <Link to={target.to} hash={target.hash}>
+                        {Item}
+                      </Link>
+                    ) : (
+                      Item
+                    )}
                   </li>
                 );
+
               })}
             </ul>
           )}
