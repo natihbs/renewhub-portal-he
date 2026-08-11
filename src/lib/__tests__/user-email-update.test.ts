@@ -146,8 +146,12 @@ describe("updateUserEmail — admin-only, both stores in sync, nothing else move
 // ----------------------------------------------------------------------- UI
 describe("/users edit dialog — editable email with honest helper text", () => {
   it("the email field is editable and labeled אימייל", () => {
-    expect(usersPageSrc).toContain("value={email} onChange={(e) => setEmail(e.target.value)}");
-    expect(usersPageSrc).not.toContain('value={user.email ?? ""} disabled');
+    // Whitespace-normalized: Phase 5 reflowed the input's attributes onto
+    // separate lines. The RULE is what's pinned — the field is bound to the
+    // editable `email` state and is NOT the old disabled, read-only input.
+    const flat = usersPageSrc.replace(/\s+/g, " ");
+    expect(flat).toContain("value={email} onChange={(e) => setEmail(e.target.value)}");
+    expect(flat).not.toContain('value={user.email ?? ""} disabled');
   });
 
   it("shows the login-address helper text", () => {
