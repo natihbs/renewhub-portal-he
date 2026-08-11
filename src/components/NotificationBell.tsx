@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useUx } from "@/lib/ux-store";
+import { resolveInternalLink } from "@/lib/internal-route";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<string, string> = {
