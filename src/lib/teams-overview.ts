@@ -37,6 +37,81 @@ export type TeamsOverviewSummary = {
   byProfile: Record<KpiProfile, number>;
 };
 
+/**
+ * The manager-filter sentinel for "teams with no manager at all" — a filter
+ * VALUE, not a manager id. Exported so the page and this module can never
+ * drift apart on the literal.
+ */
+export const NO_MANAGER_FILTER = "__none__";
+
+/** The subset of a listTeams row the filter/sort reads. */
+export type TeamsFilterRow = {
+  name: string;
+  department: string | null;
+  description: string | null;
+  manager_id: string | null;
+  active: boolean;
+  kpi_profile: KpiProfile | null;
+  created_at: string;
+  member_count: number;
+};
+
+export type TeamsFilterState = {
+  search: string;
+  /** "all" | "active" | "inactive" */
+  statusFilter: string;
+  /** "all" | NO_MANAGER_FILTER | a specific manager's user id */
+  managerFilter: string;
+  profileFilter: "all" | KpiProfile;
+  sortBy: "name" | "created" | "members";
+};
+
+/**
+ * The /teams list view: the page's five controls applied to the rows the page
+ * already loaded. Extracted from the route component UNCHANGED (same predicate
+ * order, same search fields, same comparators) purely so the rule is unit
+ * tested rather than only visually verified.
+ *
+ * It filters and sorts what the caller already holds — it is not a permission
+ * boundary, adds no data source, and knows nothing about the business
+ * hierarchy: there is deliberately no business-unit filter on this page.
+ * The manager NAME used by the search is resolved by the caller, because only
+ * the page holds the people index.
+ */
+export function filterAndSortTeams<T extends TeamsFilterRow>(
+  teams: T[],
+  filters: TeamsFilterState,
+  resolveManagerName: (managerId: string) => string,
+): T[] {
+  const { search, statusFilter, managerFilter, profileFilter, sortBy } = filters;
+  const q = search.trim().toLowerCase();
+  let rows = teams.filter((t) => {
+    if (q) {
+      const mgr = t.manager_id ? resolveManagerName(t.manager_id) : "";
+      const hay = `${t.name} ${t.department ?? ""} ${t.description ?? ""} ${mgr}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (statusFilter === "active" && !t.active) return false;
+    if (statusFilter === "inactive" && t.active) return false;
+    if (managerFilter === NO_MANAGER_FILTER && t.manager_id) return false;
+    if (
+      managerFilter !== "all" &&
+      managerFilter !== NO_MANAGER_FILTER &&
+      t.manager_id !== managerFilter
+    )
+      return false;
+    if (profileFilter !== "all" && (t.kpi_profile ?? DEFAULT_KPI_PROFILE) !== profileFilter)
+      return false;
+    return true;
+  });
+  rows = [...rows].sort((a, b) => {
+    if (sortBy === "created") return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+    if (sortBy === "members") return b.member_count - a.member_count;
+    return a.name.localeCompare(b.name, "he");
+  });
+  return rows;
+}
+
 export function summarizeTeams(teams: TeamsOverviewInput[]): TeamsOverviewSummary {
   const byProfile: Record<KpiProfile, number> = { renewals: 0, generic_sales: 0 };
   let active = 0;

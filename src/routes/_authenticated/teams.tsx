@@ -22,7 +22,7 @@ import {
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InitialsAvatar, MetricCard, SectionHeading } from "@/components/dashboard/Surfaces";
-import { summarizeTeams } from "@/lib/teams-overview";
+import { filterAndSortTeams, NO_MANAGER_FILTER, summarizeTeams } from "@/lib/teams-overview";
 import {
   UsersRound,
   Plus,
@@ -110,7 +110,10 @@ type RepMember = {
   active: boolean;
 };
 
-const NONE = "__none__";
+// The page's "nothing selected" sentinel. It doubles as the manager FILTER's
+// "ללא מנהל" value, so it is sourced from teams-overview.ts — the filter helper
+// and this page can then never disagree about the literal.
+const NONE = NO_MANAGER_FILTER;
 
 /**
  * Every query key a team mutation (manager reassignment/removal, KPI profile,
@@ -159,6 +162,30 @@ export function canManageTeamRow(
   if (ctx.isAdmin) return true;
   if (!ctx.isManager) return false;
   return !!ctx.currentUserId && team.manager_id === ctx.currentUserId;
+}
+
+/**
+ * Card-level keyboard activation rule for TeamCardSurface.
+ *
+ * The team card is itself focusable (role="button"), but it CONTAINS focusable
+ * controls: the RowActions buttons and — because a Radix portal still bubbles
+ * through the React tree — their AlertDialog confirm/cancel buttons. A keydown
+ * on any of those reaches the card's handler, where an unconditional
+ * preventDefault() would swallow the button's own activation and open the
+ * details sheet instead.
+ *
+ * So the card only reacts to a keypress on the card ITSELF; every nested
+ * control keeps its own keyboard behavior. Mouse behavior is unaffected (the
+ * actions cluster already stops click propagation). Pure so the rule is unit
+ * tested directly rather than only observed in a browser.
+ */
+export function isCardSelfActivation(e: {
+  key: string;
+  target: unknown;
+  currentTarget: unknown;
+}): boolean {
+  if (e.key !== "Enter" && e.key !== " ") return false;
+  return e.target === e.currentTarget;
 }
 
 function KpiProfileBadge({ profile }: { profile: KpiProfile }) {
@@ -215,30 +242,19 @@ function TeamsPage() {
   // (not just its own request) before reporting success to the user.
   const invalidate = () => invalidateTeamAdminCaches(qc);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let rows = teams.filter((t) => {
-      if (q) {
-        const mgr = t.manager_id ? personName(peopleById.get(t.manager_id)) : "";
-        const hay = `${t.name} ${t.department ?? ""} ${t.description ?? ""} ${mgr}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (statusFilter === "active" && !t.active) return false;
-      if (statusFilter === "inactive" && t.active) return false;
-      if (managerFilter === NONE && t.manager_id) return false;
-      if (managerFilter !== "all" && managerFilter !== NONE && t.manager_id !== managerFilter)
-        return false;
-      if (profileFilter !== "all" && (t.kpi_profile ?? DEFAULT_KPI_PROFILE) !== profileFilter)
-        return false;
-      return true;
-    });
-    rows = [...rows].sort((a, b) => {
-      if (sortBy === "created") return (b.created_at ?? "").localeCompare(a.created_at ?? "");
-      if (sortBy === "members") return b.member_count - a.member_count;
-      return a.name.localeCompare(b.name, "he");
-    });
-    return rows;
-  }, [teams, search, statusFilter, managerFilter, profileFilter, sortBy, peopleById]);
+  // Search / status / manager / KPI-profile / sort — the same five controls,
+  // now applied by a pure, unit-tested helper (teams-overview.ts) instead of an
+  // inline predicate. Behavior is unchanged, including the search fields and
+  // every comparator.
+  const filtered = useMemo(
+    () =>
+      filterAndSortTeams(
+        teams,
+        { search, statusFilter, managerFilter, profileFilter, sortBy },
+        (managerId) => personName(peopleById.get(managerId)),
+      ),
+    [teams, search, statusFilter, managerFilter, profileFilter, sortBy, peopleById],
+  );
 
   // Organization summary over ALL loaded teams (not the filtered view) — the
   // band describes the organization, the command bar's counter describes the
@@ -281,41 +297,49 @@ function TeamsPage() {
           targets or results, so there is deliberately no performance metric
           here to invent. */}
       {!teamsQ.isLoading && !teamsQ.isError && teams.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-          <MetricCard
-            icon={UsersRound}
-            label="צוותים"
-            value={String(summary.total)}
-            sub={`${summary.active} פעילים · ${summary.inactive} מושבתים`}
-            tone="primary"
-          />
-          <MetricCard
-            icon={Users2}
-            label="נציגים"
-            value={String(summary.representatives)}
-            sub={`${summary.members} חשבונות משתמש בצוותים`}
-            tone="accent"
-          />
-          <MetricCard
-            icon={AlertTriangle}
-            label="צוותים ללא מנהל"
-            value={String(summary.withoutManager)}
-            sub={
-              summary.withoutManagerStaffed > 0
-                ? `${summary.withoutManagerStaffed} מהם מאוישים`
-                : summary.withoutManager > 0
-                  ? "כולם ללא חברים"
-                  : "לכל הצוותים יש מנהל"
-            }
-            tone={summary.withoutManagerStaffed > 0 ? "warning" : "success"}
-          />
-          <MetricCard
-            icon={ShieldCheck}
-            label="פרופילי KPI"
-            value={String(summary.byProfile.renewals)}
-            sub={`${KPI_PROFILE_LABEL.renewals} · ${summary.byProfile.generic_sales} ${KPI_PROFILE_LABEL.generic_sales}`}
-            tone="primary"
-          />
+        <div className="space-y-2">
+          {/* The band describes EVERY team this user can see — not the filtered
+              subset below. The command bar's "מציג X מתוך Y" counter is what
+              follows the filters. */}
+          <p className="text-xs font-medium text-muted-foreground">סיכום כלל הצוותים בהיקף</p>
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+            <MetricCard
+              icon={UsersRound}
+              label="צוותים"
+              value={String(summary.total)}
+              sub={`${summary.active} פעילים · ${summary.inactive} מושבתים`}
+              tone="primary"
+            />
+            <MetricCard
+              icon={Users2}
+              label="נציגים"
+              value={String(summary.representatives)}
+              sub={`${summary.members} חשבונות משתמש בצוותים`}
+              tone="accent"
+            />
+            <MetricCard
+              icon={AlertTriangle}
+              label="צוותים ללא מנהל"
+              value={String(summary.withoutManager)}
+              sub={
+                summary.withoutManagerStaffed > 0
+                  ? `${summary.withoutManagerStaffed} מהם מאוישים`
+                  : summary.withoutManager > 0
+                    ? "כולם ללא חברים"
+                    : "לכל הצוותים יש מנהל"
+              }
+              tone={summary.withoutManagerStaffed > 0 ? "warning" : "success"}
+            />
+            {/* The figure IS the renewals-team count — the label says so, so the
+                number can't be misread as "how many KPI profiles exist". */}
+            <MetricCard
+              icon={ShieldCheck}
+              label={`צוותי ${KPI_PROFILE_LABEL.renewals}`}
+              value={String(summary.byProfile.renewals)}
+              sub={`${summary.byProfile.generic_sales} צוותי ${KPI_PROFILE_LABEL.generic_sales}`}
+              tone="primary"
+            />
+          </div>
         </div>
       )}
 
@@ -524,10 +548,11 @@ function TeamCardSurface({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen();
-        }
+        // Nested controls own their own keyboard behavior — see
+        // isCardSelfActivation.
+        if (!isCardSelfActivation(e)) return;
+        e.preventDefault();
+        onOpen();
       }}
       className={cn(
         "surface-tile relative cursor-pointer overflow-hidden p-4",
@@ -1532,14 +1557,17 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
               )}
 
               {/* Legacy rows from before the centers-only rule: never rewritten
-                automatically — the admin moves each team to a center manually. */}
+                automatically — the admin moves each team to a center manually.
+                The affected teams are named once, inside the activity they hang
+                off (above); this banner carries the RULE and the total, so the
+                same list is not repeated twice on one screen. */}
               {activityAttachedTeams.length > 0 && (
                 <div className="flex items-start gap-2 rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2.5 text-xs text-warning-foreground">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   <span>
-                    צוות ניתן לשייך למוקד בלבד — הפעילות נקבעת דרך המוקד. הצוותים הבאים משויכים
-                    ישירות לפעילות ויש להעבירם למוקד:{" "}
-                    {activityAttachedTeams.map((t) => t.name).join(", ")}
+                    צוות ניתן לשייך למוקד בלבד — הפעילות נקבעת דרך המוקד.{" "}
+                    {activityAttachedTeams.length} צוותים משויכים ישירות לפעילות, מסומנים בתוך
+                    הפעילות שלהם למעלה, ויש להעבירם למוקד.
                   </span>
                 </div>
               )}
