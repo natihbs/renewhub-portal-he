@@ -37,7 +37,13 @@ export const IMPORT_PREVIEW_FILTER_LABEL: Record<ImportPreviewFilter, string> = 
   all: "הכול",
   errors: "שגיאות",
   warnings: "אזהרות",
-  decisions: "דורש החלטה",
+  // A matching EXCEPTION, stated as what the data proves: the row matched a
+  // deactivated representative, or matched nothing at all. It deliberately no
+  // longer says "דורש החלטה" — ProcessedRow cannot distinguish a row parked on
+  // skip by default from one a person deliberately skipped, so the filter must
+  // not assert that every such row is still awaiting a decision. The predicate
+  // and every filtering behavior are unchanged.
+  decisions: "חריגי התאמה",
   inactive: "נציגים מושבתים",
   unmatched: "ללא התאמה",
   unknown_team: "צוות לא מזוהה",
@@ -74,9 +80,12 @@ export type ImportPreviewRowClass = {
   unknownTeam: boolean;
   renewalsSkipped: boolean;
   /**
-   * The manager must actively decide: a matched-but-deactivated row, or an
-   * importable unmatched row currently parked on "skip" (it will silently be
-   * dropped unless they choose create/manual-match).
+   * A matching exception: a matched-but-deactivated row, or an importable
+   * unmatched row currently parked on "skip" (which will silently be dropped
+   * unless create/manual-match is chosen). Unchanged predicate — note it stays
+   * true for an inactive match even after it is resolved, which is why the
+   * preview band counts the narrower "still set to skip" population under its
+   * own label.
    */
   decision: boolean;
 };

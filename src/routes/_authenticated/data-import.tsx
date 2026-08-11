@@ -51,9 +51,13 @@ import {
   type TargetGoalSnapshotEntry,
 } from "@/lib/import-store";
 import {
+  countImportActions,
+  deriveStoredImportOutcome,
+  hasImportableRows,
   importOutcomeView,
   importStatusLabel,
   importTargetPlan,
+  MATCH_EXCEPTIONS_SKIPPED_LABEL,
   summarizeProcessedRows,
 } from "@/lib/import-summary";
 import { processRows, type ProcessedRow, type ResolvedAction, type RawRow } from "@/lib/import-processing";
@@ -451,7 +455,13 @@ function DataImportPage() {
     try {
       const snapshot = state.reps.map((r) => ({ ...r }));
       const errorReport: ImportHistoryEntry["errorReport"] = [];
-      let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0, cloudFailed = 0, reactivated = 0;
+      let updated = 0,
+        created = 0,
+        skipped = 0,
+        warns = 0,
+        errs = 0,
+        cloudFailed = 0,
+        reactivated = 0;
       const now = new Date().toISOString().slice(0, 10);
       const byId = new Map(state.reps.map((r) => [r.id, r] as const));
       // Official-target write candidates, collected only for rows whose
@@ -468,7 +478,13 @@ function DataImportPage() {
           skipped++;
           if (rowErrors.length > 0) errs += rowErrors.length;
           if (r.issues.length > 0) {
-            errorReport!.push({ row: r.index + 2, name: r.name, messages: r.issues.map((i) => `${i.severity === "error" ? "שגיאה" : "אזהרה"}: ${i.message}`) });
+            errorReport!.push({
+              row: r.index + 2,
+              name: r.name,
+              messages: r.issues.map(
+                (i) => `${i.severity === "error" ? "שגיאה" : "אזהרה"}: ${i.message}`,
+              ),
+            });
           }
           continue;
         }
@@ -524,14 +540,22 @@ function DataImportPage() {
           } else if (r.action === "create") {
             if (isDemo) {
               addRep({
-                name: r.name, teamId: r.teamId, teamName: r.teamName ?? "ללא צוות",
-                monthlyTarget: 0, currentResult: r.currentResult!, lastUpdatedAt: updatedAt,
+                name: r.name,
+                teamId: r.teamId,
+                teamName: r.teamName ?? "ללא צוות",
+                monthlyTarget: 0,
+                currentResult: r.currentResult!,
+                lastUpdatedAt: updatedAt,
               });
             } else {
               const createdRep = await createRepFn({
                 data: {
-                  name: r.name, team_id: r.teamId, current_result: r.currentResult!,
-                  external_ref: null, user_id: null, active: true,
+                  name: r.name,
+                  team_id: r.teamId,
+                  current_result: r.currentResult!,
+                  external_ref: null,
+                  user_id: null,
+                  active: true,
                 },
               });
               repIdForRenewal = createdRep.rep_id;
@@ -541,18 +565,30 @@ function DataImportPage() {
         } catch (e) {
           cloudFailed++;
           errs++;
-          errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`] });
+          errorReport!.push({
+            row: r.index + 2,
+            name: r.name,
+            messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`],
+          });
           continue;
         }
 
         if (!isDemo && repIdForRenewal && r.monthlyTarget != null) {
-          targetCandidates.push({ repId: repIdForRenewal, teamId: r.teamId, targetValue: r.monthlyTarget });
+          targetCandidates.push({
+            repId: repIdForRenewal,
+            teamId: r.teamId,
+            targetValue: r.monthlyTarget,
+          });
         }
 
         // Renewal values are a second, independent write — a failure here must never
         // be reported as import success, but also must not undo the target/result
         // write that already succeeded above.
-        if (!isDemo && repIdForRenewal && (r.renewalOpportunities != null || r.completedRenewals != null)) {
+        if (
+          !isDemo &&
+          repIdForRenewal &&
+          (r.renewalOpportunities != null || r.completedRenewals != null)
+        ) {
           try {
             // team_id is deliberately NOT sent: the database derives the
             // historical attribution from the representative's authoritative
@@ -570,7 +606,11 @@ function DataImportPage() {
             });
           } catch (e) {
             errs++;
-            errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירת נתוני חידוש: ${(e as Error).message ?? e}`] });
+            errorReport!.push({
+              row: r.index + 2,
+              name: r.name,
+              messages: [`שגיאת שמירת נתוני חידוש: ${(e as Error).message ?? e}`],
+            });
           }
         }
       }
@@ -583,38 +623,54 @@ function DataImportPage() {
       // silently dropped. Every write also captures a restore point
       // (targetGoalSnapshot) so undo can put things back exactly, per row —
       // never a generic "clear everything" undo.
-      let targetsSet = 0, targetsSkippedNoTeam = 0, targetsFailed = 0;
+      let targetsSet = 0,
+        targetsSkippedNoTeam = 0,
+        targetsFailed = 0;
       const targetGoalSnapshot: TargetGoalSnapshotEntry[] = [];
       if (!isDemo && applyTargetsFromImport && targetCandidates.length > 0 && importTargetMonth) {
         const byTeam = new Map<string, { representative_id: string; target_value: number }[]>();
         for (const c of targetCandidates) {
-          if (!c.teamId) { targetsSkippedNoTeam++; continue; }
+          if (!c.teamId) {
+            targetsSkippedNoTeam++;
+            continue;
+          }
           const list = byTeam.get(c.teamId) ?? [];
           list.push({ representative_id: c.repId, target_value: c.targetValue });
           byTeam.set(c.teamId, list);
         }
         for (const [teamId, goals] of byTeam) {
           try {
-            const res = await setGoalsFn({ data: { team_id: teamId, month: importTargetMonth, goals } });
+            const res = await setGoalsFn({
+              data: { team_id: teamId, month: importTargetMonth, goals },
+            });
             targetsSet += res.created + res.updated;
             const goalMonth = `${importTargetMonth}-01`;
             for (const p of res.previously_existing) {
               targetGoalSnapshot.push({
-                representativeId: p.representative_id, teamId, goalMonth,
-                hadPrevious: true, previousTargetValue: p.target_value,
+                representativeId: p.representative_id,
+                teamId,
+                goalMonth,
+                hadPrevious: true,
+                previousTargetValue: p.target_value,
               });
             }
             for (const repId of res.newly_created_representative_ids) {
               targetGoalSnapshot.push({
-                representativeId: repId, teamId, goalMonth,
-                hadPrevious: false, previousTargetValue: null,
+                representativeId: repId,
+                teamId,
+                goalMonth,
+                hadPrevious: false,
+                previousTargetValue: null,
               });
             }
           } catch (e) {
             targetsFailed += goals.length;
             errorReport!.push({
-              row: 0, name: undefined,
-              messages: [`עדכון יעדים רשמיים נכשל עבור צוות (${goals.length} נציגים): ${(e as Error).message ?? e}`],
+              row: 0,
+              name: undefined,
+              messages: [
+                `עדכון יעדים רשמיים נכשל עבור צוות (${goals.length} נציגים): ${(e as Error).message ?? e}`,
+              ],
             });
           }
         }
@@ -622,11 +678,21 @@ function DataImportPage() {
 
       if (!isDemo) {
         void qc.invalidateQueries({ queryKey: ["representatives"] });
-        if (applyTargetsFromImport) void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
+        if (applyTargetsFromImport)
+          void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
       }
 
-      const status: ImportHistoryEntry["status"] =
-        cloudFailed > 0 ? (updated + created === 0 ? "failed" : "partial") : (errs > 0 ? "partial" : "success");
+      // Stored outcome — status AND error count — derived in one tested place
+      // (import-summary.ts). A failed official-target write now downgrades the
+      // import to "partial" and is counted in the stored errors, instead of
+      // being invisible to everything except the transient toast.
+      const stored = deriveStoredImportOutcome({
+        cloudFailed,
+        updated,
+        created,
+        errs,
+        targetsFailed,
+      });
 
       // The reporting period this import applied to: recorded only when every
       // applied row's own date agreed on one calendar month — a mixed-months
@@ -649,8 +715,11 @@ function DataImportPage() {
         rowsCreated: created,
         rowsSkipped: skipped,
         warnings: warns,
-        errors: errs,
-        status,
+        // Warning counting is untouched; the error count now includes failed
+        // official-target writes so the permanent summary can never show
+        // "0 שגיאות" after a target write failed.
+        errors: stored.errors,
+        status: stored.status,
         period: appliedPeriod,
         snapshot: { reps: snapshot, targetGoals: targetGoalSnapshot },
         errorReport,
@@ -662,8 +731,8 @@ function DataImportPage() {
       const targetsNote = !applyTargetsFromImport
         ? undefined
         : targetsFailed > 0
-        ? ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו, ${targetsFailed} נכשלו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`
-        : ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`;
+          ? ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו, ${targetsFailed} נכשלו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`
+          : ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`;
 
       // Never report success unless every cloud write actually succeeded.
       if (cloudFailed > 0 || targetsFailed > 0) {
@@ -671,9 +740,13 @@ function DataImportPage() {
           description: `${updated} עודכנו, ${created} נוספו, ${cloudFailed} נכשלו בשמירה בענן — פרטים בדוח השגיאות${targetsNote ?? ""}`,
         });
       } else if (isDemo) {
-        toast.success("הייבוא הושלם (מצב הדגמה — לא נשמר בענן)", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
+        toast.success("הייבוא הושלם (מצב הדגמה — לא נשמר בענן)", {
+          description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו`,
+        });
       } else {
-        toast.success("הייבוא נשמר בהצלחה בענן", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו${targetsNote ?? ""}` });
+        toast.success("הייבוא נשמר בהצלחה בענן", {
+          description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו${targetsNote ?? ""}`,
+        });
       }
     } catch (e) {
       toast.error("שגיאה בייבוא", { description: String((e as Error).message ?? e) });
@@ -1373,8 +1446,9 @@ function PreviewStep({
       })()}
       {/* Decision band — what this file will actually do, over the FULL
           processed array (never the filtered view). Reactivations are counted
-          on their own line rather than folded into "update", and "דורש החלטה"
-          is the number of rows that will be dropped unless a human acts. */}
+          on their own line rather than folded into "update", and the matching
+          exceptions still set to skip are the rows that will be dropped if the
+          import is confirmed as it stands. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <StatChip label="שורות" value={processed.length} tone="muted" />
         <StatChip
@@ -1389,9 +1463,9 @@ function PreviewStep({
           tone="info"
         />
         <StatChip
-          label="דורש החלטה"
-          value={summary.decisionsRequired}
-          tone={summary.decisionsRequired > 0 ? "warning" : "muted"}
+          label={MATCH_EXCEPTIONS_SKIPPED_LABEL}
+          value={summary.matchExceptionsSkipped}
+          tone={summary.matchExceptionsSkipped > 0 ? "warning" : "muted"}
         />
         <StatChip
           label="שגיאות"
@@ -1786,24 +1860,46 @@ function ManualMatchDialog({ reps, onPick }: { reps: Rep[]; onPick: (id: string)
 // ---------- Step: Confirm ----------
 
 function ConfirmStep({
-  processed, fileName, criticalCount, warnCount, onBack, onConfirm, busy,
-  isDemo, applyTargetsFromImport, onApplyTargetsFromImportChange,
-  importTargetMonth, onImportTargetMonthChange,
+  processed,
+  fileName,
+  criticalCount,
+  warnCount,
+  onBack,
+  onConfirm,
+  busy,
+  isDemo,
+  applyTargetsFromImport,
+  onApplyTargetsFromImportChange,
+  importTargetMonth,
+  onImportTargetMonthChange,
 }: {
-  processed: ProcessedRow[]; fileName: string; criticalCount: number; warnCount: number;
-  onBack: () => void; onConfirm: () => void; busy: boolean;
-  isDemo: boolean; applyTargetsFromImport: boolean; onApplyTargetsFromImportChange: (v: boolean) => void;
-  importTargetMonth: string; onImportTargetMonthChange: (v: string) => void;
+  processed: ProcessedRow[];
+  fileName: string;
+  criticalCount: number;
+  warnCount: number;
+  onBack: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+  isDemo: boolean;
+  applyTargetsFromImport: boolean;
+  onApplyTargetsFromImportChange: (v: boolean) => void;
+  importTargetMonth: string;
+  onImportTargetMonthChange: (v: string) => void;
 }) {
-  const updateN = processed.filter((p) => p.action === "update").length;
-  const createN = processed.filter((p) => p.action === "create").length;
-  const skipN = processed.length - updateN - createN;
-  const targetRowsN = processed.filter((p) => p.action !== "skip" && p.monthlyTarget != null).length;
+  // Each action population is counted from the row's own action — deriving
+  // skip by subtraction classified every reactivation as "will be skipped".
+  const actions = countImportActions(processed);
+  const updateN = actions.update;
+  const createN = actions.create;
+  const skipN = actions.skip;
+  const targetRowsN = processed.filter(
+    (p) => p.action !== "skip" && p.monthlyTarget != null,
+  ).length;
   // Confirming an import that would write official targets requires an
   // explicit target month — never silently falls back to "now" (§20
   // correction #3).
   const monthMissing = applyTargetsFromImport && !importTargetMonth;
-  const reactivateN = processed.filter((p) => p.action === "reactivate").length;
+  const reactivateN = actions.reactivate;
   const targetPlan = importTargetPlan({ applyTargetsFromImport, importTargetMonth });
   return (
     <div className="space-y-4">
@@ -1908,9 +2004,9 @@ function ConfirmStep({
         <Button
           size="lg"
           onClick={onConfirm}
-          disabled={busy || updateN + createN === 0 || monthMissing}
+          disabled={busy || !hasImportableRows(actions) || monthMissing}
         >
-          {busy ? "מייבא..." : `אישור וייבוא · ${updateN + createN} שורות`}
+          {busy ? "מייבא..." : `אישור וייבוא · ${updateN + reactivateN + createN} שורות`}
         </Button>
       </div>
     </div>
