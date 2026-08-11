@@ -416,6 +416,45 @@ export function activityStructureSummary(board: ActivityCenterBoard): ActivitySt
   };
 }
 
+// ------------------------------------------------------- target readiness
+
+/**
+ * "How ready are these teams' targets for the selected month" — the /targets
+ * management question, derived from the SAME ScopeTeamRow values the home
+ * dashboards use, so the two screens can never disagree about who is missing
+ * a target.
+ *
+ * Every field is a count over rows that exist. There is deliberately no
+ * percentage and no combined target: a set of teams may mix KPI profiles, and
+ * "מיועדות" + "יעד" is not a number. `kpiProfiles` reports which profiles are
+ * present so the UI can label per profile instead of inventing one unit.
+ */
+export type TargetReadiness = {
+  teamCount: number;
+  /** Teams with an official team target for the month. */
+  teamsWithTarget: number;
+  /** Teams still missing their official team target. */
+  teamsMissingTarget: number;
+  repCount: number;
+  /** Representatives with no positive official personal target. */
+  repsMissingPersonalTarget: number;
+  /** Profiles actually present among these teams, renewals first. */
+  kpiProfiles: KpiProfile[];
+};
+
+export function targetReadiness(rows: ScopeTeamRow[]): TargetReadiness {
+  const withTarget = rows.filter((r) => r.target !== null && r.target > 0).length;
+  const order: KpiProfile[] = ["renewals", "generic_sales"];
+  return {
+    teamCount: rows.length,
+    teamsWithTarget: withTarget,
+    teamsMissingTarget: rows.length - withTarget,
+    repCount: rows.reduce((a, r) => a + r.repCount, 0),
+    repsMissingPersonalTarget: rows.reduce((a, r) => a + r.missingTargets, 0),
+    kpiProfiles: order.filter((p) => rows.some((r) => r.kpiProfile === p)),
+  };
+}
+
 // ---------------------------------------------------- per-profile aggregates
 
 export type ScopeProfileAggregate = {

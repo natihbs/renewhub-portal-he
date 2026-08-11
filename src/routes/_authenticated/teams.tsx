@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,8 +21,25 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { InitialsAvatar } from "@/components/dashboard/Surfaces";
-import { UsersRound, Plus, Search, Pencil, Trash2, Power, UserPlus, UserMinus, AlertTriangle } from "lucide-react";
+import { InitialsAvatar, MetricCard, SectionHeading } from "@/components/dashboard/Surfaces";
+import { summarizeTeams } from "@/lib/teams-overview";
+import {
+  UsersRound,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  Power,
+  UserPlus,
+  UserMinus,
+  AlertTriangle,
+  Users2,
+  Building2,
+  ShieldCheck,
+  Network,
+  Link2,
+  ChevronLeft,
+} from "lucide-react";
 import { requireRole } from "@/lib/require-role";
 import { formatDateIL } from "@/lib/format";
 import {
@@ -153,8 +170,11 @@ function TeamsPage() {
   const qc = useQueryClient();
   const teamsQ = useQuery({ queryKey: ["admin", "teams"], queryFn: () => list() });
 
-  const teams = (teamsQ.data?.teams ?? []) as TeamRow[];
-  const people = (teamsQ.data?.people ?? []) as Person[];
+  // Memoized so the `?? []` fallback doesn't produce a new array identity on
+  // every render and re-run every downstream useMemo (filtering, the overview
+  // summary, the people index).
+  const teams = useMemo(() => (teamsQ.data?.teams ?? []) as TeamRow[], [teamsQ.data?.teams]);
+  const people = useMemo(() => (teamsQ.data?.people ?? []) as Person[], [teamsQ.data?.people]);
   // canManage: organization-wide capabilities only (create team, full edit
   // dialog, activate/deactivate, delete) — always admin-only. A manager's
   // scoped capability for their own team (description, KPI profile, members)
@@ -206,8 +226,10 @@ function TeamsPage() {
       if (statusFilter === "active" && !t.active) return false;
       if (statusFilter === "inactive" && t.active) return false;
       if (managerFilter === NONE && t.manager_id) return false;
-      if (managerFilter !== "all" && managerFilter !== NONE && t.manager_id !== managerFilter) return false;
-      if (profileFilter !== "all" && (t.kpi_profile ?? DEFAULT_KPI_PROFILE) !== profileFilter) return false;
+      if (managerFilter !== "all" && managerFilter !== NONE && t.manager_id !== managerFilter)
+        return false;
+      if (profileFilter !== "all" && (t.kpi_profile ?? DEFAULT_KPI_PROFILE) !== profileFilter)
+        return false;
       return true;
     });
     rows = [...rows].sort((a, b) => {
@@ -218,6 +240,11 @@ function TeamsPage() {
     return rows;
   }, [teams, search, statusFilter, managerFilter, profileFilter, sortBy, peopleById]);
 
+  // Organization summary over ALL loaded teams (not the filtered view) — the
+  // band describes the organization, the command bar's counter describes the
+  // current filter. Pure and unit-tested in teams-overview.ts.
+  const summary = useMemo(() => summarizeTeams(teams), [teams]);
+
   const del = useServerFn(deleteTeam);
   const toggleActive = useServerFn(setTeamActive);
 
@@ -226,12 +253,18 @@ function TeamsPage() {
     // Await the full invalidation/refetch before the success toast — the
     // deleted team must actually be gone from the table by the time "הצוות
     // נמחק" appears, matching every other Teams mutation's pattern (P3b).
-    onSuccess: async () => { await invalidate(); toast.success("הצוות נמחק"); },
+    onSuccess: async () => {
+      await invalidate();
+      toast.success("הצוות נמחק");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const activeM = useMutation({
     mutationFn: (v: { team_id: string; active: boolean }) => toggleActive({ data: v }),
-    onSuccess: async (_d, v) => { await invalidate(); toast.success(v.active ? "הצוות הופעל" : "הצוות הושבת"); },
+    onSuccess: async (_d, v) => {
+      await invalidate();
+      toast.success(v.active ? "הצוות הופעל" : "הצוות הושבת");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -241,182 +274,189 @@ function TeamsPage() {
         title="ניהול צוותים"
         icon={UsersRound}
         description="יצירה, עריכה והשבתה של צוותים, שיוך מנהלים ונציגים"
-        actions={canManage ? <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="ms-1 h-4 w-4" />הוספת צוות</Button> : undefined}
       />
+
+      {/* Organization summary band — counts only, all of them derived from the
+          already-loaded team rows (see teams-overview.ts). /teams carries no
+          targets or results, so there is deliberately no performance metric
+          here to invent. */}
+      {!teamsQ.isLoading && !teamsQ.isError && teams.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <MetricCard
+            icon={UsersRound}
+            label="צוותים"
+            value={String(summary.total)}
+            sub={`${summary.active} פעילים · ${summary.inactive} מושבתים`}
+            tone="primary"
+          />
+          <MetricCard
+            icon={Users2}
+            label="נציגים"
+            value={String(summary.representatives)}
+            sub={`${summary.members} חשבונות משתמש בצוותים`}
+            tone="accent"
+          />
+          <MetricCard
+            icon={AlertTriangle}
+            label="צוותים ללא מנהל"
+            value={String(summary.withoutManager)}
+            sub={
+              summary.withoutManagerStaffed > 0
+                ? `${summary.withoutManagerStaffed} מהם מאוישים`
+                : summary.withoutManager > 0
+                  ? "כולם ללא חברים"
+                  : "לכל הצוותים יש מנהל"
+            }
+            tone={summary.withoutManagerStaffed > 0 ? "warning" : "success"}
+          />
+          <MetricCard
+            icon={ShieldCheck}
+            label="פרופילי KPI"
+            value={String(summary.byProfile.renewals)}
+            sub={`${KPI_PROFILE_LABEL.renewals} · ${summary.byProfile.generic_sales} ${KPI_PROFILE_LABEL.generic_sales}`}
+            tone="primary"
+          />
+        </div>
+      )}
+
+      {/* Command bar — search, filters, sorting, the live result count and the
+          admin-only create action on ONE surface, instead of floating inside
+          the list card. Same state and handlers as before. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card p-3">
+        <div className="relative w-full sm:w-64">
+          <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="חיפוש צוות, מחלקה או מנהל"
+            aria-label="חיפוש צוותים"
+            className="h-9 pe-9"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="h-9 w-full sm:w-36" aria-label="סינון לפי סטטוס">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">כל הסטטוסים</SelectItem>
+            <SelectItem value="active">פעיל</SelectItem>
+            <SelectItem value="inactive">מושבת</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={managerFilter} onValueChange={setManagerFilter}>
+          <SelectTrigger className="h-9 w-full sm:w-44" aria-label="סינון לפי מנהל">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">כל המנהלים</SelectItem>
+            <SelectItem value={NONE}>ללא מנהל</SelectItem>
+            {managers.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {personName(m)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={profileFilter}
+          onValueChange={(v) => setProfileFilter(v as "all" | KpiProfile)}
+        >
+          <SelectTrigger className="h-9 w-full sm:w-40" aria-label="סינון לפי פרופיל KPI">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">כל הפרופילים</SelectItem>
+            <SelectItem value="generic_sales">{KPI_PROFILE_LABEL.generic_sales}</SelectItem>
+            <SelectItem value="renewals">{KPI_PROFILE_LABEL.renewals}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+          <SelectTrigger className="h-9 w-full sm:w-48" aria-label="מיון">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">מיון לפי שם</SelectItem>
+            <SelectItem value="created">מיון לפי תאריך יצירה</SelectItem>
+            <SelectItem value="members">מיון לפי מספר חברים</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground">
+          מציג {filtered.length} מתוך {teams.length}
+        </span>
+        {canManage && (
+          <>
+            <span aria-hidden className="hidden h-6 w-px bg-border/70 sm:block" />
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="ms-1 h-4 w-4" />
+              הוספת צוות
+            </Button>
+          </>
+        )}
+      </div>
 
       <Card>
         <CardContent className="pt-5 space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="relative">
-              <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="חיפוש צוות, מחלקה או מנהל"
-                aria-label="חיפוש צוותים"
-                className="pe-9"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger aria-label="סינון לפי סטטוס"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל הסטטוסים</SelectItem>
-                <SelectItem value="active">פעיל</SelectItem>
-                <SelectItem value="inactive">מושבת</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={managerFilter} onValueChange={setManagerFilter}>
-              <SelectTrigger aria-label="סינון לפי מנהל"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל המנהלים</SelectItem>
-                <SelectItem value={NONE}>ללא מנהל</SelectItem>
-                {managers.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{personName(m)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={profileFilter} onValueChange={(v) => setProfileFilter(v as "all" | KpiProfile)}>
-              <SelectTrigger aria-label="סינון לפי פרופיל KPI"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל הפרופילים</SelectItem>
-                <SelectItem value="generic_sales">{KPI_PROFILE_LABEL.generic_sales}</SelectItem>
-                <SelectItem value="renewals">{KPI_PROFILE_LABEL.renewals}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
-              <SelectTrigger aria-label="מיון"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="name">מיון לפי שם</SelectItem>
-                <SelectItem value="created">מיון לפי תאריך יצירה</SelectItem>
-                <SelectItem value="members">מיון לפי מספר חברים</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           {teamsQ.isLoading ? (
             <div className="space-y-2">
-              {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
             </div>
           ) : teamsQ.isError ? (
             <EmptyState
               icon={AlertTriangle}
               title="שגיאה בטעינת הצוותים"
               description={(teamsQ.error as Error)?.message ?? "לא הצלחנו לטעון את רשימת הצוותים"}
-              action={<Button size="sm" onClick={() => teamsQ.refetch()}>ניסיון חוזר</Button>}
+              action={
+                <Button size="sm" onClick={() => teamsQ.refetch()}>
+                  ניסיון חוזר
+                </Button>
+              }
               compact
             />
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={UsersRound}
               title={teams.length === 0 ? "עדיין לא הוגדרו צוותים" : "לא נמצאו צוותים תואמים"}
-              description={teams.length === 0 ? "הוסיפו צוות ראשון כדי לשייך אליו מנהל ונציגים." : "נסו לשנות את החיפוש או הסינון."}
-              action={canManage && teams.length === 0 ? <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="ms-1 h-4 w-4" />הוספת צוות</Button> : undefined}
+              description={
+                teams.length === 0
+                  ? "הוסיפו צוות ראשון כדי לשייך אליו מנהל ונציגים."
+                  : "נסו לשנות את החיפוש או הסינון."
+              }
+              action={
+                canManage && teams.length === 0 ? (
+                  <Button size="sm" onClick={() => setCreateOpen(true)}>
+                    <Plus className="ms-1 h-4 w-4" />
+                    הוספת צוות
+                  </Button>
+                ) : undefined
+              }
               compact
             />
           ) : (
-            <>
-              {/* Desktop table */}
-              <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>שם הצוות</TableHead>
-                      <TableHead>מחלקה / פעילות</TableHead>
-                      <TableHead>פרופיל KPI</TableHead>
-                      <TableHead>מנהל הצוות</TableHead>
-                      <TableHead>נציגים</TableHead>
-                      <TableHead>סטטוס</TableHead>
-                      <TableHead>נוצר בתאריך</TableHead>
-                      <TableHead>פעולות</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((t) => (
-                      <TableRow key={t.id} className="cursor-pointer" onClick={() => setOpenTeamId(t.id)}>
-                        <TableCell className="font-semibold">{t.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{t.department || "—"}</TableCell>
-                        <TableCell><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></TableCell>
-                        <TableCell>
-                          {t.manager_id ? (
-                            <span className="flex min-w-0 items-center gap-2">
-                              <InitialsAvatar
-                                name={personName(peopleById.get(t.manager_id))}
-                                className="h-7 w-7 text-[10px]"
-                              />
-                              <span className="min-w-0 truncate">
-                                {personName(peopleById.get(t.manager_id))}
-                              </span>
-                            </span>
-                          ) : t.member_count > 0 ? (
-                            <Badge
-                              variant="outline"
-                              className="bg-primary/10 text-primary border-primary/25"
-                            >
-                              ללא מנהל צוות
-                            </Badge>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell>{t.rep_count} / {t.member_count}</TableCell>
-                        <TableCell>
-                          <Badge variant={t.active ? "default" : "secondary"}>{t.active ? "פעיל" : "מושבת"}</Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{formatDateIL(t.created_at)}</TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <RowActions
-                            team={t}
-                            canManage={canManage}
-                            canManageThisTeam={canManageTeamRow(t, { isAdmin, isManager, currentUserId })}
-                            onEdit={() => setEditTeam(t)}
-                            onToggle={() => activeM.mutate({ team_id: t.id, active: !t.active })}
-                            onDelete={() => delM.mutate(t.id)}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Mobile cards */}
-              <div className="space-y-3 md:hidden">
-                {filtered.map((t) => (
-                  <div key={t.id} className="card-interactive cursor-pointer rounded-xl border p-3" onClick={() => setOpenTeamId(t.id)}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-semibold truncate">{t.name}</div>
-                        <div className="text-xs text-muted-foreground">{t.department || "ללא מחלקה"}</div>
-                      </div>
-                      <Badge variant={t.active ? "default" : "secondary"}>{t.active ? "פעיל" : "מושבת"}</Badge>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-                      <div>
-                        מנהל הצוות:{" "}
-                        {t.manager_id
-                          ? personName(peopleById.get(t.manager_id))
-                          : t.member_count > 0
-                            ? "ללא מנהל צוות ⚠"
-                            : "—"}
-                      </div>
-                      <div>נציגים: {t.rep_count} / {t.member_count}</div>
-                      <div>נוצר: {formatDateIL(t.created_at)}</div>
-                      <div><KpiProfileBadge profile={t.kpi_profile ?? DEFAULT_KPI_PROFILE} /></div>
-                    </div>
-                    <div className="mt-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
-                      <RowActions
-                        team={t}
-                        canManage={canManage}
-                        canManageThisTeam={canManageTeamRow(t, { isAdmin, isManager, currentUserId })}
-                        onEdit={() => setEditTeam(t)}
-                        onToggle={() => activeM.mutate({ team_id: t.id, active: !t.active })}
-                        onDelete={() => delM.mutate(t.id)}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
+            /* Team surfaces — one management card per team at every width,
+               replacing the desktop table. Same click target (the details
+               sheet), same RowActions, same permission gates. */
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+              {filtered.map((t) => (
+                <TeamCardSurface
+                  key={t.id}
+                  team={t}
+                  managerName={t.manager_id ? personName(peopleById.get(t.manager_id)) : null}
+                  onOpen={() => setOpenTeamId(t.id)}
+                  actions={
+                    <RowActions
+                      team={t}
+                      canManage={canManage}
+                      canManageThisTeam={canManageTeamRow(t, { isAdmin, isManager, currentUserId })}
+                      onEdit={() => setEditTeam(t)}
+                      onToggle={() => activeM.mutate({ team_id: t.id, active: !t.active })}
+                      onDelete={() => delM.mutate(t.id)}
+                    />
+                  }
+                />
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -434,7 +474,9 @@ function TeamsPage() {
       {canManage && editTeam && (
         <TeamDialog
           open
-          onOpenChange={(o) => { if (!o) setEditTeam(null); }}
+          onOpenChange={(o) => {
+            if (!o) setEditTeam(null);
+          }}
           managers={managers}
           team={editTeam}
           onSaved={invalidate}
@@ -443,7 +485,9 @@ function TeamsPage() {
 
       <TeamDetailsSheet
         teamId={openTeamId}
-        onOpenChange={(o) => { if (!o) setOpenTeamId(null); }}
+        onOpenChange={(o) => {
+          if (!o) setOpenTeamId(null);
+        }}
         people={people}
         managers={managers}
         teams={teams}
@@ -452,6 +496,104 @@ function TeamsPage() {
         currentUserId={currentUserId}
         onChanged={invalidate}
       />
+    </div>
+  );
+}
+
+/**
+ * One team as a management surface. Everything shown is a value already on
+ * the team row — no performance figure exists on this page to invent. The
+ * whole card opens the existing details sheet; the actions cluster stops
+ * propagation exactly as the old table cell did.
+ */
+function TeamCardSurface({
+  team,
+  managerName,
+  onOpen,
+  actions,
+}: {
+  team: TeamRow;
+  managerName: string | null;
+  onOpen: () => void;
+  actions: React.ReactNode;
+}) {
+  const unmanagedStaffed = !team.manager_id && team.member_count > 0;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className={cn(
+        "surface-tile relative cursor-pointer overflow-hidden p-4",
+        "before:absolute before:inset-y-4 before:start-0 before:w-1 before:rounded-e-full",
+        !team.active
+          ? "before:bg-muted-foreground/40"
+          : unmanagedStaffed
+            ? "before:bg-[color:var(--warning)]"
+            : "before:bg-primary",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-display text-base font-bold">{team.name}</div>
+          <div className="truncate text-xs text-muted-foreground">
+            {team.department || "ללא שיוך מחלקה"}
+          </div>
+        </div>
+        <Badge variant={team.active ? "default" : "secondary"} className="shrink-0">
+          {team.active ? "פעיל" : "מושבת"}
+        </Badge>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <KpiProfileBadge profile={team.kpi_profile ?? DEFAULT_KPI_PROFILE} />
+        <Badge variant="outline" className="gap-1">
+          <Users2 className="h-3 w-3" />
+          {team.rep_count} נציגים
+        </Badge>
+        <Badge variant="outline">{team.member_count} חשבונות</Badge>
+      </div>
+
+      <div className="mt-3 flex min-w-0 items-center gap-2 border-t pt-3">
+        {managerName ? (
+          <>
+            <InitialsAvatar name={managerName} className="h-8 w-8" />
+            <div className="min-w-0">
+              <div className="text-[11px] text-muted-foreground">מנהל הצוות</div>
+              <div className="min-w-0 truncate text-sm font-medium">{managerName}</div>
+            </div>
+          </>
+        ) : (
+          <div className="min-w-0">
+            <div className="text-[11px] text-muted-foreground">מנהל הצוות</div>
+            {unmanagedStaffed ? (
+              <Badge
+                variant="outline"
+                className="mt-0.5 border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 text-warning-foreground"
+              >
+                <AlertTriangle className="ms-1 h-3 w-3" />
+                ללא מנהל צוות
+              </Badge>
+            ) : (
+              <div className="text-sm text-muted-foreground">—</div>
+            )}
+          </div>
+        )}
+        <div className="ms-auto flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          {actions}
+        </div>
+      </div>
+
+      <div className="mt-2 text-[11px] text-muted-foreground">
+        נוצר {formatDateIL(team.created_at)}
+      </div>
     </div>
   );
 }
@@ -792,20 +934,43 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
         </SheetHeader>
 
         {q.isLoading ? (
-          <div className="space-y-3 p-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
+          <div className="space-y-3 p-4">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-14 w-full" />
+            ))}
+          </div>
         ) : q.isError ? (
           <div className="p-4 text-sm text-destructive">{(q.error as Error)?.message}</div>
         ) : team ? (
           <div className="space-y-5 p-4">
-            <div className="grid grid-cols-2 gap-3">
-              <Stat label="חברי צוות" value={String(members.length)} />
-              <Stat label="נציגים" value={String(reps.length)} />
-              <Stat label="משתמשים פעילים" value={String(members.filter((m) => m.active).length)} />
-              <Stat label="סטטוס" value={team.active ? "פעיל" : "מושבת"} />
+            {/* Identity band — name, status and KPI profile as one header
+                surface instead of four equal stat boxes. */}
+            <div className="surface-page-header rounded-2xl p-3.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate font-display text-lg font-extrabold">{team.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {team.department || "ללא שיוך מחלקה"}
+                  </div>
+                </div>
+                <Badge variant={team.active ? "default" : "secondary"} className="shrink-0">
+                  {team.active ? "פעיל" : "מושבת"}
+                </Badge>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <KpiProfileBadge profile={team.kpi_profile ?? DEFAULT_KPI_PROFILE} />
+                <Badge variant="outline" className="gap-1">
+                  <Users2 className="h-3 w-3" />
+                  {reps.length} נציגים
+                </Badge>
+                <Badge variant="outline">{members.length} חשבונות</Badge>
+                <Badge variant="outline">{members.filter((m) => m.active).length} פעילים</Badge>
+              </div>
             </div>
             {!team.active && (
               <p className="text-xs text-muted-foreground">
-                הצוות מושבת ואינו זמין לשיוך חדש — הנתונים וההיסטוריה שלו (חברים, נציגים, יעדים, ביצועים) נותרים זמינים לצפייה במלואם.
+                הצוות מושבת ואינו זמין לשיוך חדש — הנתונים וההיסטוריה שלו (חברים, נציגים, יעדים,
+                ביצועים) נותרים זמינים לצפייה במלואם.
               </p>
             )}
 
@@ -821,7 +986,11 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                     placeholder="תיאור הצוות"
                   />
                   {description !== (team.description ?? "") && (
-                    <Button size="sm" onClick={() => descriptionM.mutate(description)} disabled={descriptionM.isPending}>
+                    <Button
+                      size="sm"
+                      onClick={() => descriptionM.mutate(description)}
+                      disabled={descriptionM.isPending}
+                    >
                       שמירת תיאור
                     </Button>
                   )}
@@ -838,16 +1007,26 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                   value={team.manager_id ?? NONE}
                   onValueChange={(v) => managerM.mutate(v === NONE ? null : v)}
                 >
-                  <SelectTrigger aria-label="שיוך מנהל לצוות"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="שיוך מנהל לצוות">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>ללא מנהל</SelectItem>
-                    {managers.map((m) => <SelectItem key={m.id} value={m.id}>{personName(m)}</SelectItem>)}
+                    {managers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {personName(m)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               ) : (
                 <div className="text-sm">
                   {team.manager_id ? personName(people.find((p) => p.id === team.manager_id)) : "—"}
-                  {canManageThisTeam && <span className="ms-1 text-xs text-muted-foreground">(שינוי מנהל מיועד למנהלי מערכת בלבד)</span>}
+                  {canManageThisTeam && (
+                    <span className="ms-1 text-xs text-muted-foreground">
+                      (שינוי מנהל מיועד למנהלי מערכת בלבד)
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -859,7 +1038,9 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                   value={team.kpi_profile ?? DEFAULT_KPI_PROFILE}
                   onValueChange={(v) => profileM.mutate(v as KpiProfile)}
                 >
-                  <SelectTrigger aria-label="שינוי פרופיל KPI"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="שינוי פרופיל KPI">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="generic_sales">{KPI_PROFILE_LABEL.generic_sales}</SelectItem>
                     <SelectItem value="renewals">{KPI_PROFILE_LABEL.renewals}</SelectItem>
@@ -883,11 +1064,18 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
               ) : (
                 <div className="space-y-2">
                   {members.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between gap-2 rounded-xl border p-2.5">
-                      <div className="min-w-0">
+                    <div key={m.id} className="flex items-center gap-2.5 rounded-xl border p-2.5">
+                      <InitialsAvatar name={personName(m)} className="h-8 w-8" />
+                      <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium truncate">{personName(m)}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {m.roles.includes("representative") ? "נציג" : m.roles.includes("manager") ? "מנהל צוות" : m.roles.includes("admin") ? "מנהל מערכת" : "ללא תפקיד"}
+                          {m.roles.includes("representative")
+                            ? "נציג"
+                            : m.roles.includes("manager")
+                              ? "מנהל צוות"
+                              : m.roles.includes("admin")
+                                ? "מנהל מערכת"
+                                : "ללא תפקיד"}
                           {m.business_id ? ` · ${m.business_id}` : ""}
                         </div>
                       </div>
@@ -896,27 +1084,36 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                           setUserTeam itself now rejects removing an admin/manager/
                           non-representative account for a manager actor. Admin keeps
                           the existing organization-wide capability. */}
-                      {canManageThisTeam && (isAdmin || canManagerRemoveTarget({ roles: m.roles })) && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="icon" variant="ghost" aria-label={`הסרת ${personName(m)} מהצוות`}>
-                              <UserMinus className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent dir="rtl">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>הסרת משתמש מהצוות?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                השיוך לצוות יוסר. חשבון המשתמש והנתונים שלו יישמרו.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>ביטול</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => assignM.mutate({ user_id: m.id, team_id: null })}>הסרה</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
+                      {canManageThisTeam &&
+                        (isAdmin || canManagerRemoveTarget({ roles: m.roles })) && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                aria-label={`הסרת ${personName(m)} מהצוות`}
+                              >
+                                <UserMinus className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent dir="rtl">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>הסרת משתמש מהצוות?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  השיוך לצוות יוסר. חשבון המשתמש והנתונים שלו יישמרו.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>ביטול</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => assignM.mutate({ user_id: m.id, team_id: null })}
+                                >
+                                  הסרה
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
                     </div>
                   ))}
                 </div>
@@ -926,8 +1123,8 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
             <div className="space-y-2">
               <Label>נציגים בצוות</Label>
               <p className="text-xs text-muted-foreground">
-                כלל הנציגים המשויכים לצוות, כולל נציגים ללא חשבון התחברות. נציג עם חשבון
-                מופיע גם ברשימת "חברי הצוות" למעלה.
+                כלל הנציגים המשויכים לצוות, כולל נציגים ללא חשבון התחברות. נציג עם חשבון מופיע גם
+                ברשימת "חברי הצוות" למעלה.
               </p>
               {reps.length === 0 ? (
                 <div className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
@@ -936,8 +1133,9 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
               ) : (
                 <div className="space-y-2">
                   {reps.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between gap-2 rounded-xl border p-2.5">
-                      <div className="min-w-0">
+                    <div key={r.id} className="flex items-center gap-2.5 rounded-xl border p-2.5">
+                      <InitialsAvatar name={r.name} className="h-8 w-8" />
+                      <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium truncate">{r.name}</div>
                         <div className="text-xs text-muted-foreground truncate">
                           {r.user_id ? "מקושר לחשבון משתמש" : "ללא חשבון משתמש"}
@@ -950,13 +1148,15 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                שיוך נציגים לצוות מנוהל מעמוד <span className="font-medium">ניהול נציגים</span>, לא מכאן.
+                שיוך נציגים לצוות מנוהל מעמוד <span className="font-medium">ניהול נציגים</span>, לא
+                מכאן.
               </p>
             </div>
 
             {canManageThisTeam && !team.active && (
               <p className="text-xs text-muted-foreground">
-                לא ניתן להוסיף או להעביר משתמשים לצוות מושבת. יש להפעיל את הצוות מחדש כדי לשייך אליו משתמשים.
+                לא ניתן להוסיף או להעביר משתמשים לצוות מושבת. יש להפעיל את הצוות מחדש כדי לשייך אליו
+                משתמשים.
               </p>
             )}
 
@@ -964,16 +1164,22 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
               <div className="space-y-2">
                 <Label>{isTransferSelection ? "העברת משתמש לצוות" : "הוספת משתמש לצוות"}</Label>
                 <p className="text-xs text-muted-foreground">
-                  הרשימה כוללת רק חשבונות נציג פעילים — משתמשים ללא שיוך, וכאלה המשויכים כבר לצוות אחר שבניהולכם. בחירה במשויך לצוות אחר מעבירה אותו לכאן, ולא רק "מוסיפה".
+                  הרשימה כוללת רק חשבונות נציג פעילים — משתמשים ללא שיוך, וכאלה המשויכים כבר לצוות
+                  אחר שבניהולכם. בחירה במשויך לצוות אחר מעבירה אותו לכאן, ולא רק "מוסיפה".
                 </p>
                 <div className="flex gap-2">
                   <Select value={addUserId} onValueChange={setAddUserId}>
-                    <SelectTrigger aria-label="בחירת משתמש להוספה או העברה"><SelectValue placeholder="בחרו משתמש" /></SelectTrigger>
+                    <SelectTrigger aria-label="בחירת משתמש להוספה או העברה">
+                      <SelectValue placeholder="בחרו משתמש" />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE}>בחרו משתמש</SelectItem>
                       {candidates.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {personName(p)} — {p.team_id ? `משויך כרגע לצוות ${p.team_name ?? "אחר"}` : "לא משויך לצוות"}
+                          {personName(p)} —{" "}
+                          {p.team_id
+                            ? `משויך כרגע לצוות ${p.team_name ?? "אחר"}`
+                            : "לא משויך לצוות"}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -986,12 +1192,18 @@ function TeamDetailsSheet({ teamId, onOpenChange, people, managers, teams, isAdm
                   </Button>
                 </div>
 
-                <AlertDialog open={!!pendingTransfer} onOpenChange={(o) => { if (!o) setPendingTransfer(null); }}>
+                <AlertDialog
+                  open={!!pendingTransfer}
+                  onOpenChange={(o) => {
+                    if (!o) setPendingTransfer(null);
+                  }}
+                >
                   <AlertDialogContent dir="rtl">
                     <AlertDialogHeader>
                       <AlertDialogTitle>העברת משתמש לצוות אחר?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        {pendingTransfer && `המשתמש ${pendingTransfer.userName} יוסר מצוות ${pendingTransfer.fromTeamName} ויועבר לצוות ${team.name}.`}
+                        {pendingTransfer &&
+                          `המשתמש ${pendingTransfer.userName} יוסר מצוות ${pendingTransfer.fromTeamName} ויועבר לצוות ${team.name}.`}
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -1192,365 +1404,459 @@ function BusinessHierarchyCard({ onChanged }: { onChanged: () => Promise<unknown
   );
 
   return (
-    <Card>
-      <CardContent className="pt-5 space-y-5">
-        <div>
-          <h2 className="text-base font-bold">היררכיה עסקית</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            סמנכ"ל / מנהל ממ"ט ← מנהל פעילות ← מנהל מוקד ← מנהל צוות ← נציג. ההיקפים העסקיים נוספים
-            מעל הבעלות הישירה על צוות (teams.manager_id) ואינם משנים אותה; מנהל מערכת נשאר מנהל
-            מערכת בלבד.
-          </p>
-        </div>
+    <div className="space-y-4">
+      <SectionHeading
+        title="היררכיה עסקית"
+        hint={`סמנכ"ל / מנהל ממ"ט ← מנהל פעילות ← מנהל מוקד ← מנהל צוות ← נציג. ההיקפים העסקיים נוספים מעל הבעלות הישירה על צוות (teams.manager_id) ואינם משנים אותה; מנהל מערכת נשאר מנהל מערכת בלבד.`}
+      />
 
-        {q.isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : q.isError ? (
-          <p className="text-sm text-destructive">טעינת ההיררכיה העסקית נכשלה.</p>
-        ) : !view?.ready ? (
-          <p className="text-sm text-muted-foreground">{HIERARCHY_TABLES_MISSING_MESSAGE}</p>
-        ) : (
-          <>
-            {/* Current structure — read-only view */}
-            {activities.length === 0 && centers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                טרם הוגדרו פעילויות או מוקדים. צרו פעילות ראשונה כדי להתחיל.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {activities.map((a) => (
-                  <div key={a.id} className="rounded-lg border p-3 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">פעילות</Badge>
-                      <span className="text-sm font-semibold">{a.name}</span>
-                      {(teamsByUnit.get(a.id) ?? []).length > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                          צוותים: {(teamsByUnit.get(a.id) ?? []).join(", ")}
-                        </span>
-                      )}
-                      <UnitRowActions unit={a} onEdit={openEdit} onDelete={setDeleteUnit} />
-                    </div>
-                    {centers
-                      .filter((c) => c.parentId === a.id)
-                      .map((c) => (
-                        <div key={c.id} className="me-4 flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">מוקד</Badge>
-                          <span className="text-sm">{c.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {(teamsByUnit.get(c.id) ?? []).length > 0
-                              ? `צוותים: ${(teamsByUnit.get(c.id) ?? []).join(", ")}`
-                              : "ללא צוותים משויכים"}
+      {q.isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : q.isError ? (
+        <p className="text-sm text-destructive">טעינת ההיררכיה העסקית נכשלה.</p>
+      ) : !view?.ready ? (
+        <p className="text-sm text-muted-foreground">{HIERARCHY_TABLES_MISSING_MESSAGE}</p>
+      ) : (
+        <>
+          {/* ---- Current structure: activity → centers → attached teams ---- */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Network className="h-4 w-4 text-primary" />
+                המבנה הנוכחי
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {activities.length === 0 && centers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  טרם הוגדרו פעילויות או מוקדים. צרו פעילות ראשונה כדי להתחיל.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {activities.map((a) => {
+                    const activityTeams = teamsByUnit.get(a.id) ?? [];
+                    const childCenters = centers.filter((c) => c.parentId === a.id);
+                    return (
+                      <div key={a.id} className="rounded-xl border">
+                        <div className="flex flex-wrap items-center gap-2 border-b bg-surface-subtle p-3">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                            <Building2 className="h-4 w-4" />
                           </span>
+                          <span className="min-w-0 truncate font-display font-bold">{a.name}</span>
+                          <Badge variant="secondary">פעילות</Badge>
+                          <Badge variant="outline">{childCenters.length} מוקדים</Badge>
+                          <div className="ms-auto">
+                            <UnitRowActions unit={a} onEdit={openEdit} onDelete={setDeleteUnit} />
+                          </div>
+                        </div>
+                        <div className="space-y-2 p-3">
+                          {childCenters.length === 0 && activityTeams.length === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              אין מוקדים משויכים לפעילות זו.
+                            </p>
+                          )}
+                          {childCenters.map((c) => {
+                            const centerTeams = teamsByUnit.get(c.id) ?? [];
+                            return (
+                              <div key={c.id} className="rounded-lg border p-2.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="outline">מוקד</Badge>
+                                  <span className="min-w-0 truncate text-sm font-medium">
+                                    {c.name}
+                                  </span>
+                                  <Badge variant="outline" className="text-muted-foreground">
+                                    {centerTeams.length} צוותים
+                                  </Badge>
+                                  <div className="ms-auto">
+                                    <UnitRowActions
+                                      unit={c}
+                                      onEdit={openEdit}
+                                      onDelete={setDeleteUnit}
+                                    />
+                                  </div>
+                                </div>
+                                {/* An empty center stays visible and honest — it is
+                                  a real structural fact, not a rendering gap. */}
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                  {centerTeams.length === 0 ? (
+                                    <span className="text-xs text-muted-foreground">
+                                      ללא צוותים משויכים
+                                    </span>
+                                  ) : (
+                                    centerTeams.map((name) => (
+                                      <Badge key={name} variant="secondary" className="font-normal">
+                                        <ChevronLeft className="h-3 w-3 opacity-60" />
+                                        {name}
+                                      </Badge>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {/* Legacy: teams hanging directly off the activity. */}
+                          {activityTeams.length > 0 && (
+                            <div className="rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2.5">
+                              <div className="text-xs font-semibold text-warning-foreground">
+                                צוותים המשויכים ישירות לפעילות
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {activityTeams.map((name) => (
+                                  <Badge key={name} variant="outline" className="font-normal">
+                                    {name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {centers
+                    .filter((c) => !c.parentId)
+                    .map((c) => (
+                      <div
+                        key={c.id}
+                        className="rounded-xl border p-3 flex flex-wrap items-center gap-2"
+                      >
+                        <Badge variant="outline">מוקד</Badge>
+                        <span className="text-sm">{c.name}</span>
+                        <span className="text-xs text-muted-foreground">ללא פעילות אב</span>
+                        <div className="ms-auto">
                           <UnitRowActions unit={c} onEdit={openEdit} onDelete={setDeleteUnit} />
                         </div>
-                      ))}
-                  </div>
-                ))}
-                {centers
-                  .filter((c) => !c.parentId)
-                  .map((c) => (
-                    <div
-                      key={c.id}
-                      className="rounded-lg border p-3 flex flex-wrap items-center gap-2"
-                    >
-                      <Badge variant="outline">מוקד</Badge>
-                      <span className="text-sm">{c.name}</span>
-                      <span className="text-xs text-muted-foreground">ללא פעילות אב</span>
-                      <UnitRowActions unit={c} onEdit={openEdit} onDelete={setDeleteUnit} />
-                    </div>
-                  ))}
-              </div>
-            )}
-
-            {/* Legacy rows from before the centers-only rule: never rewritten
-                automatically — the admin moves each team to a center manually. */}
-            {activityAttachedTeams.length > 0 && (
-              <div className="flex items-start gap-2 rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2.5 text-xs text-warning-foreground">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>
-                  צוות ניתן לשייך למוקד בלבד — הפעילות נקבעת דרך המוקד. הצוותים הבאים משויכים ישירות
-                  לפעילות ויש להעבירם למוקד: {activityAttachedTeams.map((t) => t.name).join(", ")}
-                </span>
-              </div>
-            )}
-
-            {/* Create unit */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
-              <div className="space-y-1.5">
-                <Label htmlFor="bh-unit-name">שם יחידה חדשה</Label>
-                <Input
-                  id="bh-unit-name"
-                  value={unitName}
-                  onChange={(e) => setUnitName(e.target.value)}
-                  placeholder="למשל: פעילות חידושים"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>סוג</Label>
-                <Select
-                  value={unitType}
-                  onValueChange={(v) => setUnitType(v as "activity" | "center")}
-                >
-                  <SelectTrigger aria-label="סוג יחידה">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="activity">פעילות</SelectItem>
-                    <SelectItem value="center">מוקד</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {unitType === "center" && (
-                <div className="space-y-1.5">
-                  <Label>פעילות אב</Label>
-                  <Select value={unitParent} onValueChange={setUnitParent}>
-                    <SelectTrigger aria-label="פעילות אב">
-                      <SelectValue placeholder="בחרו פעילות" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activities.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      </div>
+                    ))}
                 </div>
               )}
-              <Button
-                size="sm"
-                disabled={
-                  !unitName.trim() ||
-                  (unitType === "center" && !unitParent) ||
-                  createUnitM.isPending
-                }
-                onClick={() => createUnitM.mutate()}
-              >
-                <Plus className="ms-1 h-4 w-4" />
-                הוספת יחידה
-              </Button>
-            </div>
 
-            {/* Attach team */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
-              <div className="space-y-1.5">
-                <Label>שיוך צוות ליחידה</Label>
-                <Select value={attachTeam} onValueChange={setAttachTeam}>
-                  <SelectTrigger aria-label="בחירת צוות לשיוך">
-                    <SelectValue placeholder="בחרו צוות" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(view.teams ?? []).map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                {/* Teams attach to CENTERS only — the activity is inherited
-                    through the center, so activities are not offered here. */}
-                <Label>מוקד</Label>
-                <Select value={attachUnit} onValueChange={setAttachUnit}>
-                  <SelectTrigger aria-label="בחירת מוקד">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>ללא שיוך</SelectItem>
-                    {centers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {centerOptionLabel(c, view.units ?? [])}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!attachTeam || attachM.isPending}
-                onClick={() => attachM.mutate()}
-              >
-                עדכון שיוך
-              </Button>
-            </div>
+              {/* Legacy rows from before the centers-only rule: never rewritten
+                automatically — the admin moves each team to a center manually. */}
+              {activityAttachedTeams.length > 0 && (
+                <div className="flex items-start gap-2 rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2.5 text-xs text-warning-foreground">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>
+                    צוות ניתן לשייך למוקד בלבד — הפעילות נקבעת דרך המוקד. הצוותים הבאים משויכים
+                    ישירות לפעילות ויש להעבירם למוקד:{" "}
+                    {activityAttachedTeams.map((t) => t.name).join(", ")}
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-            {/* Assign manager scope */}
-            <div className="space-y-2">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
-                <div className="space-y-1.5">
-                  <Label>היקף ניהול למנהל</Label>
-                  <Select value={scopeUser} onValueChange={setScopeUser}>
-                    <SelectTrigger aria-label="בחירת מנהל">
-                      <SelectValue placeholder="בחרו מנהל" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(view.managers ?? []).map((m) => (
-                        <SelectItem key={m.userId} value={m.userId}>
-                          {m.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>סוג היקף</Label>
-                  <Select
-                    value={scopeType}
-                    onValueChange={(v) => {
-                      setScopeType(v as typeof scopeType);
-                      setScopeUnit("");
-                    }}
-                  >
-                    <SelectTrigger aria-label="סוג היקף">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">ללא היקף נוסף (מנהל צוות)</SelectItem>
-                      <SelectItem value="center">מנהל מוקד</SelectItem>
-                      <SelectItem value="activity">מנהל פעילות</SelectItem>
-                      <SelectItem value="executive">סמנכ"ל / מנהל ממ"ט</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {(scopeType === "center" || scopeType === "activity") && (
+          {/* ---- Management actions, one purpose per surface ---- */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Plus className="h-4 w-4 text-primary" />
+                  יחידה עסקית חדשה
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Create unit */}
+                <div className="grid grid-cols-1 gap-3 items-end">
                   <div className="space-y-1.5">
-                    <Label>{scopeType === "activity" ? "פעילות" : "מוקד"}</Label>
-                    <Select value={scopeUnit} onValueChange={setScopeUnit}>
-                      <SelectTrigger aria-label="בחירת יחידה להיקף">
-                        <SelectValue placeholder="בחרו יחידה" />
+                    <Label htmlFor="bh-unit-name">שם יחידה חדשה</Label>
+                    <Input
+                      id="bh-unit-name"
+                      value={unitName}
+                      onChange={(e) => setUnitName(e.target.value)}
+                      placeholder="למשל: פעילות חידושים"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>סוג</Label>
+                    <Select
+                      value={unitType}
+                      onValueChange={(v) => setUnitType(v as "activity" | "center")}
+                    >
+                      <SelectTrigger aria-label="סוג יחידה">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {scopeUnitOptions.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.name}
+                        <SelectItem value="activity">פעילות</SelectItem>
+                        <SelectItem value="center">מוקד</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {unitType === "center" && (
+                    <div className="space-y-1.5">
+                      <Label>פעילות אב</Label>
+                      <Select value={unitParent} onValueChange={setUnitParent}>
+                        <SelectTrigger aria-label="פעילות אב">
+                          <SelectValue placeholder="בחרו פעילות" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activities.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    disabled={
+                      !unitName.trim() ||
+                      (unitType === "center" && !unitParent) ||
+                      createUnitM.isPending
+                    }
+                    onClick={() => createUnitM.mutate()}
+                  >
+                    <Plus className="ms-1 h-4 w-4" />
+                    הוספת יחידה
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Link2 className="h-4 w-4 text-primary" />
+                  שיוך צוות למוקד
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Attach team */}
+                <div className="grid grid-cols-1 gap-3 items-end">
+                  <div className="space-y-1.5">
+                    <Label>שיוך צוות ליחידה</Label>
+                    <Select value={attachTeam} onValueChange={setAttachTeam}>
+                      <SelectTrigger aria-label="בחירת צוות לשיוך">
+                        <SelectValue placeholder="בחרו צוות" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(view.teams ?? []).map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={
-                    !scopeUser ||
-                    ((scopeType === "center" || scopeType === "activity") && !scopeUnit) ||
-                    setScopeM.isPending
-                  }
-                  onClick={() => setScopeM.mutate()}
-                >
-                  עדכון היקף
-                </Button>
-              </div>
-              {(view.grants ?? []).length > 0 && (
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  {view.grants.map((g) => (
-                    <div key={`${g.userId}-${g.scopeType}-${g.businessUnitId ?? "all"}`}>
-                      {g.userName} —{" "}
-                      {g.scopeType === "executive"
-                        ? 'סמנכ"ל / מנהל ממ"ט (כלל הפעילות העסקית)'
-                        : `${g.scopeType === "activity" ? "מנהל פעילות" : "מנהל מוקד"}${g.unitName ? ` · ${g.unitName}` : ""}`}
+                  <div className="space-y-1.5">
+                    {/* Teams attach to CENTERS only — the activity is inherited
+                    through the center, so activities are not offered here. */}
+                    <Label>מוקד</Label>
+                    <Select value={attachUnit} onValueChange={setAttachUnit}>
+                      <SelectTrigger aria-label="בחירת מוקד">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>ללא שיוך</SelectItem>
+                        {centers.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {centerOptionLabel(c, view.units ?? [])}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!attachTeam || attachM.isPending}
+                    onClick={() => attachM.mutate()}
+                  >
+                    עדכון שיוך
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  היקף ניהול למנהל
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Assign manager scope */}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 gap-3 items-end">
+                    <div className="space-y-1.5">
+                      <Label>היקף ניהול למנהל</Label>
+                      <Select value={scopeUser} onValueChange={setScopeUser}>
+                        <SelectTrigger aria-label="בחירת מנהל">
+                          <SelectValue placeholder="בחרו מנהל" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(view.managers ?? []).map((m) => (
+                            <SelectItem key={m.userId} value={m.userId}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Edit unit — the name (and, for a center, the parent activity).
-            The unit TYPE is immutable and has no control here. */}
-        <Dialog open={!!editUnit} onOpenChange={(o) => !o && setEditUnit(null)}>
-          <DialogContent dir="rtl" className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>
-                {editUnit?.unitType === "activity" ? "עריכת פעילות" : "עריכת מוקד"}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="bh-edit-name">שם היחידה</Label>
-                <Input
-                  id="bh-edit-name"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                />
-              </div>
-              {editUnit?.unitType === "center" && (
-                <div className="space-y-1.5">
-                  <Label>פעילות אב</Label>
-                  <Select value={editParent} onValueChange={setEditParent}>
-                    <SelectTrigger aria-label="פעילות אב">
-                      <SelectValue placeholder="בחרו פעילות" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activities.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name}
-                        </SelectItem>
+                    <div className="space-y-1.5">
+                      <Label>סוג היקף</Label>
+                      <Select
+                        value={scopeType}
+                        onValueChange={(v) => {
+                          setScopeType(v as typeof scopeType);
+                          setScopeUnit("");
+                        }}
+                      >
+                        <SelectTrigger aria-label="סוג היקף">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">ללא היקף נוסף (מנהל צוות)</SelectItem>
+                          <SelectItem value="center">מנהל מוקד</SelectItem>
+                          <SelectItem value="activity">מנהל פעילות</SelectItem>
+                          <SelectItem value="executive">סמנכ"ל / מנהל ממ"ט</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {(scopeType === "center" || scopeType === "activity") && (
+                      <div className="space-y-1.5">
+                        <Label>{scopeType === "activity" ? "פעילות" : "מוקד"}</Label>
+                        <Select value={scopeUnit} onValueChange={setScopeUnit}>
+                          <SelectTrigger aria-label="בחירת יחידה להיקף">
+                            <SelectValue placeholder="בחרו יחידה" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {scopeUnitOptions.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        !scopeUser ||
+                        ((scopeType === "center" || scopeType === "activity") && !scopeUnit) ||
+                        setScopeM.isPending
+                      }
+                      onClick={() => setScopeM.mutate()}
+                    >
+                      עדכון היקף
+                    </Button>
+                  </div>
+                  {(view.grants ?? []).length > 0 && (
+                    <div className="space-y-1 border-t pt-2">
+                      <div className="text-xs font-semibold text-muted-foreground">
+                        היקפים מוגדרים
+                      </div>
+                      {view.grants.map((g) => (
+                        <div
+                          key={`${g.userId}-${g.scopeType}-${g.businessUnitId ?? "all"}`}
+                          className="flex min-w-0 items-center gap-2 rounded-lg border p-2"
+                        >
+                          <InitialsAvatar name={g.userName} className="h-7 w-7 text-[10px]" />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{g.userName}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {g.scopeType === "executive"
+                                ? 'סמנכ"ל / מנהל ממ"ט (כלל הפעילות העסקית)'
+                                : `${g.scopeType === "activity" ? "מנהל פעילות" : "מנהל מוקד"}${g.unitName ? ` · ${g.unitName}` : ""}`}
+                            </div>
+                          </div>
+                        </div>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </div>
+                  )}
                 </div>
-              )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
+
+      {/* Edit unit — the name (and, for a center, the parent activity).
+            The unit TYPE is immutable and has no control here. */}
+      <Dialog open={!!editUnit} onOpenChange={(o) => !o && setEditUnit(null)}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editUnit?.unitType === "activity" ? "עריכת פעילות" : "עריכת מוקד"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="bh-edit-name">שם היחידה</Label>
+              <Input
+                id="bh-edit-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
             </div>
-            <DialogFooter className="gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditUnit(null)}>
-                ביטול
-              </Button>
-              <Button
-                size="sm"
-                disabled={updateUnitM.isPending}
-                onClick={() => {
-                  if (!editName.trim()) {
-                    toast.error(UNIT_NAME_REQUIRED_MESSAGE);
-                    return;
-                  }
-                  updateUnitM.mutate();
-                }}
-              >
-                שמירת שינויים
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            {editUnit?.unitType === "center" && (
+              <div className="space-y-1.5">
+                <Label>פעילות אב</Label>
+                <Select value={editParent} onValueChange={setEditParent}>
+                  <SelectTrigger aria-label="פעילות אב">
+                    <SelectValue placeholder="בחרו פעילות" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activities.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setEditUnit(null)}>
+              ביטול
+            </Button>
+            <Button
+              size="sm"
+              disabled={updateUnitM.isPending}
+              onClick={() => {
+                if (!editName.trim()) {
+                  toast.error(UNIT_NAME_REQUIRED_MESSAGE);
+                  return;
+                }
+                updateUnitM.mutate();
+              }}
+            >
+              שמירת שינויים
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        {/* Delete unit — explicit confirmation; the server refuses any unit
+      {/* Delete unit — explicit confirmation; the server refuses any unit
             that still has centers, teams or active scope grants. */}
-        <AlertDialog open={!!deleteUnit} onOpenChange={(o) => !o && setDeleteUnit(null)}>
-          <AlertDialogContent dir="rtl">
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {deleteUnit?.unitType === "activity" ? "מחיקת פעילות" : "מחיקת מוקד"}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                הפעולה תמחק את היחידה מההיררכיה העסקית. לא ניתן לבטל פעולה זו.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter className="gap-2">
-              <AlertDialogCancel>ביטול</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                disabled={deleteUnitM.isPending}
-                onClick={() => deleteUnitM.mutate()}
-              >
-                מחיקה
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </CardContent>
-    </Card>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-bold">{value}</div>
+      <AlertDialog open={!!deleteUnit} onOpenChange={(o) => !o && setDeleteUnit(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteUnit?.unitType === "activity" ? "מחיקת פעילות" : "מחיקת מוקד"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              הפעולה תמחק את היחידה מההיררכיה העסקית. לא ניתן לבטל פעולה זו.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteUnitM.isPending}
+              onClick={() => deleteUnitM.mutate()}
+            >
+              מחיקה
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

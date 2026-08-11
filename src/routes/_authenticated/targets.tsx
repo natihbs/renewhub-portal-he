@@ -34,15 +34,20 @@ import { useVisibleTeams } from "@/lib/teams-hooks";
 import { useResolvedRole } from "@/lib/use-resolved-role";
 import { useBusinessScope } from "@/lib/business-scope-hooks";
 import {
+  buildActivityCenterBoard,
   buildScopeTeamRows,
   groupScopeRows,
   isScopedManagerKind,
   missingTargetsByTeam,
+  SCOPE_DIRECT_ACTIVITY_GROUP_LABEL,
   SCOPE_METRIC_LABELS,
+  SCOPE_UNATTACHED_GROUP_LABEL,
   type ScopedManagerKind,
   type ScopeHomeTeamInput,
   type ScopeTeamRow,
 } from "@/lib/scope-home";
+import { ActivityTargetsBoard, CenterTargetsBoard } from "@/components/TargetScopeBoards";
+import { InitialsAvatar, MetricCard } from "@/components/dashboard/Surfaces";
 import {
   useTeamGoal,
   useTeamGoals,
@@ -92,6 +97,76 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
+/**
+ * The month command area — the page's primary context: every figure and every
+ * save below belongs to the displayed month and to it alone.
+ *
+ * It now lives at PAGE level rather than inside the team workspace, because
+ * the scope boards above are month-specific too: before this, a scope manager
+ * looking at "which teams are missing targets" had no way to change the month
+ * until they had already picked a team. Navigation semantics (shiftMonth,
+ * goalMonthKind, return-to-current) are unchanged.
+ */
+function MonthCommandBar({
+  month,
+  onMonthChange,
+  scopeLine,
+}: {
+  month: string;
+  onMonthChange: (m: string) => void;
+  scopeLine?: string;
+}) {
+  const kind = goalMonthKind(month);
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-card p-3">
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="חודש קודם"
+          onClick={() => onMonthChange(shiftMonth(month, -1))}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <div className="min-w-36 px-2 text-center">
+          <div className="font-display text-lg font-extrabold leading-tight">{monthLabel(month)}</div>
+          <Badge
+            variant={kind === "current" ? "default" : "secondary"}
+            className="mt-0.5 text-[11px]"
+          >
+            {kind === "current"
+              ? "החודש הנוכחי"
+              : kind === "future"
+                ? "חודש עתידי · תכנון"
+                : "חודש קודם · היסטוריה"}
+          </Badge>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="חודש הבא"
+          onClick={() => onMonthChange(shiftMonth(month, 1))}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        {kind !== "current" && (
+          <Button variant="ghost" size="sm" onClick={() => onMonthChange(currentGoalMonth())}>
+            חזרה לחודש הנוכחי
+          </Button>
+        )}
+      </div>
+      {scopeLine && (
+        <span className="inline-flex items-center rounded-full bg-surface-subtle px-3 py-1.5 text-xs text-muted-foreground">
+          {scopeLine}
+        </span>
+      )}
+      <p className="w-full text-xs text-muted-foreground sm:w-auto sm:flex-1 sm:text-end">
+        כל חודש עומד בפני עצמו — חודש ללא יעדים יוצג ריק ולא יירש ערכים מחודש אחר.
+      </p>
+    </div>
+  );
+}
+
 function TargetsPage() {
   const role = useResolvedRole();
   return (
@@ -136,47 +211,74 @@ function RepresentativeTargetsView() {
         icon={Target}
         description={`${monthLabel(currentGoalMonth())} · ${me.teamName}`}
       />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Target className="h-4 w-4 text-primary" />יעד אישי</CardTitle></CardHeader>
-          <CardContent>
-            {hasPersonal ? (
-              <div className="space-y-2">
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  <Stat label="יעד" value={formatNum(myGoal.targetValue as number)} />
-                  <Stat label="ביצוע" value={formatNum(me.currentResult)} />
-                  <Stat label="פער" value={`${(personalGap ?? 0) >= 0 ? "+" : ""}${formatNum(personalGap ?? 0)}`} />
+      {/* READ ONLY — visual alignment with the canonical Pulse language only;
+          no management control is added here. A missing target stays missing:
+          the ring renders only when a real personal target exists. */}
+      {hasPersonal ? (
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <MetricCard
+            icon={Target}
+            label="היעד שלי"
+            value={formatNum(myGoal.targetValue as number)}
+            sub={monthLabel(currentGoalMonth())}
+            tone="primary"
+          />
+          <MetricCard
+            icon={Gauge}
+            label="ביצוע נוכחי"
+            value={formatNum(me.currentResult)}
+            sub={personalPct !== null ? `${formatPct(personalPct)} עמידה ביעד` : undefined}
+            tone="accent"
+          />
+          <MetricCard
+            icon={Users2}
+            label="פער"
+            value={`${(personalGap ?? 0) >= 0 ? "+" : ""}${formatNum(personalGap ?? 0)}`}
+            sub={(personalGap ?? 0) >= 0 ? "היעד הושג" : undefined}
+            tone={(personalGap ?? 0) >= 0 ? "success" : "primary"}
+          />
+          <MetricCard
+            icon={Users2}
+            label="יעד הצוות"
+            value={hasTeam ? formatNum(teamGoal.targetValue as number) : "—"}
+            sub={hasTeam ? me.teamName : "לא הוגדר יעד חודשי לצוות"}
+            tone="primary"
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card>
+            <CardContent className="p-0">
+              <EmptyState
+                icon={Target}
+                title="לא הוגדר יעד אישי"
+                description="פנו למנהל/ת הצוות להגדרת יעד רשמי לחודש זה."
+                compact
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users2 className="h-4 w-4 text-primary" />יעד הצוות
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {hasTeam ? (
+                <div className="num text-center font-display text-2xl font-extrabold">
+                  {formatNum(teamGoal.targetValue as number)}
                 </div>
-                <div className="pt-1 text-center text-2xl font-extrabold">{formatPct(personalPct ?? 0)}</div>
-              </div>
-            ) : (
-              <EmptyState icon={Target} title="לא הוגדר יעד אישי" description="פנו למנהל/ת הצוות להגדרת יעד רשמי לחודש זה." compact />
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users2 className="h-4 w-4 text-primary" />יעד הצוות</CardTitle></CardHeader>
-          <CardContent>
-            {hasTeam ? (
-              <div className="text-center text-2xl font-extrabold">{formatNum(teamGoal.targetValue as number)}</div>
-            ) : (
-              <EmptyState icon={Users2} title="לא הוגדר יעד חודשי לצוות" compact />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              ) : (
+                <EmptyState icon={Users2} title="לא הוגדר יעד חודשי לצוות" compact />
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-bold">{value}</div>
-    </div>
-  );
-}
 
 // ============================================================================
 // Manager / Admin — full target management workspace.
@@ -205,6 +307,11 @@ function ManagerAdminTargetsView() {
   // RLS scope funnel — this overview adds visibility, never reach.
   const { scope } = useBusinessScope();
   const scopedManager = isScopedManagerKind(scope?.kind);
+  // The management level decides the board, exactly as on ManagerHome:
+  // center → teams; activity → centers (teams one drill down); executive keeps
+  // the existing grouped overview unchanged.
+  const centerManager = scope?.kind === "center";
+  const activityManager = scope?.kind === "activity";
 
   return (
     <>
@@ -213,10 +320,13 @@ function ManagerAdminTargetsView() {
         icon={Target}
         description={
           scopedManager
-            ? "יעדים בהיקף — סטטוס היעדים של כל הצוותים בהיקף הניהול, ובחירת צוות לעריכה."
+            ? "יעדים בהיקף — סטטוס היעדים בהיקף הניהול, ובחירת צוות לעריכה."
             : "יעד חודשי רשמי לצוות ולכל נציג — המקור היחיד לחישובי עמידה ביעד, קצב ותחזית."
         }
       />
+
+      {/* Month first: the boards below and every save are month-specific. */}
+      <MonthCommandBar month={month} onMonthChange={setMonth} scopeLine={scope?.title} />
 
       {scopedManager && scope && (
         <ScopeTargetsOverview
@@ -225,10 +335,11 @@ function ManagerAdminTargetsView() {
           profileByTeamId={profileByTeamId}
           selectedTeamId={selectedTeamId}
           onSelectTeam={setWorkspaceTeam}
+          level={centerManager ? "center" : activityManager ? "activity" : "executive"}
         />
       )}
 
-      {needsTeamPicker && (
+      {needsTeamPicker && !scopedManager && (
         <Card>
           <CardContent className="pt-5 flex flex-wrap items-center gap-3">
             <Label className="text-sm">צוות</Label>
@@ -250,7 +361,13 @@ function ManagerAdminTargetsView() {
             <EmptyState
               icon={Users2}
               title={cloudTeams.length === 0 ? "עדיין לא הוגדרו צוותים" : "בחרו צוות לניהול יעדים"}
-              description={cloudTeams.length === 0 ? "יש להוסיף צוות ראשון בעמוד ניהול צוותים." : undefined}
+              description={
+                cloudTeams.length === 0
+                  ? "יש להוסיף צוות ראשון בעמוד ניהול צוותים."
+                  : scopedManager
+                    ? 'בחרו צוות מהלוח שלמעלה בלחיצה על "ניהול יעדים".'
+                    : undefined
+              }
               compact
             />
           </CardContent>
@@ -259,7 +376,6 @@ function ManagerAdminTargetsView() {
         <TargetWorkspacePanel
           teamId={selectedTeamId}
           month={month}
-          onMonthChange={setMonth}
           kpiProfile={profileByTeamId.get(selectedTeamId) ?? DEFAULT_KPI_PROFILE}
         />
       )}
@@ -281,12 +397,15 @@ function ScopeTargetsOverview({
   profileByTeamId,
   selectedTeamId,
   onSelectTeam,
+  level,
 }: {
   scope: NonNullable<ReturnType<typeof useBusinessScope>["scope"]>;
   month: string;
   profileByTeamId: Map<string, KpiProfile>;
   selectedTeamId: string | null;
   onSelectTeam: (teamId: string) => void;
+  /** Which board this manager manages from — executive keeps the old view. */
+  level: "center" | "activity" | "executive";
 }) {
   const { state } = useApp();
   const teamInputs = useMemo<ScopeHomeTeamInput[]>(() => {
@@ -328,6 +447,46 @@ function ScopeTargetsOverview({
   );
   const missingByTeam = useMemo(() => new Map(missingTargetsByTeam(rows).map((m) => [m.teamId, m])), [rows]);
   const loading = teamGoals.isLoading || repGoals.isLoading || state.repsLoading;
+
+  // ACTIVITY manager: the SAME subtree-filtered center board the Activity
+  // Home uses (PR #53) — centers by `parentId === scope.unitId`, empty centers
+  // included, foreign centers excluded, and covered teams outside the subtree
+  // kept honestly in the unattached bucket.
+  const activityBoard = useMemo(
+    () =>
+      level === "activity"
+        ? buildActivityCenterBoard({
+            units: scope.units,
+            rows,
+            activityUnitId: scope.unitId,
+          })
+        : null,
+    [level, scope, rows],
+  );
+
+  if (level === "center") {
+    return (
+      <CenterTargetsBoard
+        rows={rows}
+        selectedTeamId={selectedTeamId}
+        onSelectTeam={onSelectTeam}
+        isLoading={loading}
+      />
+    );
+  }
+
+  if (level === "activity" && activityBoard) {
+    return (
+      <ActivityTargetsBoard
+        board={activityBoard}
+        selectedTeamId={selectedTeamId}
+        onSelectTeam={onSelectTeam}
+        isLoading={loading}
+        directLabel={SCOPE_DIRECT_ACTIVITY_GROUP_LABEL}
+        unattachedLabel={SCOPE_UNATTACHED_GROUP_LABEL}
+      />
+    );
+  }
 
   const rowView = (row: ScopeTeamRow) => {
     const labels = SCOPE_METRIC_LABELS[row.kpiProfile];
@@ -407,7 +566,7 @@ function ScopeTargetsOverview({
   );
 }
 
-function TargetWorkspacePanel({ teamId, month, onMonthChange, kpiProfile = DEFAULT_KPI_PROFILE }: { teamId: string; month: string; onMonthChange: (m: string) => void; kpiProfile?: KpiProfile }) {
+function TargetWorkspacePanel({ teamId, month, kpiProfile = DEFAULT_KPI_PROFILE }: { teamId: string; month: string; kpiProfile?: KpiProfile }) {
   // The team's own KPI language: a renewals team's target IS the assigned
   // monthly renewal book (מיועדות חודשיות) and its result is closed renewals
   // — same PR #39 definition the dashboards use; team_goals stays the source.
@@ -517,86 +676,32 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange, kpiProfile = DEFAU
 
   return (
     <div className="space-y-4">
-      {/* Month navigation — the month is the most important fact on this
-          page: every figure and every save below belongs to it and to it
-          alone. It is therefore the page's largest heading, with an explicit
-          badge saying whether this is execution (current), planning (future)
-          or history (past), and a one-click way back to now. */}
-      {(() => {
-        const kind = goalMonthKind(month);
-        return (
-          <div className="rounded-xl border bg-card p-3 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="חודש קודם"
-                  onClick={() => onMonthChange(shiftMonth(month, -1))}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <div className="min-w-40 text-center px-2">
-                  <div className="text-xl font-extrabold leading-tight">{monthLabel(month)}</div>
-                  <Badge
-                    variant={kind === "current" ? "default" : "secondary"}
-                    className="mt-0.5 text-[11px]"
-                  >
-                    {kind === "current"
-                      ? "החודש הנוכחי"
-                      : kind === "future"
-                        ? "חודש עתידי · תכנון"
-                        : "חודש קודם · היסטוריה"}
-                  </Badge>
-                </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="חודש הבא"
-                  onClick={() => onMonthChange(shiftMonth(month, 1))}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                {kind !== "current" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onMonthChange(currentGoalMonth())}
-                  >
-                    חזרה לחודש הנוכחי
-                  </Button>
-                )}
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setCopyOpen(true)} disabled={readOnly}>
-                <Copy className="ms-1 h-4 w-4" />העתקת יעדים מהחודש הקודם
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              היעדים בעמוד זה נשמרים לחודש המוצג בלבד — כל חודש עומד בפני עצמו. חודש ללא יעדים יוצג ריק, ולא יירש ערכים מחודש אחר.
-            </p>
-          </div>
-        );
-      })()}
-
       {readOnly && (
         <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
           הצוות מושבת — היעדים ההיסטוריים מוצגים לצפייה בלבד. יש להפעיל את הצוות מחדש כדי לערוך יעדים.
         </div>
       )}
 
-      {/* Team target + comparison */}
+      {/* Team target — the primary surface of the workspace: the official
+          figure, its allocation status, and the copy action that belongs to
+          this team and month. */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Target className="h-4 w-4 text-primary" />יעד חודשי לצוות {data.team.name}
-            <Badge
-              variant="secondary"
-              className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[kpiProfile])}
-            >
-              {KPI_PROFILE_LABEL[kpiProfile]}
-            </Badge>
-            {readOnly && <Badge variant="secondary">מושבת</Badge>}
-          </CardTitle>
+        <CardHeader className="gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />יעד חודשי לצוות {data.team.name}
+              <Badge
+                variant="secondary"
+                className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[kpiProfile])}
+              >
+                {KPI_PROFILE_LABEL[kpiProfile]}
+              </Badge>
+              {readOnly && <Badge variant="secondary">מושבת</Badge>}
+            </CardTitle>
+            <Button variant="outline" size="sm" onClick={() => setCopyOpen(true)} disabled={readOnly}>
+              <Copy className="ms-1 h-4 w-4" />העתקת יעדים מהחודש הקודם
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-2">
@@ -631,17 +736,42 @@ function TargetWorkspacePanel({ teamId, month, onMonthChange, kpiProfile = DEFAU
           {data.team_target == null ? (
             <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">לא הוגדר יעד חודשי · סך יעדי הנציגים: {formatNum(data.representative_target_sum)}</div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Stat
+            /* Allocation view — the official team target beside what has
+               actually been allocated to representatives. Every figure comes
+               from the workspace payload; nothing is recomputed here. */
+            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <MetricCard
+                icon={Target}
                 label={isRenewals ? metricLabels.target : "יעד צוות"}
                 value={formatNum(data.team_target)}
+                sub={monthLabel(month)}
+                tone="primary"
               />
-              <Stat label="סך יעדי הנציגים" value={formatNum(data.representative_target_sum)} />
-              <Stat
+              <MetricCard
+                icon={Users2}
+                label="סך יעדי הנציגים"
+                value={formatNum(data.representative_target_sum)}
+                sub={`${data.representatives.length} נציגים בצוות`}
+                tone="accent"
+              />
+              <MetricCard
+                icon={Gauge}
                 label={diff >= 0 ? "חריגה מהיעד הצוותי" : "טרם הוקצו"}
                 value={formatNum(Math.abs(diff))}
+                sub={diff === 0 ? "היעד הוקצה במלואו" : undefined}
+                tone={diff === 0 ? "success" : diff > 0 ? "warning" : "primary"}
               />
-              <Stat label="נציגים ללא יעד אישי" value={String(data.active_representatives_without_target)} />
+              <MetricCard
+                icon={AlertTriangle}
+                label="נציגים ללא יעד אישי"
+                value={String(data.active_representatives_without_target)}
+                sub={
+                  data.active_representatives_without_target === 0
+                    ? "לכל הנציגים הפעילים יש יעד"
+                    : undefined
+                }
+                tone={data.active_representatives_without_target > 0 ? "warning" : "success"}
+              />
             </div>
           )}
         </CardContent>
@@ -738,7 +868,12 @@ function RepresentativeTargetsTable({
                 const gap = n !== null && Number.isFinite(n) ? r.current_result - n : null;
                 return (
                   <TableRow key={r.id} className={dirtyRepIds.includes(r.id) ? "bg-primary/5" : undefined}>
-                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <InitialsAvatar name={r.name} className="h-8 w-8" />
+                        <span className="min-w-0 truncate">{r.name}</span>
+                      </div>
+                    </TableCell>
                     <TableCell><Badge variant={r.active ? "default" : "secondary"}>{r.active ? "פעיל" : "מושבת"}</Badge></TableCell>
                     <TableCell>
                       <Input
@@ -749,9 +884,16 @@ function RepresentativeTargetsTable({
                         disabled={readOnly}
                       />
                     </TableCell>
-                    <TableCell className="tabular-nums">{formatNum(r.current_result)}</TableCell>
-                    <TableCell className="tabular-nums">{pct !== null ? formatPct(pct) : "—"}</TableCell>
-                    <TableCell className="tabular-nums">{gap !== null ? `${gap >= 0 ? "+" : ""}${formatNum(gap)}` : "—"}</TableCell>
+                    <TableCell className="num font-semibold">{formatNum(r.current_result)}</TableCell>
+                    <TableCell
+                      className={cn(
+                        "num font-bold",
+                        pct !== null && pct >= 100 && "text-success-foreground",
+                      )}
+                    >
+                      {pct !== null ? formatPct(pct) : "—"}
+                    </TableCell>
+                    <TableCell className="num">{gap !== null ? `${gap >= 0 ? "+" : ""}${formatNum(gap)}` : "—"}</TableCell>
                   </TableRow>
                 );
               })}
@@ -765,25 +907,54 @@ function RepresentativeTargetsTable({
             const raw = inputs[r.id] ?? "";
             const n = raw.trim() === "" ? null : Number(raw);
             const pct = n !== null && Number.isFinite(n) ? calculateAchievement(r.current_result, n) : null;
+            const gap = n !== null && Number.isFinite(n) ? r.current_result - n : null;
             return (
-              <div key={r.id} className={cn("rounded-xl border p-3 space-y-2", dirtyRepIds.includes(r.id) && "border-primary/40 bg-primary/5")}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium">{r.name}</div>
-                  <Badge variant={r.active ? "default" : "secondary"}>{r.active ? "פעיל" : "מושבת"}</Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">{targetHeader}</Label>
-                    <Input
-                      type="number" min={0} inputMode="numeric" value={raw}
-                      onChange={(e) => onChange(r.id, e.target.value)}
-                      className="h-9" placeholder="לא הוגדר"
-                      aria-label={`יעד אישי עבור ${r.name}`}
-                      disabled={readOnly}
-                    />
+              <div
+                key={r.id}
+                className={cn(
+                  "surface-tile space-y-3 p-3",
+                  dirtyRepIds.includes(r.id) && "border-primary/40 bg-primary/5",
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <InitialsAvatar name={r.name} className="h-9 w-9" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">{r.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {resultHeader}: <span className="num font-medium">{formatNum(r.current_result)}</span>
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground pt-5">
-                    {resultHeader}: {formatNum(r.current_result)} · {pct !== null ? formatPct(pct) : "אין יעד"}
+                  <Badge variant={r.active ? "default" : "secondary"} className="shrink-0">
+                    {r.active ? "פעיל" : "מושבת"}
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">{targetHeader}</Label>
+                  <Input
+                    type="number" min={0} inputMode="numeric" value={raw}
+                    onChange={(e) => onChange(r.id, e.target.value)}
+                    className="h-10" placeholder="לא הוגדר"
+                    aria-label={`יעד אישי עבור ${r.name}`}
+                    disabled={readOnly}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2 border-t pt-2 text-center">
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">{pctHeader}</div>
+                    <div
+                      className={cn(
+                        "num text-sm font-bold",
+                        pct !== null && pct >= 100 && "text-success-foreground",
+                      )}
+                    >
+                      {pct !== null ? formatPct(pct) : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">פער</div>
+                    <div className="num text-sm font-bold">
+                      {gap !== null ? `${gap >= 0 ? "+" : ""}${formatNum(gap)}` : "—"}
+                    </div>
                   </div>
                 </div>
               </div>
