@@ -35,4 +35,3 @@ export function useBusinessScope() {
     isError: query.isError,
   };
 }
-
