@@ -3,8 +3,9 @@
 // this file only renders the groups, per-profile aggregates and the missing-
 // targets-by-team breakdown. Direct team managers never see these cards —
 // their home is the unchanged single-team layout.
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Building2, Target } from "lucide-react";
+import { Building2, ChevronDown, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,10 +14,17 @@ import { cn } from "@/lib/utils";
 import { formatNum, formatPct } from "@/lib/format";
 import { KPI_PROFILE_BADGE_CLASS, KPI_PROFILE_LABEL } from "@/lib/performance-domain";
 import {
+  ACTIVITY_CENTERS_TITLE,
+  ACTIVITY_NO_CENTERS_MESSAGE,
+  CENTER_NO_TEAMS_MESSAGE,
+  SCOPE_DIRECT_ACTIVITY_GROUP_LABEL,
   SCOPE_METRIC_LABELS,
   SCOPE_MISSING_TARGETS_TITLE,
   SCOPE_NO_TEAMS_MESSAGE,
   SCOPE_TEAMS_TITLE,
+  SCOPE_UNATTACHED_GROUP_LABEL,
+  type ActivityCenterBoard,
+  type ActivityCenterSummary,
   type MissingTargetsRow,
   type ScopeGroup,
   type ScopeProfileAggregate,
@@ -133,6 +141,170 @@ function ProfileAggregates({ aggregates }: { aggregates: ScopeProfileAggregate[]
 }
 
 /**
+ * One center summary surface on the activity manager's board. A center with
+ * teams is an expandable drill-down (header button → its teams only); a
+ * center without teams renders the honest structural empty state — no
+ * numbers, no percentage, no invented action.
+ */
+function ActivityCenterSurface({
+  center,
+  expanded,
+  onToggle,
+  onSelectTeam,
+}: {
+  center: ActivityCenterSummary;
+  expanded: boolean;
+  onToggle: () => void;
+  onSelectTeam?: (teamId: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        disabled={!center.hasTeams}
+        className={cn(
+          "flex w-full flex-wrap items-center justify-between gap-2 rounded-xl p-3 text-start",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          center.hasTeams && "transition-colors hover:bg-surface-subtle",
+          expanded && "rounded-b-none border-b",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+            <Building2 className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 truncate font-semibold">{center.centerName}</span>
+        </span>
+        <span className="flex items-center gap-2">
+          {center.hasTeams ? (
+            <>
+              <Badge variant="outline">{center.teamCount} צוותים</Badge>
+              <Badge variant="outline">{center.repCount} נציגים</Badge>
+              {center.missingRepresentativeTargets > 0 && (
+                <Badge variant="secondary" className="bg-primary/10 text-primary">
+                  {center.missingRepresentativeTargets} ללא יעד
+                </Badge>
+              )}
+              <ChevronDown
+                aria-hidden
+                className={cn(
+                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150",
+                  expanded && "rotate-180",
+                )}
+              />
+            </>
+          ) : (
+            <Badge variant="outline" className="text-muted-foreground">
+              {CENTER_NO_TEAMS_MESSAGE}
+            </Badge>
+          )}
+        </span>
+      </button>
+      {center.hasTeams && (
+        <div className="space-y-2 p-3 pt-2">
+          {/* Per-profile summary is always visible; the team rows are the
+              drill-down layer behind the expand. */}
+          <ProfileAggregates aggregates={center.profileAggregates} />
+          {expanded &&
+            center.teams.map((row) => (
+              <ScopeTeamRowView
+                key={row.id}
+                row={row}
+                onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+              />
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The activity manager's PRIMARY board — one surface per center UNIT of the
+ * activity (empty centers included), plus honest groups for teams attached
+ * straight to the activity or outside the hierarchy. The manager manages
+ * CENTERS; teams appear only inside the center they belong to, one drill
+ * level down.
+ */
+export function ActivityCenterBoardCard({
+  board,
+  isLoading,
+  isError,
+  onSelectTeam,
+}: {
+  board: ActivityCenterBoard;
+  isLoading: boolean;
+  isError: boolean;
+  onSelectTeam?: (teamId: string) => void;
+}) {
+  const [expandedCenterId, setExpandedCenterId] = useState<string | null>(null);
+  const empty =
+    board.centers.length === 0 &&
+    board.directRows.length === 0 &&
+    board.unattachedRows.length === 0;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Building2 className="h-4 w-4 text-primary" /> {ACTIVITY_CENTERS_TITLE}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <ScopeCardSkeleton />
+        ) : isError ? (
+          <ScopeErrorState message="לא ניתן לטעון את נתוני ההיקף." />
+        ) : empty ? (
+          <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+            {ACTIVITY_NO_CENTERS_MESSAGE}
+          </div>
+        ) : (
+          <>
+            {board.centers.map((center) => (
+              <ActivityCenterSurface
+                key={center.centerId}
+                center={center}
+                expanded={expandedCenterId === center.centerId}
+                onToggle={() =>
+                  setExpandedCenterId((cur) => (cur === center.centerId ? null : center.centerId))
+                }
+                onSelectTeam={onSelectTeam}
+              />
+            ))}
+            {board.directRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-semibold">{SCOPE_DIRECT_ACTIVITY_GROUP_LABEL}</div>
+                {board.directRows.map((row) => (
+                  <ScopeTeamRowView
+                    key={row.id}
+                    row={row}
+                    onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+                  />
+                ))}
+              </div>
+            )}
+            {board.unattachedRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-semibold">{SCOPE_UNATTACHED_GROUP_LABEL}</div>
+                {board.unattachedRows.map((row) => (
+                  <ScopeTeamRowView
+                    key={row.id}
+                    row={row}
+                    onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
  * The scope's primary card: per-profile aggregates on top, then team rows in
  * the hierarchy grouping of the manager's level (flat for a center; by center
  * for an activity; activity → centers for an executive).
@@ -143,18 +315,21 @@ export function ScopeOverviewCard({
   isLoading,
   isError,
   onSelectTeam,
+  title = SCOPE_TEAMS_TITLE,
 }: {
   groups: ScopeGroup[];
   aggregates: ScopeProfileAggregate[];
   isLoading: boolean;
   isError: boolean;
   onSelectTeam?: (teamId: string) => void;
+  /** Level-specific board title (a center manager's board says "מצב הצוותים"). */
+  title?: string;
 }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Building2 className="h-4 w-4 text-primary" /> {SCOPE_TEAMS_TITLE}
+          <Building2 className="h-4 w-4 text-primary" /> {title}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">

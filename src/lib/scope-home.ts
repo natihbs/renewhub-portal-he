@@ -41,6 +41,13 @@ export const SCOPE_METRIC_LABELS: Record<
 };
 
 export const SCOPE_TEAMS_TITLE = "צוותים בהיקף הניהול";
+/** A center manager manages TEAMS — their primary board says so. */
+export const CENTER_TEAMS_TITLE = "מצב הצוותים";
+/** An activity manager manages CENTERS — their primary board says so. */
+export const ACTIVITY_CENTERS_TITLE = "מצב המוקדים";
+/** Honest structural empty state for a center unit with no teams attached. */
+export const CENTER_NO_TEAMS_MESSAGE = "אין צוותים משויכים למוקד";
+export const ACTIVITY_NO_CENTERS_MESSAGE = "אין מוקדים משויכים לפעילות.";
 export const SCOPE_MISSING_TARGETS_TITLE = "יעדים חסרים לפי צוות";
 export const SCOPE_NO_TEAMS_MESSAGE =
   "אין צוותים משויכים להיקף הניהול. שיוך צוותים למוקד מתבצע בעמוד הצוותים.";
@@ -289,6 +296,124 @@ export function groupScopeRows(params: {
     groups.push({ key: "unattached", label: SCOPE_UNATTACHED_GROUP_LABEL, rows: unattached });
   }
   return groups;
+}
+
+// ------------------------------------------------- activity center board
+
+/**
+ * One center of an activity manager's scope, summarised at the level they
+ * actually manage. Derived from the hierarchy UNITS first, so a center with
+ * zero teams still exists on the board — an empty center is a real structural
+ * fact, not a rendering accident. `hasTeams === false` means every
+ * performance field is meaningless and the UI must show a structural empty
+ * state, never 0 / 0%.
+ */
+export type ActivityCenterSummary = {
+  centerId: string;
+  /** Display name with the "מוקד" type word ("מוקד רכב"). */
+  centerName: string;
+  teamCount: number;
+  repCount: number;
+  hasTeams: boolean;
+  /** This center's team rows ONLY — the drill-down population. */
+  teams: ScopeTeamRow[];
+  /** Per-profile aggregates over this center's teams (renewals ≠ generic). */
+  profileAggregates: ScopeProfileAggregate[];
+  /** Representatives in this center with no positive official target. */
+  missingRepresentativeTargets: number;
+};
+
+export type ActivityCenterBoard = {
+  /** Every center UNIT of the activity — including empty ones. */
+  centers: ActivityCenterSummary[];
+  /** Teams attached straight to the activity unit (legacy attachments). */
+  directRows: ScopeTeamRow[];
+  /** Covered teams with no hierarchy attachment at all. */
+  unattachedRows: ScopeTeamRow[];
+};
+
+/**
+ * The activity manager's primary board: starts from the activity's OWN center
+ * UNITS (so empty centers render), assigns each covered team row to exactly
+ * one bucket (its center / directly-on-activity / unattached), and summarises
+ * each center per KPI profile. Nothing in scope is dropped and nothing empty
+ * is inflated into fake performance.
+ *
+ * `activityUnitId` is the manager's resolved activity unit (scope.unitId) and
+ * is what makes the board honest in a multi-activity organization: the units
+ * list handed in is the org-wide business_units table (authenticated-readable),
+ * so the board must select ONLY this activity's subtree — centers are matched
+ * by `parentId === activityUnitId`, never by name. A covered team pointing at
+ * a unit outside that subtree (another activity's center, or an unknown unit)
+ * is NOT silently attached to that foreign center; it falls into
+ * `unattachedRows`, where it stays visible and counted. Passing null (no
+ * resolved unit) yields no centers — every covered row is then unattached,
+ * which is the truthful reading of "we don't know this manager's activity".
+ */
+export function buildActivityCenterBoard(params: {
+  units: BusinessUnit[];
+  rows: ScopeTeamRow[];
+  activityUnitId: string | null;
+}): ActivityCenterBoard {
+  const { units, rows, activityUnitId } = params;
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  const centers = units
+    .filter(
+      (u) => u.unitType === "center" && activityUnitId !== null && u.parentId === activityUnitId,
+    )
+    .map((center): ActivityCenterSummary => {
+      const teams = rows.filter((r) => r.businessUnitId === center.id);
+      return {
+        centerId: center.id,
+        centerName: withTypeWord(center.name, BUSINESS_UNIT_TYPE_LABEL.center),
+        teamCount: teams.length,
+        repCount: teams.reduce((a, t) => a + t.repCount, 0),
+        hasTeams: teams.length > 0,
+        teams,
+        profileAggregates: aggregateByProfile(teams),
+        missingRepresentativeTargets: teams.reduce((a, t) => a + t.missingTargets, 0),
+      };
+    })
+    .sort((a, b) => a.centerName.localeCompare(b.centerName, "he"));
+  // Direct attachments count only for THIS activity — a team hanging off some
+  // other activity unit is not "directly attached" from this manager's point
+  // of view, it is simply outside their hierarchy subtree.
+  const directRows = rows.filter((r) => {
+    if (!r.businessUnitId || r.businessUnitId !== activityUnitId) return false;
+    return unitById.get(r.businessUnitId)?.unitType === "activity";
+  });
+  const centerIds = new Set(centers.map((c) => c.centerId));
+  const unattachedRows = rows.filter(
+    (r) => !(r.businessUnitId && centerIds.has(r.businessUnitId)) && !directRows.includes(r),
+  );
+  return { centers, directRows, unattachedRows };
+}
+
+/**
+ * The structural figures an activity manager leads with — how the activity is
+ * BUILT, before how it performs. Counts cover the full covered population
+ * (center teams + direct + unattached), so the totals always match the board
+ * below them.
+ */
+export type ActivityStructureSummary = {
+  centerCount: number;
+  teamCount: number;
+  repCount: number;
+  centersWithoutTeams: number;
+};
+
+export function activityStructureSummary(board: ActivityCenterBoard): ActivityStructureSummary {
+  const allRows = [
+    ...board.centers.flatMap((c) => c.teams),
+    ...board.directRows,
+    ...board.unattachedRows,
+  ];
+  return {
+    centerCount: board.centers.length,
+    teamCount: allRows.length,
+    repCount: allRows.reduce((a, r) => a + r.repCount, 0),
+    centersWithoutTeams: board.centers.filter((c) => !c.hasTeams).length,
+  };
 }
 
 // ---------------------------------------------------- per-profile aggregates

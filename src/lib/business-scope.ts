@@ -60,6 +60,17 @@ export type ResolvedBusinessScope = {
   title: string;
   /** The highest granted unit's raw name (center/activity kinds), else null. */
   unitName: string | null;
+  /**
+   * The highest granted unit's ID (center/activity kinds), else null.
+   *
+   * DISPLAY ONLY, exactly like unitName: authorization is already decided —
+   * `teams` carries the resolved coverage and RLS enforces the same scope
+   * server-side. This id exists so a screen can filter the org-wide
+   * business_units list (authenticated-readable, so the payload carries all
+   * of them) down to the manager's OWN subtree; without it an activity
+   * manager's center board would render every activity's centers.
+   */
+  unitId: string | null;
   /** Teams covered by the resolved scope. Personal scope resolves to []. */
   teams: { id: string; name: string }[];
 };
@@ -139,6 +150,7 @@ export function resolveBusinessScope(params: {
       scopeLabel: `${VIEW_SCOPE_PREFIX}: אישי`,
       title: BUSINESS_ROLE_LABEL.representative,
       unitName: null,
+      unitId: null,
       teams: [],
     };
   }
@@ -152,6 +164,7 @@ export function resolveBusinessScope(params: {
       scopeLabel: `${BUSINESS_ROLE_LABEL.admin} — כלל המערכת`,
       title: BUSINESS_ROLE_LABEL.admin,
       unitName: null,
+      unitId: null,
       teams: teams.map(asTeam),
     };
   }
@@ -189,6 +202,7 @@ export function resolveBusinessScope(params: {
       // by the scope line, not appended to the name.
       title: BUSINESS_ROLE_LABEL.executive,
       unitName: null,
+      unitId: null,
       teams: coveredTeams,
     };
   }
@@ -206,6 +220,7 @@ export function resolveBusinessScope(params: {
       // "מנהל מוקד · דירות וחידושים" — same shape as effectiveBusinessTitle.
       title: `${BUSINESS_ROLE_LABEL[kind]} · ${highestUnit.name}`,
       unitName: highestUnit.name,
+      unitId: highestUnit.id,
       teams: coveredTeams,
     };
   }
@@ -223,6 +238,7 @@ export function resolveBusinessScope(params: {
     scopeLabel,
     title: BUSINESS_ROLE_LABEL.team_manager,
     unitName: null,
+    unitId: null,
     teams: coveredTeams,
   };
 }
