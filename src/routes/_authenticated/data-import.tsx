@@ -31,12 +31,35 @@ import { createRepresentative, updateRepresentativeMetrics, setRepresentativeAct
 import { writeRepresentativeKpiValue } from "@/lib/kpi.functions";
 import { setRepresentativeGoals, restoreRepresentativeGoals } from "@/lib/goals.functions";
 import {
-  useImport, autoMap, detectPii, PII_LABEL, type PiiHit,
-  FIELD_LABEL, FIELD_GROUPS, REQUIRED_FIELDS, UNSUPPORTED_FIELDS, UNSUPPORTED_FIELD_REASON,
-  RENEWAL_FIELDS, RENEWAL_FIELDS_WRONG_PROFILE_REASON,
-  IMPORT_MODEL_HELPER_LINE, GENERIC_TEAM_RENEWALS_HINT,
-  type ImportFieldKey, type ImportHistoryEntry, type TargetGoalSnapshotEntry,
+  useImport,
+  autoMap,
+  detectPii,
+  PII_LABEL,
+  type PiiHit,
+  FIELD_LABEL,
+  FIELD_GROUPS,
+  REQUIRED_FIELDS,
+  UNSUPPORTED_FIELDS,
+  UNSUPPORTED_FIELD_REASON,
+  RENEWAL_FIELDS,
+  RENEWAL_FIELDS_WRONG_PROFILE_REASON,
+  MATCH_ONLY_FIELDS,
+  IMPORT_MODEL_HELPER_LINE,
+  GENERIC_TEAM_RENEWALS_HINT,
+  type ImportFieldKey,
+  type ImportHistoryEntry,
+  type TargetGoalSnapshotEntry,
 } from "@/lib/import-store";
+import {
+  countImportActions,
+  deriveStoredImportOutcome,
+  hasImportableRows,
+  importOutcomeView,
+  importStatusLabel,
+  importTargetPlan,
+  MATCH_EXCEPTIONS_SKIPPED_LABEL,
+  summarizeProcessedRows,
+} from "@/lib/import-summary";
 import { processRows, type ProcessedRow, type ResolvedAction, type RawRow } from "@/lib/import-processing";
 import {
   filterImportPreviewRows,
@@ -73,22 +96,54 @@ export const Route = createFileRoute("/_authenticated/data-import")({
 
 const STEPS = ["העלאת קובץ", "מיפוי עמודות", "בדיקת נתונים", "אישור", "סיכום"] as const;
 
+/**
+ * The workflow rail: status and context, never a shortcut. It renders which
+ * steps are done / current / upcoming and stays purely presentational — there
+ * is deliberately no click target here, because every forward move is gated by
+ * its own validation (required mappings, row decisions, target month).
+ */
 function StepBar({ step }: { step: number }) {
   return (
-    <ol className="flex flex-wrap items-center gap-2 text-sm">
+    <ol className="grid grid-cols-1 gap-1.5 sm:grid-cols-5 sm:gap-2" aria-label="שלבי הייבוא">
       {STEPS.map((label, i) => {
         const active = i === step;
         const done = i < step;
         return (
-          <li key={label} className="flex items-center gap-2">
-            <div className={cn(
-              "grid h-7 w-7 place-items-center rounded-full text-xs font-semibold",
-              done ? "bg-primary text-primary-foreground" :
-              active ? "bg-primary/15 text-primary ring-2 ring-primary" :
-              "bg-muted text-muted-foreground"
-            )}>{i + 1}</div>
-            <span className={cn("font-medium", active ? "text-foreground" : "text-muted-foreground")}>{label}</span>
-            {i < STEPS.length - 1 && <ArrowLeft className="h-4 w-4 text-muted-foreground" />}
+          <li
+            key={label}
+            aria-current={active ? "step" : undefined}
+            className={cn(
+              "flex items-center gap-2 rounded-xl border p-2 transition-colors",
+              done && "border-[color:var(--success)]/40 bg-[color:var(--success)]/10",
+              active && "border-primary/50 bg-primary/5",
+              !done && !active && "border-dashed bg-surface-subtle",
+            )}
+          >
+            <span
+              className={cn(
+                "grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold",
+                done
+                  ? "bg-[color:var(--success)]/20 text-success-foreground"
+                  : active
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground",
+              )}
+            >
+              {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
+            </span>
+            <span className="min-w-0">
+              <span
+                className={cn(
+                  "block truncate text-xs font-semibold",
+                  active ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {label}
+              </span>
+              <span className="block text-[10px] text-muted-foreground">
+                {done ? "הושלם" : active ? "שלב נוכחי" : "בהמשך"}
+              </span>
+            </span>
           </li>
         );
       })}
@@ -105,6 +160,67 @@ function PrivacyNotice() {
         המערכת מיועדת לנתוני ביצועים ניהוליים בלבד. אין להעלות פרטי לקוחות, מספרי פוליסה, תעודות זהות, מספרי טלפון או מידע רגיש אחר.
       </AlertDescription>
     </Alert>
+  );
+}
+
+/**
+ * The operations bar above the workflow: the scope this import may reach, the
+ * privacy rule, the file currently loaded and the two side actions (templates,
+ * manual entry) on ONE surface — instead of two stacked generic alerts that
+ * read as unrelated to the wizard below them.
+ *
+ * Neither warning is weakened: both keep their own alert surface inside the
+ * bar, and the privacy rule stays visible at every step.
+ */
+function ImportContextBar({
+  fileName,
+  rowCount,
+  step,
+  onReset,
+}: {
+  fileName: string | null;
+  rowCount: number;
+  step: number;
+  onReset: () => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-2xl border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary">
+          <Upload className="h-3.5 w-3.5" />
+          שלב {step + 1} מתוך {STEPS.length} · {STEPS[step]}
+        </span>
+        {fileName ? (
+          <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-surface-subtle px-3 py-1.5 text-xs text-muted-foreground">
+            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{fileName}</span>
+            <span className="shrink-0">· {rowCount} שורות</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-subtle px-3 py-1.5 text-xs text-muted-foreground">
+            טרם נטען קובץ
+          </span>
+        )}
+        <div className="ms-auto flex flex-wrap items-center gap-2">
+          {fileName && (
+            <Button variant="ghost" size="sm" onClick={onReset}>
+              קובץ אחר
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => downloadTemplate("xlsx")}>
+            <Download className="me-1 h-4 w-4" /> תבנית Excel
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => downloadTemplate("csv")}>
+            <Download className="me-1 h-4 w-4" /> תבנית CSV
+          </Button>
+          <ManualEntryDialog />
+        </div>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-2">
+        <ImportScopeCard />
+        <PrivacyNotice />
+      </div>
+    </div>
   );
 }
 
@@ -339,7 +455,13 @@ function DataImportPage() {
     try {
       const snapshot = state.reps.map((r) => ({ ...r }));
       const errorReport: ImportHistoryEntry["errorReport"] = [];
-      let updated = 0, created = 0, skipped = 0, warns = 0, errs = 0, cloudFailed = 0, reactivated = 0;
+      let updated = 0,
+        created = 0,
+        skipped = 0,
+        warns = 0,
+        errs = 0,
+        cloudFailed = 0,
+        reactivated = 0;
       const now = new Date().toISOString().slice(0, 10);
       const byId = new Map(state.reps.map((r) => [r.id, r] as const));
       // Official-target write candidates, collected only for rows whose
@@ -356,7 +478,13 @@ function DataImportPage() {
           skipped++;
           if (rowErrors.length > 0) errs += rowErrors.length;
           if (r.issues.length > 0) {
-            errorReport!.push({ row: r.index + 2, name: r.name, messages: r.issues.map((i) => `${i.severity === "error" ? "שגיאה" : "אזהרה"}: ${i.message}`) });
+            errorReport!.push({
+              row: r.index + 2,
+              name: r.name,
+              messages: r.issues.map(
+                (i) => `${i.severity === "error" ? "שגיאה" : "אזהרה"}: ${i.message}`,
+              ),
+            });
           }
           continue;
         }
@@ -412,14 +540,22 @@ function DataImportPage() {
           } else if (r.action === "create") {
             if (isDemo) {
               addRep({
-                name: r.name, teamId: r.teamId, teamName: r.teamName ?? "ללא צוות",
-                monthlyTarget: 0, currentResult: r.currentResult!, lastUpdatedAt: updatedAt,
+                name: r.name,
+                teamId: r.teamId,
+                teamName: r.teamName ?? "ללא צוות",
+                monthlyTarget: 0,
+                currentResult: r.currentResult!,
+                lastUpdatedAt: updatedAt,
               });
             } else {
               const createdRep = await createRepFn({
                 data: {
-                  name: r.name, team_id: r.teamId, current_result: r.currentResult!,
-                  external_ref: null, user_id: null, active: true,
+                  name: r.name,
+                  team_id: r.teamId,
+                  current_result: r.currentResult!,
+                  external_ref: null,
+                  user_id: null,
+                  active: true,
                 },
               });
               repIdForRenewal = createdRep.rep_id;
@@ -429,18 +565,30 @@ function DataImportPage() {
         } catch (e) {
           cloudFailed++;
           errs++;
-          errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`] });
+          errorReport!.push({
+            row: r.index + 2,
+            name: r.name,
+            messages: [`שגיאת שמירה בענן: ${(e as Error).message ?? e}`],
+          });
           continue;
         }
 
         if (!isDemo && repIdForRenewal && r.monthlyTarget != null) {
-          targetCandidates.push({ repId: repIdForRenewal, teamId: r.teamId, targetValue: r.monthlyTarget });
+          targetCandidates.push({
+            repId: repIdForRenewal,
+            teamId: r.teamId,
+            targetValue: r.monthlyTarget,
+          });
         }
 
         // Renewal values are a second, independent write — a failure here must never
         // be reported as import success, but also must not undo the target/result
         // write that already succeeded above.
-        if (!isDemo && repIdForRenewal && (r.renewalOpportunities != null || r.completedRenewals != null)) {
+        if (
+          !isDemo &&
+          repIdForRenewal &&
+          (r.renewalOpportunities != null || r.completedRenewals != null)
+        ) {
           try {
             // team_id is deliberately NOT sent: the database derives the
             // historical attribution from the representative's authoritative
@@ -458,7 +606,11 @@ function DataImportPage() {
             });
           } catch (e) {
             errs++;
-            errorReport!.push({ row: r.index + 2, name: r.name, messages: [`שגיאת שמירת נתוני חידוש: ${(e as Error).message ?? e}`] });
+            errorReport!.push({
+              row: r.index + 2,
+              name: r.name,
+              messages: [`שגיאת שמירת נתוני חידוש: ${(e as Error).message ?? e}`],
+            });
           }
         }
       }
@@ -471,38 +623,54 @@ function DataImportPage() {
       // silently dropped. Every write also captures a restore point
       // (targetGoalSnapshot) so undo can put things back exactly, per row —
       // never a generic "clear everything" undo.
-      let targetsSet = 0, targetsSkippedNoTeam = 0, targetsFailed = 0;
+      let targetsSet = 0,
+        targetsSkippedNoTeam = 0,
+        targetsFailed = 0;
       const targetGoalSnapshot: TargetGoalSnapshotEntry[] = [];
       if (!isDemo && applyTargetsFromImport && targetCandidates.length > 0 && importTargetMonth) {
         const byTeam = new Map<string, { representative_id: string; target_value: number }[]>();
         for (const c of targetCandidates) {
-          if (!c.teamId) { targetsSkippedNoTeam++; continue; }
+          if (!c.teamId) {
+            targetsSkippedNoTeam++;
+            continue;
+          }
           const list = byTeam.get(c.teamId) ?? [];
           list.push({ representative_id: c.repId, target_value: c.targetValue });
           byTeam.set(c.teamId, list);
         }
         for (const [teamId, goals] of byTeam) {
           try {
-            const res = await setGoalsFn({ data: { team_id: teamId, month: importTargetMonth, goals } });
+            const res = await setGoalsFn({
+              data: { team_id: teamId, month: importTargetMonth, goals },
+            });
             targetsSet += res.created + res.updated;
             const goalMonth = `${importTargetMonth}-01`;
             for (const p of res.previously_existing) {
               targetGoalSnapshot.push({
-                representativeId: p.representative_id, teamId, goalMonth,
-                hadPrevious: true, previousTargetValue: p.target_value,
+                representativeId: p.representative_id,
+                teamId,
+                goalMonth,
+                hadPrevious: true,
+                previousTargetValue: p.target_value,
               });
             }
             for (const repId of res.newly_created_representative_ids) {
               targetGoalSnapshot.push({
-                representativeId: repId, teamId, goalMonth,
-                hadPrevious: false, previousTargetValue: null,
+                representativeId: repId,
+                teamId,
+                goalMonth,
+                hadPrevious: false,
+                previousTargetValue: null,
               });
             }
           } catch (e) {
             targetsFailed += goals.length;
             errorReport!.push({
-              row: 0, name: undefined,
-              messages: [`עדכון יעדים רשמיים נכשל עבור צוות (${goals.length} נציגים): ${(e as Error).message ?? e}`],
+              row: 0,
+              name: undefined,
+              messages: [
+                `עדכון יעדים רשמיים נכשל עבור צוות (${goals.length} נציגים): ${(e as Error).message ?? e}`,
+              ],
             });
           }
         }
@@ -510,11 +678,21 @@ function DataImportPage() {
 
       if (!isDemo) {
         void qc.invalidateQueries({ queryKey: ["representatives"] });
-        if (applyTargetsFromImport) void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
+        if (applyTargetsFromImport)
+          void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
       }
 
-      const status: ImportHistoryEntry["status"] =
-        cloudFailed > 0 ? (updated + created === 0 ? "failed" : "partial") : (errs > 0 ? "partial" : "success");
+      // Stored outcome — status AND error count — derived in one tested place
+      // (import-summary.ts). A failed official-target write now downgrades the
+      // import to "partial" and is counted in the stored errors, instead of
+      // being invisible to everything except the transient toast.
+      const stored = deriveStoredImportOutcome({
+        cloudFailed,
+        updated,
+        created,
+        errs,
+        targetsFailed,
+      });
 
       // The reporting period this import applied to: recorded only when every
       // applied row's own date agreed on one calendar month — a mixed-months
@@ -537,8 +715,11 @@ function DataImportPage() {
         rowsCreated: created,
         rowsSkipped: skipped,
         warnings: warns,
-        errors: errs,
-        status,
+        // Warning counting is untouched; the error count now includes failed
+        // official-target writes so the permanent summary can never show
+        // "0 שגיאות" after a target write failed.
+        errors: stored.errors,
+        status: stored.status,
         period: appliedPeriod,
         snapshot: { reps: snapshot, targetGoals: targetGoalSnapshot },
         errorReport,
@@ -550,8 +731,8 @@ function DataImportPage() {
       const targetsNote = !applyTargetsFromImport
         ? undefined
         : targetsFailed > 0
-        ? ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו, ${targetsFailed} נכשלו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`
-        : ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`;
+          ? ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו, ${targetsFailed} נכשלו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`
+          : ` · יעדים רשמיים לחודש ${monthLabel}: ${targetsSet} עודכנו${targetsSkippedNoTeam ? `, ${targetsSkippedNoTeam} דולגו (ללא צוות)` : ""}`;
 
       // Never report success unless every cloud write actually succeeded.
       if (cloudFailed > 0 || targetsFailed > 0) {
@@ -559,9 +740,13 @@ function DataImportPage() {
           description: `${updated} עודכנו, ${created} נוספו, ${cloudFailed} נכשלו בשמירה בענן — פרטים בדוח השגיאות${targetsNote ?? ""}`,
         });
       } else if (isDemo) {
-        toast.success("הייבוא הושלם (מצב הדגמה — לא נשמר בענן)", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו` });
+        toast.success("הייבוא הושלם (מצב הדגמה — לא נשמר בענן)", {
+          description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו`,
+        });
       } else {
-        toast.success("הייבוא נשמר בהצלחה בענן", { description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו${targetsNote ?? ""}` });
+        toast.success("הייבוא נשמר בהצלחה בענן", {
+          description: `${updated} עודכנו, ${created} נוספו, ${skipped} דולגו${targetsNote ?? ""}`,
+        });
       }
     } catch (e) {
       toast.error("שגיאה בייבוא", { description: String((e as Error).message ?? e) });
@@ -583,34 +768,31 @@ function DataImportPage() {
         title="ייבוא נתונים"
         icon={Upload}
         description="העלאת דוח ביצועים יומי ועדכון אוטומטי של הדשבורד"
-
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => downloadTemplate("xlsx")}>
-              <Download className="me-1 h-4 w-4" /> הורדת תבנית (Excel)
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => downloadTemplate("csv")}>
-              <Download className="me-1 h-4 w-4" /> הורדת תבנית (CSV)
-            </Button>
-            <ManualEntryDialog />
-          </div>
-        }
       />
 
-      <PrivacyNotice />
-      <ImportScopeCard />
+      <ImportContextBar
+        fileName={file?.name ?? null}
+        rowCount={rows.length}
+        step={step}
+        onReset={resetWizard}
+      />
 
       <Card>
-        <CardHeader className="pb-3"><StepBar step={step} /></CardHeader>
+        <CardHeader className="pb-3">
+          <StepBar step={step} />
+        </CardHeader>
         <CardContent className="space-y-4">
-          {step === 0 && (
-            <UploadStep onFile={onFile} busy={busy} inputRef={fileInputRef} />
-          )}
+          {step === 0 && <UploadStep onFile={onFile} busy={busy} inputRef={fileInputRef} />}
           {step === 1 && (
             <MappingStep
-              headers={headers} mapping={mapping} setMapping={setMapping}
+              headers={headers}
+              mapping={mapping}
+              setMapping={setMapping}
               templates={importStore.templates}
-              onSaveTemplate={(name) => { importStore.saveTemplate(name, mapping); toast.success("תבנית נשמרה"); }}
+              onSaveTemplate={(name) => {
+                importStore.saveTemplate(name, mapping);
+                toast.success("תבנית נשמרה");
+              }}
               onApplyTemplate={(id) => {
                 const t = importStore.templates.find((x) => x.id === id);
                 if (t) {
@@ -620,25 +802,37 @@ function DataImportPage() {
                   toast.success(`הוחלה תבנית: ${t.name}`);
                 }
               }}
-              onBack={() => setStep(0)} onNext={goToPreview}
+              onBack={() => setStep(0)}
+              onNext={goToPreview}
             />
           )}
           {step === 2 && (
             <PreviewStep
-              processed={processed} reps={state.reps}
+              processed={processed}
+              reps={state.reps}
               matchNames={matchNamesById}
               onChangeAction={(idx, action, matchId) =>
-                setProcessed((p) => p.map((r) => r.index === idx ? { ...r, action, matchRepId: matchId ?? r.matchRepId } : r))
+                setProcessed((p) =>
+                  p.map((r) =>
+                    r.index === idx ? { ...r, action, matchRepId: matchId ?? r.matchRepId } : r,
+                  ),
+                )
               }
               onBack={() => setStep(1)}
               onNext={() => setStep(3)}
-              criticalCount={criticalCount} warnCount={warnCount}
+              criticalCount={criticalCount}
+              warnCount={warnCount}
             />
           )}
           {step === 3 && (
             <ConfirmStep
-              processed={processed} fileName={file?.name ?? ""} criticalCount={criticalCount} warnCount={warnCount}
-              onBack={() => setStep(2)} onConfirm={applyImport} busy={busy}
+              processed={processed}
+              fileName={file?.name ?? ""}
+              criticalCount={criticalCount}
+              warnCount={warnCount}
+              onBack={() => setStep(2)}
+              onConfirm={applyImport}
+              busy={busy}
               isDemo={isDemo}
               applyTargetsFromImport={applyTargetsFromImport}
               onApplyTargetsFromImportChange={setApplyTargetsFromImport}
@@ -646,16 +840,17 @@ function DataImportPage() {
               onImportTargetMonthChange={setImportTargetMonth}
             />
           )}
-          {step === 4 && lastSummary && (
-            <SummaryStep entry={lastSummary} onNew={resetWizard} />
-          )}
+          {step === 4 && lastSummary && <SummaryStep entry={lastSummary} onNew={resetWizard} />}
         </CardContent>
       </Card>
 
       <HistoryCard
         history={importStore.history}
         onUndo={async (entry) => {
-          if (!entry.snapshot) { toast.error("לא ניתן לשחזר – אין תמונת מצב שמורה"); return; }
+          if (!entry.snapshot) {
+            toast.error("לא ניתן לשחזר – אין תמונת מצב שמורה");
+            return;
+          }
           if (isDemo) {
             replaceReps(entry.snapshot.reps);
             importStore.removeHistory(entry.id);
@@ -672,12 +867,15 @@ function DataImportPage() {
               try {
                 await updateMetricsFn({
                   data: {
-                    rep_id: prevRep.id, current_result: prevRep.currentResult, team_id: prevRep.teamId,
+                    rep_id: prevRep.id,
+                    current_result: prevRep.currentResult,
+                    team_id: prevRep.teamId,
                     // Undo restores a prior state rather than recording new
                     // operational activity, so it stays available even for a
                     // representative deactivated since the import — same
                     // reasoning as restoreRepresentativeGoals.
-                    source: "import_reconciliation", source_screen: "data-import-undo",
+                    source: "import_reconciliation",
+                    source_screen: "data-import-undo",
                   },
                 });
               } catch {
@@ -692,7 +890,9 @@ function DataImportPage() {
             // one team at a time. A generic "the reps are back to normal" is
             // never presented as if targets were handled too — the two
             // outcomes are tracked and reported completely separately.
-            let goalsRestored = 0, goalsDeleted = 0, goalsFailed = 0;
+            let goalsRestored = 0,
+              goalsDeleted = 0,
+              goalsFailed = 0;
             const snapshotEntries = entry.snapshot.targetGoals;
             if (snapshotEntries.length > 0) {
               const byTeam = new Map<string, TargetGoalSnapshotEntry[]>();
@@ -706,10 +906,21 @@ function DataImportPage() {
                 try {
                   const res = await restoreGoalsFn({
                     data: {
-                      team_id: teamId, month: goalMonth,
-                      entries: entries.map((e) => (e.hadPrevious
-                        ? { representative_id: e.representativeId, had_previous: true as const, previous_target_value: e.previousTargetValue as number }
-                        : { representative_id: e.representativeId, had_previous: false as const, previous_target_value: null })),
+                      team_id: teamId,
+                      month: goalMonth,
+                      entries: entries.map((e) =>
+                        e.hadPrevious
+                          ? {
+                              representative_id: e.representativeId,
+                              had_previous: true as const,
+                              previous_target_value: e.previousTargetValue as number,
+                            }
+                          : {
+                              representative_id: e.representativeId,
+                              had_previous: false as const,
+                              previous_target_value: null,
+                            },
+                      ),
                     },
                   });
                   goalsRestored += res.restored;
@@ -722,14 +933,16 @@ function DataImportPage() {
             }
 
             void qc.invalidateQueries({ queryKey: ["representatives"] });
-            if (snapshotEntries.length > 0) void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
+            if (snapshotEntries.length > 0)
+              void qc.invalidateQueries({ queryKey: ["cloud", "representative_goals"] });
             importStore.removeHistory(entry.id);
 
-            const goalsNote = snapshotEntries.length === 0
-              ? ""
-              : goalsFailed > 0
-              ? ` יעדים רשמיים: ${goalsRestored + goalsDeleted} שוחזרו, ${goalsFailed} נכשלו — יש לבדוק במסך ניהול היעדים.`
-              : ` יעדים רשמיים: ${goalsRestored + goalsDeleted} שוחזרו בהצלחה.`;
+            const goalsNote =
+              snapshotEntries.length === 0
+                ? ""
+                : goalsFailed > 0
+                  ? ` יעדים רשמיים: ${goalsRestored + goalsDeleted} שוחזרו, ${goalsFailed} נכשלו — יש לבדוק במסך ניהול היעדים.`
+                  : ` יעדים רשמיים: ${goalsRestored + goalsDeleted} שוחזרו בהצלחה.`;
 
             if (repsFailed > 0 || goalsFailed > 0) {
               toast.error("הביטול הושלם חלקית", {
@@ -796,37 +1009,60 @@ function PiiBlockDialog({ data, onClose }: { data: { fileName: string; hits: Pii
 
 function UploadStep({ onFile, busy, inputRef }: { onFile: (f: File) => void; busy: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const [drag, setDrag] = useState(false);
+  const { scope } = useBusinessScope();
   return (
-    <div
-      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={(e) => {
-        e.preventDefault(); setDrag(false);
-        const f = e.dataTransfer.files?.[0]; if (f) onFile(f);
-      }}
-      className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition-colors",
-        drag ? "border-primary bg-primary/5" : "border-border bg-muted/30"
-      )}
-    >
-      <div className="grid h-14 w-14 place-items-center rounded-full bg-primary/10 text-primary">
-        <Upload className="h-6 w-6" />
+    <div className="space-y-3">
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDrag(true);
+        }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDrag(false);
+          const f = e.dataTransfer.files?.[0];
+          if (f) onFile(f);
+        }}
+        className={cn(
+          "flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors sm:p-10",
+          drag ? "border-primary bg-primary/5" : "border-border bg-muted/30",
+        )}
+      >
+        <div className="grid h-14 w-14 place-items-center rounded-full bg-primary/10 text-primary">
+          <Upload className="h-6 w-6" />
+        </div>
+        <div className="space-y-1">
+          <div className="text-base font-semibold">גררו קובץ Excel או CSV לכאן</div>
+          <div className="text-sm text-muted-foreground">או לחצו על הכפתור לבחירת קובץ מהמחשב</div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.csv"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onFile(f);
+          }}
+        />
+        <Button onClick={() => inputRef.current?.click()} disabled={busy}>
+          <FileSpreadsheet className="me-1 h-4 w-4" /> בחירת קובץ
+        </Button>
+        {/* The scope this import may reach, right where the file is chosen —
+            the same resolved scope the server funnel enforces. */}
+        {scope?.importNotice?.length ? (
+          <div className="max-w-xl space-y-0.5 rounded-lg bg-surface-subtle px-3 py-2 text-xs text-muted-foreground">
+            {scope.importNotice.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        ) : null}
+        <div className="text-xs text-muted-foreground">
+          נתמכים: .xlsx, .csv &middot; העיבוד מתבצע בדפדפן, הקובץ אינו נשלח לשרת
+        </div>
+        <div className="max-w-xl text-xs text-muted-foreground">{IMPORT_MODEL_HELPER_LINE}</div>
       </div>
-      <div className="space-y-1">
-        <div className="text-base font-semibold">גררו קובץ Excel או CSV לכאן</div>
-        <div className="text-sm text-muted-foreground">או לחצו על הכפתור לבחירת קובץ מהמחשב</div>
-      </div>
-      <input
-        ref={inputRef} type="file" accept=".xlsx,.csv" className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
-      />
-      <Button onClick={() => inputRef.current?.click()} disabled={busy}>
-        <FileSpreadsheet className="me-1 h-4 w-4" /> בחירת קובץ
-      </Button>
-      <div className="text-xs text-muted-foreground">
-        נתמכים: .xlsx, .csv &middot; העיבוד מתבצע בדפדפן, הקובץ אינו נשלח לשרת
-      </div>
-      <div className="max-w-xl text-xs text-muted-foreground">{IMPORT_MODEL_HELPER_LINE}</div>
     </div>
   );
 }
@@ -865,62 +1101,125 @@ function MappingStep({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          התאימו כל עמודה מהקובץ לשדה במערכת. שדות חובה: {REQUIRED_FIELDS.map((f) => FIELD_LABEL[f]).join(", ")}.
+          התאימו כל עמודה מהקובץ לשדה במערכת. שדות חובה:{" "}
+          {REQUIRED_FIELDS.map((f) => FIELD_LABEL[f]).join(", ")}.
         </p>
         {templates.length > 0 && (
           <div className="flex items-center gap-2">
             <Label className="text-xs text-muted-foreground">תבנית שמורה</Label>
             <Select onValueChange={onApplyTemplate}>
-              <SelectTrigger className="h-9 w-52"><SelectValue placeholder="בחר תבנית..." /></SelectTrigger>
+              <SelectTrigger className="h-9 w-52">
+                <SelectValue placeholder="בחר תבנית..." />
+              </SelectTrigger>
               <SelectContent>
-                {templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                {templates.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
         )}
       </div>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>עמודה בקובץ</TableHead>
-              <TableHead>שדה במערכת</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {headers.map((h) => (
-              <TableRow key={h}>
-                <TableCell className="font-medium">{h}</TableCell>
-                <TableCell>
-                  <Select
-                    value={mapping[h] ?? "__skip__"}
-                    onValueChange={(v) => setMapping({ ...mapping, [h]: v as ImportFieldKey })}
-                  >
-                    <SelectTrigger className="h-9 w-64"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {/* Same field keys, same disable rules — only grouped so
-                          core fields read as "for every team" and renewals
-                          fields as an optional add-on. */}
-                      <SelectItem value="__skip__">{FIELD_LABEL.__skip__}</SelectItem>
-                      {FIELD_GROUPS.map((group) => (
-                        <SelectGroup key={group.label}>
-                          <SelectLabel>{group.label}</SelectLabel>
-                          {group.fields.map((f) => (
-                            <SelectItem key={f} value={f}
-                              disabled={(f !== mapping[h] && usedFields.has(f)) || UNSUPPORTED_FIELDS.includes(f)}>
-                              {FIELD_LABEL[f]} {REQUIRED_FIELDS.includes(f) && <span className="text-primary">*</span>}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      {/* One surface per FILE COLUMN → PULSE FIELD pairing. The select keeps
+          the exact same options, groups and disable rules; what's new is that
+          each row states its own outcome instead of leaving the column's fate
+          to be inferred from the summary below. */}
+      <div className="space-y-2">
+        {headers.map((h) => {
+          const field = mapping[h] ?? "__skip__";
+          const fate = columnFate(field);
+          return (
+            <div
+              key={h}
+              className={cn(
+                "surface-tile grid grid-cols-1 items-center gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.3fr)]",
+                fate.tone === "danger" && "border-destructive/30",
+              )}
+            >
+              <div className="min-w-0">
+                <div className="text-[11px] text-muted-foreground">עמודה בקובץ</div>
+                <div className="truncate font-medium">{h}</div>
+              </div>
+              <ArrowLeft
+                aria-hidden
+                className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block"
+              />
+              <div className="min-w-0 space-y-1.5">
+                <Select
+                  value={mapping[h] ?? "__skip__"}
+                  onValueChange={(v) => setMapping({ ...mapping, [h]: v as ImportFieldKey })}
+                >
+                  <SelectTrigger className="h-9 w-full" aria-label={`שדה במערכת עבור העמודה ${h}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* Same field keys, same disable rules — only grouped so
+                        core fields read as "for every team" and renewals
+                        fields as an optional add-on. */}
+                    <SelectItem value="__skip__">{FIELD_LABEL.__skip__}</SelectItem>
+                    {FIELD_GROUPS.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectLabel>{group.label}</SelectLabel>
+                        {group.fields.map((f) => (
+                          <SelectItem
+                            key={f}
+                            value={f}
+                            disabled={
+                              (f !== mapping[h] && usedFields.has(f)) ||
+                              UNSUPPORTED_FIELDS.includes(f)
+                            }
+                          >
+                            {FIELD_LABEL[f]}{" "}
+                            {REQUIRED_FIELDS.includes(f) && <span className="text-primary">*</span>}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className={cn("font-normal", fateToneClass(fate.tone))}>
+                    {fate.label}
+                  </Badge>
+                  {field !== "__skip__" && REQUIRED_FIELDS.includes(field) && (
+                    <Badge variant="secondary" className="bg-primary/10 text-primary">
+                      שדה חובה
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Required fields still unmapped — stated as a checklist, so it is
+          obvious WHICH column is missing rather than only that one is. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3 text-sm">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          שדות חובה
+        </span>
+        {REQUIRED_FIELDS.map((f) => {
+          const ok = usedFields.has(f);
+          return (
+            <Badge
+              key={f}
+              variant="outline"
+              className={cn(
+                "gap-1 font-normal",
+                ok
+                  ? "bg-[color:var(--success)]/12 text-success-foreground"
+                  : "bg-destructive/10 text-destructive",
+              )}
+            >
+              {ok ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+              {FIELD_LABEL[f]}
+            </Badge>
+          );
+        })}
       </div>
 
       <ColumnPlan headers={headers} mapping={mapping} />
@@ -929,24 +1228,73 @@ function MappingStep({
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>חסרות עמודות חובה</AlertTitle>
-          <AlertDescription>{missingRequired.map((f) => FIELD_LABEL[f]).join(", ")}</AlertDescription>
+          <AlertDescription>
+            {missingRequired.map((f) => FIELD_LABEL[f]).join(", ")}
+          </AlertDescription>
         </Alert>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Input placeholder="שם תבנית לשמירה" value={tplName} onChange={(e) => setTplName(e.target.value)} className="h-9 w-56" />
-          <Button variant="outline" size="sm" disabled={!tplName.trim()} onClick={() => { onSaveTemplate(tplName.trim()); setTplName(""); }}>
+          <Input
+            placeholder="שם תבנית לשמירה"
+            value={tplName}
+            onChange={(e) => setTplName(e.target.value)}
+            className="h-9 w-56"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!tplName.trim()}
+            onClick={() => {
+              onSaveTemplate(tplName.trim());
+              setTplName("");
+            }}
+          >
             שמור תבנית
           </Button>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={onBack}><ArrowRight className="me-1 h-4 w-4" /> חזרה</Button>
-          <Button onClick={onNext} disabled={missingRequired.length > 0}>המשך לבדיקה <ArrowLeft className="ms-1 h-4 w-4" /></Button>
+          <Button variant="outline" onClick={onBack}>
+            <ArrowRight className="me-1 h-4 w-4" /> חזרה
+          </Button>
+          <Button onClick={onNext} disabled={missingRequired.length > 0}>
+            המשך לבדיקה <ArrowLeft className="ms-1 h-4 w-4" />
+          </Button>
         </div>
       </div>
     </div>
   );
+}
+
+type ColumnFateTone = "success" | "primary" | "muted" | "warning" | "danger";
+
+/**
+ * What a single mapped column will actually do — the same five buckets
+ * ColumnPlan reports for the whole file, stated per row so a column's fate is
+ * never something the user has to infer (and never hidden in a tooltip).
+ * Identifier columns are called out as match-only, because they are used for
+ * matching and are not written to the representative's record.
+ */
+function columnFate(field: ImportFieldKey): { label: string; tone: ColumnFateTone } {
+  if (field === "__skip__") return { label: "ידולג — לא נבחר שדה", tone: "muted" };
+  if (UNSUPPORTED_FIELDS.includes(field)) return { label: "לא נתמך כרגע", tone: "warning" };
+  if (field === "monthlyTarget") return { label: "יעד רשמי — רק באישור נפרד", tone: "primary" };
+  if (RENEWAL_FIELDS.includes(field)) return { label: "רק לצוותי חידושים", tone: "primary" };
+  if (MATCH_ONLY_FIELDS.includes(field)) return { label: "לזיהוי בלבד — לא נשמר", tone: "muted" };
+  return { label: "יישמר במערכת", tone: "success" };
+}
+
+function fateToneClass(tone: ColumnFateTone): string {
+  return tone === "success"
+    ? "bg-[color:var(--success)]/12 text-success-foreground"
+    : tone === "primary"
+      ? "bg-primary/10 text-primary"
+      : tone === "warning"
+        ? "bg-[color:var(--warning)]/15 text-warning-foreground"
+        : tone === "danger"
+          ? "bg-destructive/10 text-destructive"
+          : "text-muted-foreground";
 }
 
 /**
@@ -1017,9 +1365,17 @@ function ColumnPlan({ headers, mapping }: { headers: string[]; mapping: Record<s
 // ---------- Step: Preview ----------
 
 function PreviewStep({
-  processed, reps, matchNames, onChangeAction, onBack, onNext, criticalCount, warnCount,
+  processed,
+  reps,
+  matchNames,
+  onChangeAction,
+  onBack,
+  onNext,
+  criticalCount,
+  warnCount,
 }: {
-  processed: ProcessedRow[]; reps: Rep[];
+  processed: ProcessedRow[];
+  reps: Rep[];
   /**
    * id -> name across the AUTHORITATIVE candidate set (active + inactive), so a
    * matched deactivated representative can be named in the row action. The
@@ -1028,8 +1384,10 @@ function PreviewStep({
    */
   matchNames: Map<string, string>;
   onChangeAction: (idx: number, action: ResolvedAction, matchId?: string) => void;
-  onBack: () => void; onNext: () => void;
-  criticalCount: number; warnCount: number;
+  onBack: () => void;
+  onNext: () => void;
+  criticalCount: number;
+  warnCount: number;
 }) {
   const matchNameById = matchNames;
   // Display-only filtering/search/pagination over the ALREADY-processed rows
@@ -1052,6 +1410,9 @@ function PreviewStep({
   const shown = pag.pageRows;
   const isFilteredView = filter !== "all" || search.trim() !== "";
   const inactiveMatchCount = processed.filter((p) => p.matchedInactive).length;
+  // Counts over the FULL processed array — pure, unit-tested, and deliberately
+  // free of any quality score or success percentage (import-summary.ts).
+  const summary = useMemo(() => summarizeProcessedRows(processed), [processed]);
   const showRenewalColumns = processed.some(
     (p) => p.renewalOpportunities != null || p.completedRenewals != null || p.renewalFieldsSkipped,
   );
@@ -1065,7 +1426,8 @@ function PreviewStep({
           {inactiveMatchCount === 1
             ? "שורה אחת תואמת נציג מושבת."
             : `${inactiveMatchCount} שורות תואמות נציגים מושבתים.`}{" "}
-          שורות אלו לא ייובאו כברירת מחדל. יש לבחור לכל שורה: הפעלה מחדש ועדכון, דילוג, או יצירת נציג נפרד — יצירה תייצר רשומה כפולה עם היסטוריה ריקה.
+          שורות אלו לא ייובאו כברירת מחדל. יש לבחור לכל שורה: הפעלה מחדש ועדכון, דילוג, או יצירת
+          נציג נפרד — יצירה תייצר רשומה כפולה עם היסטוריה ריקה.
         </div>
       )}
       {(() => {
@@ -1082,18 +1444,49 @@ function PreviewStep({
           </div>
         ) : null;
       })()}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Decision band — what this file will actually do, over the FULL
+          processed array (never the filtered view). Reactivations are counted
+          on their own line rather than folded into "update", and the matching
+          exceptions still set to skip are the rows that will be dropped if the
+          import is confirmed as it stands. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <StatChip label="שורות" value={processed.length} tone="muted" />
-        <StatChip label="לעדכון" value={processed.filter((p) => p.action === "update").length} tone="success" />
-        <StatChip label="חדשים" value={processed.filter((p) => p.action === "create").length} tone="info" />
-        <StatChip label="שגיאות" value={criticalCount} tone={criticalCount > 0 ? "danger" : "muted"} />
+        <StatChip
+          label="לעדכון"
+          value={processed.filter((p) => p.action === "update").length}
+          tone="success"
+        />
+        <StatChip label="הפעלה מחדש" value={summary.reactivate} tone="info" />
+        <StatChip
+          label="חדשים"
+          value={processed.filter((p) => p.action === "create").length}
+          tone="info"
+        />
+        <StatChip
+          label={MATCH_EXCEPTIONS_SKIPPED_LABEL}
+          value={summary.matchExceptionsSkipped}
+          tone={summary.matchExceptionsSkipped > 0 ? "warning" : "muted"}
+        />
+        <StatChip
+          label="שגיאות"
+          value={criticalCount}
+          tone={criticalCount > 0 ? "danger" : "muted"}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>ידולגו: {summary.skip}</span>
+        <span>אזהרות: {summary.warnings}</span>
+        <span>ללא התאמה: {summary.unmatched}</span>
+        <span>תואמות נציג מושבת: {summary.matchedInactive}</span>
       </div>
 
       {warnCount > 0 && (
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>ישנן {warnCount} אזהרות</AlertTitle>
-          <AlertDescription>ניתן להמשיך בייבוא – השורות עם שגיאות ידולגו אוטומטית.</AlertDescription>
+          <AlertDescription>
+            ניתן להמשיך בייבוא – השורות עם שגיאות ידולגו אוטומטית.
+          </AlertDescription>
         </Alert>
       )}
 
@@ -1134,7 +1527,95 @@ function PreviewStep({
         {isFilteredView && <span>{IMPORT_PREVIEW_DISPLAY_FILTER_NOTE}</span>}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
+      {/* Mobile: the same rows as row-detail surfaces. The desktop table below
+          stays the drill-down layer for wide screens — this operational data is
+          genuinely row-oriented — but it is never squeezed into 390px. */}
+      <div className="space-y-2 md:hidden">
+        {shown.map((r) => {
+          const hasErr = r.issues.some((i) => i.severity === "error");
+          return (
+            <div
+              key={r.index}
+              className={cn(
+                "surface-tile space-y-2 p-3",
+                hasErr && "border-destructive/40 bg-destructive/5",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className={cn("truncate font-semibold", !r.name && "text-destructive")}>
+                    {r.name || "—"}{" "}
+                    <span className="text-xs text-muted-foreground">#{r.index + 1}</span>
+                  </div>
+                  <div className="truncate text-xs">
+                    {r.teamName ? (
+                      <span className="text-muted-foreground">{r.teamName}</span>
+                    ) : (
+                      <span className="text-warning-foreground">
+                        {r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {r.issues.length === 0 ? (
+                  <Badge
+                    variant="secondary"
+                    className="shrink-0 bg-[color:var(--success)]/15 text-success-foreground"
+                  >
+                    תקין
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="shrink-0 text-warning-foreground">
+                    {r.issues.length} הערות
+                  </Badge>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-2 border-t pt-2 text-center text-xs">
+                <div>
+                  <div className="text-[10px] text-muted-foreground">יעד (מהקובץ)</div>
+                  <div className="num font-semibold">{r.monthlyTarget ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground">ביצוע</div>
+                  <div className="num font-semibold">{r.currentResult ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground">תאריך</div>
+                  <div className="num font-semibold">{r.updatedAt ?? "—"}</div>
+                </div>
+              </div>
+              {r.issues.length > 0 && (
+                <div className="space-y-0.5">
+                  {r.issues.map((i, k) => (
+                    <div
+                      key={k}
+                      className={cn(
+                        "text-xs",
+                        i.severity === "error" ? "text-destructive" : "text-warning-foreground",
+                      )}
+                    >
+                      {i.severity === "error" ? (
+                        <XCircle className="inline h-3 w-3 me-1" />
+                      ) : (
+                        <AlertTriangle className="inline h-3 w-3 me-1" />
+                      )}
+                      {i.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <PreviewRowAction
+                r={r}
+                matchNameById={matchNameById}
+                reps={reps}
+                onChangeAction={onChangeAction}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-lg border md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -1156,8 +1637,18 @@ function PreviewStep({
               return (
                 <TableRow key={r.index} className={cn(hasErr && "bg-destructive/5")}>
                   <TableCell className="text-muted-foreground">{r.index + 1}</TableCell>
-                  <TableCell className={cn("font-medium", !r.name && "text-destructive")}>{r.name || "—"}</TableCell>
-                  <TableCell>{r.teamName ? r.teamName : <span className="text-warning-foreground">{r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}</span>}</TableCell>
+                  <TableCell className={cn("font-medium", !r.name && "text-destructive")}>
+                    {r.name || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {r.teamName ? (
+                      r.teamName
+                    ) : (
+                      <span className="text-warning-foreground">
+                        {r.teamRaw ? `לא מזוהה: ${r.teamRaw}` : "ללא צוות"}
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>{r.monthlyTarget ?? "—"}</TableCell>
                   <TableCell>{r.currentResult ?? "—"}</TableCell>
                   {showRenewalColumns && (
@@ -1170,51 +1661,43 @@ function PreviewStep({
                       {r.completedRenewals ?? (r.renewalFieldsSkipped ? "לא יישמר" : "—")}
                     </TableCell>
                   )}
-                  <TableCell>{r.updatedAt ?? <span className="text-destructive">—</span>}</TableCell>
+                  <TableCell>
+                    {r.updatedAt ?? <span className="text-destructive">—</span>}
+                  </TableCell>
                   <TableCell className="space-y-1">
                     {r.issues.length === 0 ? (
-                      <Badge variant="secondary" className="bg-[color:var(--success)]/15 text-success-foreground">תקין</Badge>
-                    ) : r.issues.map((i, k) => (
-                      <div key={k} className={cn("text-xs", i.severity === "error" ? "text-destructive" : "text-warning-foreground")}>
-                        {i.severity === "error" ? <XCircle className="inline h-3 w-3 me-1" /> : <AlertTriangle className="inline h-3 w-3 me-1" />}
-                        {i.message}
-                      </div>
-                    ))}
+                      <Badge
+                        variant="secondary"
+                        className="bg-[color:var(--success)]/15 text-success-foreground"
+                      >
+                        תקין
+                      </Badge>
+                    ) : (
+                      r.issues.map((i, k) => (
+                        <div
+                          key={k}
+                          className={cn(
+                            "text-xs",
+                            i.severity === "error" ? "text-destructive" : "text-warning-foreground",
+                          )}
+                        >
+                          {i.severity === "error" ? (
+                            <XCircle className="inline h-3 w-3 me-1" />
+                          ) : (
+                            <AlertTriangle className="inline h-3 w-3 me-1" />
+                          )}
+                          {i.message}
+                        </div>
+                      ))
+                    )}
                   </TableCell>
                   <TableCell>
-                    <Select
-                      value={r.action}
-                      onValueChange={(v) => onChangeAction(r.index, v as ResolvedAction)}
-                      disabled={hasErr}
-                    >
-                      <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {/* §P1: for a row matching a DEACTIVATED representative
-                            the only update route is an explicit reactivation —
-                            plain "update" stays disabled so new operational
-                            numbers can never land on an inactive record, and
-                            "create" is still offered but clearly warned about,
-                            since it genuinely does produce a second person. */}
-                        <SelectItem value="update" disabled={!r.matchRepId || r.matchedInactive}>
-                          עדכון {r.matchRepId && !r.matchedInactive ? `(${matchNameById.get(r.matchRepId) ?? ""})` : ""}
-                        </SelectItem>
-                        {r.matchedInactive && (
-                          <SelectItem value="reactivate">
-                            הפעלה מחדש ועדכון {r.matchRepId ? `(${matchNameById.get(r.matchRepId) ?? ""})` : ""}
-                          </SelectItem>
-                        )}
-                        <SelectItem value="create">{r.matchedInactive ? "יצירת נציג נפרד (כפילות!)" : "יצירת נציג חדש"}</SelectItem>
-                        <SelectItem value="skip">דילוג</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {r.matchedInactive && !hasErr && (
-                      <div className="mt-1 text-[11px] text-warning-foreground">
-                        {r.matchedBy === "external_ref" ? "זוהה לפי מזהה נציג" : "זוהה לפי שם"} · נציג מושבת
-                      </div>
-                    )}
-                    {!r.matchRepId && !hasErr && (
-                      <ManualMatchDialog reps={reps} onPick={(id) => onChangeAction(r.index, "update", id)} />
-                    )}
+                    <PreviewRowAction
+                      r={r}
+                      matchNameById={matchNameById}
+                      reps={reps}
+                      onChangeAction={onChangeAction}
+                    />
                   </TableCell>
                 </TableRow>
               );
@@ -1280,9 +1763,67 @@ function PreviewStep({
       </div>
 
       <div className="flex justify-between">
-        <Button variant="outline" onClick={onBack}><ArrowRight className="me-1 h-4 w-4" /> חזרה</Button>
-        <Button onClick={onNext}>המשך לאישור <ArrowLeft className="ms-1 h-4 w-4" /></Button>
+        <Button variant="outline" onClick={onBack}>
+          <ArrowRight className="me-1 h-4 w-4" /> חזרה
+        </Button>
+        <Button onClick={onNext}>
+          המשך לאישור <ArrowLeft className="ms-1 h-4 w-4" />
+        </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The per-row decision control, shared by the desktop table and the mobile row
+ * surfaces so both dispatch through the SAME rule and the same original
+ * row.index. The inactive-match choices and their wording are unchanged.
+ */
+function PreviewRowAction({
+  r, matchNameById, reps, onChangeAction,
+}: {
+  r: ProcessedRow;
+  matchNameById: Map<string, string>;
+  reps: Rep[];
+  onChangeAction: (idx: number, action: ResolvedAction, matchId?: string) => void;
+}) {
+  const hasErr = r.issues.some((i) => i.severity === "error");
+  return (
+    <div className="space-y-1">
+      <Select
+        value={r.action}
+        onValueChange={(v) => onChangeAction(r.index, v as ResolvedAction)}
+        disabled={hasErr}
+      >
+        <SelectTrigger className="h-8 w-full md:w-44" aria-label={`פעולה לשורה ${r.index + 1}`}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {/* §P1: for a row matching a DEACTIVATED representative the only
+              update route is an explicit reactivation — plain "update" stays
+              disabled so new operational numbers can never land on an inactive
+              record, and "create" is still offered but clearly warned about,
+              since it genuinely does produce a second person. */}
+          <SelectItem value="update" disabled={!r.matchRepId || r.matchedInactive}>
+            עדכון {r.matchRepId && !r.matchedInactive ? `(${matchNameById.get(r.matchRepId) ?? ""})` : ""}
+          </SelectItem>
+          {r.matchedInactive && (
+            <SelectItem value="reactivate">
+              הפעלה מחדש ועדכון {r.matchRepId ? `(${matchNameById.get(r.matchRepId) ?? ""})` : ""}
+            </SelectItem>
+          )}
+          <SelectItem value="create">{r.matchedInactive ? "יצירת נציג נפרד (כפילות!)" : "יצירת נציג חדש"}</SelectItem>
+          <SelectItem value="skip">דילוג</SelectItem>
+        </SelectContent>
+      </Select>
+      {r.matchedInactive && !hasErr && (
+        <div className="text-[11px] text-warning-foreground">
+          {r.matchedBy === "external_ref" ? "זוהה לפי מזהה נציג" : "זוהה לפי שם"} · נציג מושבת
+        </div>
+      )}
+      {!r.matchRepId && !hasErr && (
+        <ManualMatchDialog reps={reps} onPick={(id) => onChangeAction(r.index, "update", id)} />
+      )}
     </div>
   );
 }
@@ -1319,66 +1860,134 @@ function ManualMatchDialog({ reps, onPick }: { reps: Rep[]; onPick: (id: string)
 // ---------- Step: Confirm ----------
 
 function ConfirmStep({
-  processed, fileName, criticalCount, warnCount, onBack, onConfirm, busy,
-  isDemo, applyTargetsFromImport, onApplyTargetsFromImportChange,
-  importTargetMonth, onImportTargetMonthChange,
+  processed,
+  fileName,
+  criticalCount,
+  warnCount,
+  onBack,
+  onConfirm,
+  busy,
+  isDemo,
+  applyTargetsFromImport,
+  onApplyTargetsFromImportChange,
+  importTargetMonth,
+  onImportTargetMonthChange,
 }: {
-  processed: ProcessedRow[]; fileName: string; criticalCount: number; warnCount: number;
-  onBack: () => void; onConfirm: () => void; busy: boolean;
-  isDemo: boolean; applyTargetsFromImport: boolean; onApplyTargetsFromImportChange: (v: boolean) => void;
-  importTargetMonth: string; onImportTargetMonthChange: (v: string) => void;
+  processed: ProcessedRow[];
+  fileName: string;
+  criticalCount: number;
+  warnCount: number;
+  onBack: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+  isDemo: boolean;
+  applyTargetsFromImport: boolean;
+  onApplyTargetsFromImportChange: (v: boolean) => void;
+  importTargetMonth: string;
+  onImportTargetMonthChange: (v: string) => void;
 }) {
-  const updateN = processed.filter((p) => p.action === "update").length;
-  const createN = processed.filter((p) => p.action === "create").length;
-  const skipN = processed.length - updateN - createN;
-  const targetRowsN = processed.filter((p) => p.action !== "skip" && p.monthlyTarget != null).length;
+  // Each action population is counted from the row's own action — deriving
+  // skip by subtraction classified every reactivation as "will be skipped".
+  const actions = countImportActions(processed);
+  const updateN = actions.update;
+  const createN = actions.create;
+  const skipN = actions.skip;
+  const targetRowsN = processed.filter(
+    (p) => p.action !== "skip" && p.monthlyTarget != null,
+  ).length;
   // Confirming an import that would write official targets requires an
   // explicit target month — never silently falls back to "now" (§20
   // correction #3).
   const monthMissing = applyTargetsFromImport && !importTargetMonth;
+  const reactivateN = actions.reactivate;
+  const targetPlan = importTargetPlan({ applyTargetsFromImport, importTargetMonth });
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <StatChip label="לעדכון" value={updateN} tone="success" />
-        <StatChip label="חדשים" value={createN} tone="info" />
-        <StatChip label="ידולגו" value={skipN} tone="muted" />
+      {/* "What will happen" — the same truthful counts, stated as the outcome
+          of confirming rather than as a stat strip with no verb. */}
+      <div className="rounded-2xl border bg-card p-4">
+        <div className="text-sm font-semibold">בלחיצה על אישור וייבוא</div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatChip label="לעדכון" value={updateN} tone="success" />
+          <StatChip label="הפעלה מחדש" value={reactivateN} tone="info" />
+          <StatChip label="חדשים" value={createN} tone="info" />
+          <StatChip label="ידולגו" value={skipN} tone="muted" />
+        </div>
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+          <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-surface-subtle px-2.5 py-2">
+            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 truncate">
+              קובץ: <b>{fileName}</b>
+            </span>
+          </div>
+          <div className="rounded-lg bg-surface-subtle px-2.5 py-2">
+            סה"כ {processed.length} שורות · {warnCount} אזהרות · {criticalCount} שגיאות
+          </div>
+          <div
+            className={cn(
+              "rounded-lg px-2.5 py-2",
+              targetPlan.willWrite
+                ? "bg-primary/10 text-primary"
+                : targetPlan.reason === "month_missing"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-surface-subtle text-muted-foreground",
+            )}
+          >
+            {targetPlan.willWrite
+              ? `יעדים רשמיים: יעודכנו לחודש ${formatMonthLabel(targetPlan.month)} בלבד`
+              : targetPlan.reason === "month_missing"
+                ? "יעדים רשמיים: נבחר עדכון יעדים אך טרם נבחר חודש"
+                : "יעדים רשמיים: לא ישתנו"}
+          </div>
+          <div className="rounded-lg bg-surface-subtle px-2.5 py-2 text-muted-foreground">
+            {IMPORT_CONFIRM_INCLUDES_HIDDEN_NOTE}
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          פעולה זו לא תשנה הערות מנהל, האזנות, משימות, מאמרים או תחרויות.
+        </p>
       </div>
-      <Alert>
-        <CheckCircle2 className="h-4 w-4" />
-        <AlertTitle>סיכום לפני ייבוא</AlertTitle>
-        <AlertDescription>
-          קובץ: <b>{fileName}</b>. סה"כ {processed.length} שורות · {warnCount} אזהרות ·{" "}
-          {criticalCount} שגיאות. פעולה זו לא תשנה הערות מנהל, האזנות, משימות, מאמרים או תחרויות.
-          <div className="mt-1">{IMPORT_CONFIRM_INCLUDES_HIDDEN_NOTE}</div>
-        </AlertDescription>
-      </Alert>
 
       {!isDemo && targetRowsN > 0 && (
-        <div className="space-y-3 rounded-xl border p-4">
+        <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wide text-primary">
+                פעולה נפרדת · עדכון יעדים רשמיים
+              </div>
               <div className="font-medium text-sm">עדכון יעדים אישיים רשמיים מהקובץ</div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                הקובץ מכיל עמודת "יעד חודשי" עם ערך עבור {targetRowsN} שורות. כברירת מחדל היעדים הרשמיים
-                (המוצגים ב"ניהול יעדים") אינם משתנים מייבוא — רק הביצוע הנוכחי מתעדכן. הפעלת האפשרות הזו
-                תעדכן את היעד האישי הרשמי לחודש שייבחר למטה עבור כל נציג עם ערך יעד בשורה, ותדרוס יעד רשמי
-                קיים לאותו חודש אם הוגדר. נציג ללא צוות משויך לא יעודכן בדרך זו.
+                הקובץ מכיל עמודת "יעד חודשי" עם ערך עבור {targetRowsN} שורות. כברירת מחדל היעדים
+                הרשמיים (המוצגים ב"ניהול יעדים") אינם משתנים מייבוא — רק הביצוע הנוכחי מתעדכן. הפעלת
+                האפשרות הזו תעדכן את היעד האישי הרשמי לחודש שייבחר למטה עבור כל נציג עם ערך יעד
+                בשורה, ותדרוס יעד רשמי קיים לאותו חודש אם הוגדר. נציג ללא צוות משויך לא יעודכן בדרך
+                זו.
               </p>
             </div>
-            <Switch checked={applyTargetsFromImport} onCheckedChange={onApplyTargetsFromImportChange} className="shrink-0 mt-1" />
+            <Switch
+              checked={applyTargetsFromImport}
+              onCheckedChange={onApplyTargetsFromImportChange}
+              className="shrink-0 mt-1"
+            />
           </div>
 
           {applyTargetsFromImport && (
             <div className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/40 p-3">
-              <Label htmlFor="import-target-month" className="text-sm shrink-0">חודש יעד לייבוא</Label>
+              <Label htmlFor="import-target-month" className="text-sm shrink-0">
+                חודש יעד לייבוא
+              </Label>
               <Input
-                id="import-target-month" type="month" value={importTargetMonth}
+                id="import-target-month"
+                type="month"
+                value={importTargetMonth}
                 onChange={(e) => onImportTargetMonthChange(e.target.value)}
                 className="w-auto"
               />
               {importTargetMonth ? (
                 <span className="text-sm text-muted-foreground">
-                  היעדים יעודכנו עבור <b className="text-foreground">{formatMonthLabel(importTargetMonth)}</b> בלבד — לא חודש נוכחי אוטומטית.
+                  היעדים יעודכנו עבור{" "}
+                  <b className="text-foreground">{formatMonthLabel(importTargetMonth)}</b> בלבד — לא
+                  חודש נוכחי אוטומטית.
                 </span>
               ) : (
                 <span className="text-sm text-destructive">חובה לבחור חודש לפני אישור הייבוא.</span>
@@ -1388,9 +1997,17 @@ function ConfirmStep({
         </div>
       )}
 
-      <div className="flex justify-between">
-        <Button variant="outline" onClick={onBack} disabled={busy}><ArrowRight className="me-1 h-4 w-4" /> חזרה</Button>
-        <Button onClick={onConfirm} disabled={busy || updateN + createN === 0 || monthMissing}>אישור וייבוא</Button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button variant="outline" onClick={onBack} disabled={busy}>
+          <ArrowRight className="me-1 h-4 w-4" /> חזרה
+        </Button>
+        <Button
+          size="lg"
+          onClick={onConfirm}
+          disabled={busy || !hasImportableRows(actions) || monthMissing}
+        >
+          {busy ? "מייבא..." : `אישור וייבוא · ${updateN + reactivateN + createN} שורות`}
+        </Button>
       </div>
     </div>
   );
@@ -1399,24 +2016,73 @@ function ConfirmStep({
 // ---------- Step: Summary ----------
 
 function SummaryStep({ entry, onNew }: { entry: ImportHistoryEntry; onNew: () => void }) {
+  // TRUTHFULNESS FIX: this panel used to render "הייבוא הושלם בהצלחה"
+  // unconditionally, including for an entry stored as partial or failed. The
+  // wording is now DERIVED from the stored status (import-summary.ts) — the
+  // success sentence is unreachable for any other status. The status itself,
+  // and every count, is unchanged.
+  const outcome = importOutcomeView(entry.status);
   return (
     <div className="space-y-4">
-      <Alert>
-        <CheckCircle2 className="h-4 w-4" />
-        <AlertTitle>הייבוא הושלם בהצלחה</AlertTitle>
-        <AlertDescription>הדשבורד, טבלת הביצועים והתובנות עודכנו בהתאם.</AlertDescription>
-      </Alert>
+      <div
+        className={cn(
+          "flex items-start gap-3 rounded-2xl border p-4",
+          outcome.tone === "success" &&
+            "border-[color:var(--success)]/40 bg-[color:var(--success)]/10",
+          outcome.tone === "warning" &&
+            "border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10",
+          outcome.tone === "danger" && "border-destructive/40 bg-destructive/5",
+        )}
+      >
+        <span
+          className={cn(
+            "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
+            outcome.tone === "success" && "bg-[color:var(--success)]/20 text-success-foreground",
+            outcome.tone === "warning" && "bg-[color:var(--warning)]/20 text-warning-foreground",
+            outcome.tone === "danger" && "bg-destructive/15 text-destructive",
+          )}
+        >
+          {outcome.tone === "success" ? (
+            <CheckCircle2 className="h-5 w-5" />
+          ) : outcome.tone === "warning" ? (
+            <AlertTriangle className="h-5 w-5" />
+          ) : (
+            <XCircle className="h-5 w-5" />
+          )}
+        </span>
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-lg font-extrabold">{outcome.title}</span>
+            <Badge variant="outline">{importStatusLabel(entry.status)}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">{outcome.description}</p>
+        </div>
+      </div>
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatChip label="שורות" value={entry.rowsProcessed} tone="muted" />
         <StatChip label="עודכנו" value={entry.rowsUpdated} tone="success" />
         <StatChip label="חדשים" value={entry.rowsCreated} tone="info" />
         <StatChip label="דולגו" value={entry.rowsSkipped} tone="muted" />
         <StatChip label="אזהרות" value={entry.warnings} tone="warning" />
-        <StatChip label="שגיאות" value={entry.errors} tone={entry.errors > 0 ? "danger" : "muted"} />
+        <StatChip
+          label="שגיאות"
+          value={entry.errors}
+          tone={entry.errors > 0 ? "danger" : "muted"}
+        />
       </div>
-      <div className="text-sm text-muted-foreground">
-        קובץ: <b>{entry.fileName}</b> · תאריך: {new Date(entry.date).toLocaleString("he-IL")}
+      <div className="grid gap-2 text-sm sm:grid-cols-3">
+        <SummaryField label="קובץ" value={entry.fileName} />
+        <SummaryField
+          label="תקופה"
+          value={entry.period ? formatMonthLabel(entry.period) : "לא נקבעה תקופה אחידה"}
+        />
+        <SummaryField label="תאריך" value={new Date(entry.date).toLocaleString("he-IL")} />
       </div>
+      {(entry.errorReport?.length ?? 0) > 0 && (
+        <Button variant="outline" size="sm" onClick={() => downloadErrorReport(entry)}>
+          <FileDown className="me-1 h-4 w-4" /> הורדת דוח שגיאות ואזהרות
+        </Button>
+      )}
       {entry.snapshot && entry.snapshot.targetGoals.length > 0 && (
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
@@ -1428,8 +2094,16 @@ function SummaryStep({ entry, onNew }: { entry: ImportHistoryEntry; onNew: () =>
         </Alert>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button asChild><Link to="/performance">צפה בביצועים המעודכנים</Link></Button>
-        <Button variant="outline" onClick={onNew}>ייבוא נוסף</Button>
+        {/* The "look at the results" action is only the natural next step when
+            rows actually landed; a failed import points at a retry instead. */}
+        {entry.rowsUpdated + entry.rowsCreated > 0 && (
+          <Button asChild>
+            <Link to="/performance">צפה בביצועים המעודכנים</Link>
+          </Button>
+        )}
+        <Button variant={entry.status === "failed" ? "default" : "outline"} onClick={onNew}>
+          ייבוא נוסף
+        </Button>
       </div>
     </div>
   );
@@ -1447,74 +2121,176 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2 text-base"><History className="h-4 w-4" /> היסטוריית ייבוא</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <History className="h-4 w-4" /> היסטוריית ייבוא
+        </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
         {history.length === 0 ? (
-          <EmptyState icon={History} title="עדיין לא בוצע ייבוא" description="לאחר הייבוא הראשון תוצג כאן היסטוריה מלאה." />
+          <EmptyState
+            icon={History}
+            title="עדיין לא בוצע ייבוא"
+            description="לאחר הייבוא הראשון תוצג כאן היסטוריה מלאה."
+          />
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>תאריך</TableHead>
-                  <TableHead>שעה</TableHead>
-                  <TableHead>קובץ</TableHead>
-                  <TableHead>תקופה</TableHead>
-                  <TableHead>נציגים עודכנו</TableHead>
-                  <TableHead>אזהרות</TableHead>
-                  <TableHead>שגיאות</TableHead>
-                  <TableHead>סטטוס</TableHead>
-                  <TableHead>פעולות</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {history.map((h, i) => {
-                  const { date, time } = fmtDate(h.date);
-                  return (
-                    <TableRow key={h.id} className="cursor-pointer hover:bg-accent/40" onClick={() => setDetailFor(h)}>
-                      <TableCell className="whitespace-nowrap">{date}</TableCell>
-                      <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{time}</TableCell>
-                      <TableCell className="max-w-[220px] truncate">{h.fileName}</TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {h.period ? formatMonthLabel(h.period) : "—"}
-                      </TableCell>
-                      <TableCell>{h.rowsUpdated + h.rowsCreated}</TableCell>
-                      <TableCell>
-                        {h.warnings > 0
-                          ? <Badge variant="outline" className="bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30">{h.warnings}</Badge>
-                          : <span className="text-muted-foreground">0</span>}
-                      </TableCell>
-                      <TableCell>
-                        {h.errors > 0
-                          ? <Badge variant="destructive">{h.errors}</Badge>
-                          : <span className="text-muted-foreground">0</span>}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={h.status === "success" ? "secondary" : h.status === "partial" ? "outline" : "destructive"}
-                          className={h.status === "success" ? "bg-[color:var(--success)]/15 text-success-foreground" : ""}>
-                          {h.status === "success" ? "הושלם" : h.status === "partial" ? "חלקי" : "נכשל"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div className="flex flex-wrap gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => setDetailFor(h)}>פרטים</Button>
-                          <Button size="sm" variant="ghost" onClick={() => downloadErrorReport(h)}>
-                            <FileDown className="h-3.5 w-3.5 me-1" /> דוח
-                          </Button>
-                          {i === 0 && h.snapshot && (
-                            <Button size="sm" variant="outline" onClick={() => onUndo(h)}>
-                              <Undo2 className="h-3.5 w-3.5 me-1" /> בטל
-                            </Button>
+          <>
+            {/* The most recent run as an operational card — it is the only entry
+              that can still be undone, and the undo caveat travels with it. */}
+            {(() => {
+              const latest = history[0];
+              const outcome = importOutcomeView(latest.status);
+              const { date, time } = fmtDate(latest.date);
+              return (
+                <div className="surface-tile space-y-2 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        outcome.tone === "success" &&
+                          "bg-[color:var(--success)]/12 text-success-foreground",
+                        outcome.tone === "warning" &&
+                          "bg-[color:var(--warning)]/15 text-warning-foreground",
+                        outcome.tone === "danger" && "bg-destructive/10 text-destructive",
+                      )}
+                    >
+                      {importStatusLabel(latest.status)}
+                    </Badge>
+                    <span className="min-w-0 truncate text-sm font-semibold">
+                      {latest.fileName}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {date} · {time} · {latest.importedBy}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      תקופה: {latest.period ? formatMonthLabel(latest.period) : "—"}
+                    </span>
+                    <div className="ms-auto flex flex-wrap gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setDetailFor(latest)}>
+                        פרטים
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => downloadErrorReport(latest)}>
+                        <FileDown className="h-3.5 w-3.5 me-1" /> דוח
+                      </Button>
+                      {latest.snapshot && (
+                        <Button size="sm" variant="outline" onClick={() => onUndo(latest)}>
+                          <Undo2 className="h-3.5 w-3.5 me-1" /> ביטול הייבוא האחרון
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>עודכנו: {latest.rowsUpdated}</span>
+                    <span>נוספו: {latest.rowsCreated}</span>
+                    <span>דולגו: {latest.rowsSkipped}</span>
+                    <span>אזהרות: {latest.warnings}</span>
+                    <span>שגיאות: {latest.errors}</span>
+                  </div>
+                  {latest.snapshot && (
+                    <p className="rounded-lg border border-[color:var(--warning)]/40 bg-[color:var(--warning)]/10 p-2 text-xs text-warning-foreground">
+                      ביטול משחזר את נתוני הביצועים והיעדים הרשמיים לפי תמונת המצב שנשמרה, אך
+                      <b> נציגים שנוצרו בייבוא זה אינם נמחקים</b> — יש להסירם ידנית מעמוד ניהול
+                      הנציגים.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>תאריך</TableHead>
+                    <TableHead>שעה</TableHead>
+                    <TableHead>קובץ</TableHead>
+                    <TableHead>תקופה</TableHead>
+                    <TableHead>נציגים עודכנו</TableHead>
+                    <TableHead>אזהרות</TableHead>
+                    <TableHead>שגיאות</TableHead>
+                    <TableHead>סטטוס</TableHead>
+                    <TableHead>פעולות</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history.map((h, i) => {
+                    const { date, time } = fmtDate(h.date);
+                    return (
+                      <TableRow
+                        key={h.id}
+                        className="cursor-pointer hover:bg-accent/40"
+                        onClick={() => setDetailFor(h)}
+                      >
+                        <TableCell className="whitespace-nowrap">{date}</TableCell>
+                        <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                          {time}
+                        </TableCell>
+                        <TableCell className="max-w-[220px] truncate">{h.fileName}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {h.period ? formatMonthLabel(h.period) : "—"}
+                        </TableCell>
+                        <TableCell>{h.rowsUpdated + h.rowsCreated}</TableCell>
+                        <TableCell>
+                          {h.warnings > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-[color:var(--warning)]/15 text-warning-foreground border-[color:var(--warning)]/30"
+                            >
+                              {h.warnings}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
                           )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                        </TableCell>
+                        <TableCell>
+                          {h.errors > 0 ? (
+                            <Badge variant="destructive">{h.errors}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              h.status === "success"
+                                ? "secondary"
+                                : h.status === "partial"
+                                  ? "outline"
+                                  : "destructive"
+                            }
+                            className={
+                              h.status === "success"
+                                ? "bg-[color:var(--success)]/15 text-success-foreground"
+                                : ""
+                            }
+                          >
+                            {importStatusLabel(h.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-wrap gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => setDetailFor(h)}>
+                              פרטים
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => downloadErrorReport(h)}
+                            >
+                              <FileDown className="h-3.5 w-3.5 me-1" /> דוח
+                            </Button>
+                            {i === 0 && h.snapshot && (
+                              <Button size="sm" variant="outline" onClick={() => onUndo(h)}>
+                                <Undo2 className="h-3.5 w-3.5 me-1" /> בטל
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
 
@@ -1534,12 +2310,23 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
                 <SummaryField label="נציגים עודכנו" value={String(detailFor.rowsUpdated)} />
                 <SummaryField label="נציגים חדשים" value={String(detailFor.rowsCreated)} />
                 <SummaryField label="שורות דולגו" value={String(detailFor.rowsSkipped)} />
-                <SummaryField label="סטטוס" value={detailFor.status === "success" ? "הושלם" : detailFor.status === "partial" ? "חלקי" : "נכשל"} />
+                <SummaryField
+                  label="סטטוס"
+                  value={
+                    detailFor.status === "success"
+                      ? "הושלם"
+                      : detailFor.status === "partial"
+                        ? "חלקי"
+                        : "נכשל"
+                  }
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-lg border bg-[color:var(--warning)]/5 p-3">
                   <div className="text-xs font-semibold text-warning-foreground">אזהרות</div>
-                  <div className="mt-1 text-2xl font-bold text-warning-foreground">{detailFor.warnings}</div>
+                  <div className="mt-1 text-2xl font-bold text-warning-foreground">
+                    {detailFor.warnings}
+                  </div>
                 </div>
                 <div className="rounded-lg border bg-destructive/5 p-3">
                   <div className="text-xs font-semibold text-destructive">שגיאות</div>
@@ -1548,19 +2335,28 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
               </div>
               {detailFor.errorReport && detailFor.errorReport.length > 0 && (
                 <div>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">פירוט אזהרות ושגיאות</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    פירוט אזהרות ושגיאות
+                  </div>
                   <ul className="space-y-2">
                     {detailFor.errorReport.slice(0, 50).map((r, k) => (
                       <li key={k} className="rounded border p-2">
-                        <div className="font-medium">שורה {r.row}{r.name ? ` – ${r.name}` : ""}</div>
+                        <div className="font-medium">
+                          שורה {r.row}
+                          {r.name ? ` – ${r.name}` : ""}
+                        </div>
                         <ul className="mt-1 list-disc ps-5 text-muted-foreground">
-                          {r.messages.map((m, j) => <li key={j}>{m}</li>)}
+                          {r.messages.map((m, j) => (
+                            <li key={j}>{m}</li>
+                          ))}
                         </ul>
                       </li>
                     ))}
                   </ul>
                   {detailFor.errorReport.length > 50 && (
-                    <div className="mt-2 text-xs text-muted-foreground">מוצגות 50 מתוך {detailFor.errorReport.length}. להורדת הכל השתמשו בכפתור הדוח.</div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      מוצגות 50 מתוך {detailFor.errorReport.length}. להורדת הכל השתמשו בכפתור הדוח.
+                    </div>
                   )}
                 </div>
               )}
@@ -1568,37 +2364,52 @@ function HistoryCard({ history, onUndo }: { history: ImportHistoryEntry[]; onUnd
           )}
           <DialogFooter className="gap-2">
             {detailFor && (detailFor.errorReport?.length ?? 0) > 0 && (
-              <Button variant="outline" onClick={() => setErrFor(detailFor)}>רק שגיאות ואזהרות</Button>
+              <Button variant="outline" onClick={() => setErrFor(detailFor)}>
+                רק שגיאות ואזהרות
+              </Button>
             )}
-            {detailFor && <Button variant="outline" onClick={() => downloadErrorReport(detailFor)}>הורדת דוח CSV</Button>}
+            {detailFor && (
+              <Button variant="outline" onClick={() => downloadErrorReport(detailFor)}>
+                הורדת דוח CSV
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!errFor} onOpenChange={(o) => !o && setErrFor(null)}>
         <DialogContent className="max-h-[70vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>שגיאות ואזהרות – {errFor?.fileName}</DialogTitle></DialogHeader>
-          {(!errFor?.errorReport || errFor.errorReport.length === 0) ? (
+          <DialogHeader>
+            <DialogTitle>שגיאות ואזהרות – {errFor?.fileName}</DialogTitle>
+          </DialogHeader>
+          {!errFor?.errorReport || errFor.errorReport.length === 0 ? (
             <div className="text-sm text-muted-foreground">אין שגיאות מתועדות לייבוא זה.</div>
           ) : (
             <ul className="space-y-2 text-sm">
               {errFor.errorReport.map((r, k) => (
                 <li key={k} className="rounded border p-2">
-                  <div className="font-medium">שורה {r.row} {r.name && `– ${r.name}`}</div>
+                  <div className="font-medium">
+                    שורה {r.row} {r.name && `– ${r.name}`}
+                  </div>
                   <ul className="mt-1 list-disc ps-5 text-muted-foreground">
-                    {r.messages.map((m, j) => <li key={j}>{m}</li>)}
+                    {r.messages.map((m, j) => (
+                      <li key={j}>{m}</li>
+                    ))}
                   </ul>
                 </li>
               ))}
             </ul>
           )}
           <DialogFooter>
-            {errFor && <Button variant="outline" onClick={() => downloadErrorReport(errFor)}>הורדת דוח שגיאות</Button>}
+            {errFor && (
+              <Button variant="outline" onClick={() => downloadErrorReport(errFor)}>
+                הורדת דוח שגיאות
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>
-
   );
 }
 

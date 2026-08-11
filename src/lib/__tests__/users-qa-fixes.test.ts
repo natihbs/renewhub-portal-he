@@ -12,6 +12,31 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { computeUserHealth } from "../user-health";
+import { filterAndSortUsers, type UsersFilterRow, type UsersFilterState } from "../users-overview";
+
+/** A minimal, valid list row — each test overrides only what it exercises. */
+const baseFilterRow: UsersFilterRow = {
+  full_name: "—",
+  email: null,
+  team_id: null,
+  manager_id: null,
+  created_at: "2024-01-01",
+  active: true,
+  roles: [],
+  last_login_at: null,
+  auth_last_sign_in_at: null,
+  representative_link: null,
+  health: { status: "healthy" },
+};
+const baseFilters: UsersFilterState = {
+  search: "",
+  roleFilter: "all",
+  teamFilter: "all",
+  statusFilter: "all",
+  healthFilter: "all",
+  sortBy: "name",
+};
+const noNames = { teamName: () => "", managerName: () => "" };
 
 const read = (rel: string) => readFileSync(resolve(__dirname, rel), "utf8");
 const usersPageSrc = read("../../routes/_authenticated/users.tsx");
@@ -158,12 +183,54 @@ describe("Part A polish — list role filter uses the technical permission wordi
     expect(usersPageSrc).not.toContain("כל התפקידים");
   });
 
+  // Phase 5 moved the list predicate out of the route into the pure,
+  // unit-tested filterAndSortUsers (users-overview.ts). The RULES these two
+  // pinned are unchanged and are now asserted behaviorally — the filter reads
+  // the TECHNICAL role, and the search still covers the derived business
+  // title — with the route pinned to route its state through that helper.
   it("still filters by the TECHNICAL role value", () => {
-    expect(listSrc).toContain("u.roles.includes(roleFilter as AppRole)");
+    const scopedManager = {
+      ...baseFilterRow,
+      full_name: "לירון",
+      roles: ["manager"] as const,
+      business_title: "מנהל מוקד · דירות וחידושים",
+    };
+    const rep = { ...baseFilterRow, full_name: "דנה", roles: ["representative"] as const };
+    const rows = [scopedManager, rep].map((r) => ({ ...r, roles: [...r.roles] }));
+    expect(
+      filterAndSortUsers(rows, { ...baseFilters, roleFilter: "manager" }, noNames).map(
+        (r) => r.full_name,
+      ),
+    ).toEqual(["לירון"]);
+    // A business TITLE is never a technical role: filtering by "manager" is
+    // what selects the scoped manager, and no title value is a valid filter.
+    expect(filterAndSortUsers(rows, { ...baseFilters, roleFilter: "מנהל מוקד" }, noNames)).toEqual(
+      [],
+    );
+    expect(usersPageSrc).toContain("roleFilter, teamFilter, statusFilter, healthFilter, sortBy }");
   });
 
   it("searches business_title so scoped managers are findable by title or unit", () => {
-    expect(listSrc).toContain('${u.business_title ?? ""}');
+    const scopedManager: UsersFilterRow = {
+      ...baseFilterRow,
+      full_name: "לירון",
+      roles: ["manager"],
+      business_title: "מנהל מוקד · דירות וחידושים",
+    };
+    const rows: UsersFilterRow[] = [
+      scopedManager,
+      { ...baseFilterRow, full_name: "דנה", roles: ["representative"] },
+    ];
+    expect(
+      filterAndSortUsers(rows, { ...baseFilters, search: "מנהל מוקד" }, noNames).map(
+        (r) => r.full_name,
+      ),
+    ).toEqual(["לירון"]);
+    expect(
+      filterAndSortUsers(rows, { ...baseFilters, search: "דירות" }, noNames).map(
+        (r) => r.full_name,
+      ),
+    ).toEqual(["לירון"]);
   });
 });
 

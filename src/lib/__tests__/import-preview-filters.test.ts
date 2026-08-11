@@ -218,9 +218,10 @@ describe("original row.index is preserved end to end", () => {
     expect(preview).toContain('value={processed.filter((p) => p.action === "update").length}');
     expect(preview).toContain("value={processed.length}");
     const confirm = dataImportSrc.slice(dataImportSrc.indexOf("function ConfirmStep"));
-    expect(confirm).toContain(
-      'const updateN = processed.filter((p) => p.action === "update").length;',
-    );
+    // The confirm counts still read the FULL processed array — they now come
+    // from countImportActions(processed), which counts each action population
+    // explicitly instead of deriving skip by subtraction.
+    expect(confirm).toContain("countImportActions(processed)");
     expect(confirm).toContain("{IMPORT_CONFIRM_INCLUDES_HIDDEN_NOTE}");
   });
 });
@@ -234,7 +235,11 @@ describe("display-only wording", () => {
       "האישור כולל גם שורות שלא הוצגו בסינון התצוגה המקדימה.",
     );
     expect(dataImportSrc).toContain("{IMPORT_PREVIEW_DISPLAY_FILTER_NOTE}");
-    expect(IMPORT_PREVIEW_FILTER_LABEL.decisions).toBe("דורש החלטה");
+    // Relabelled (predicate unchanged): the filter cannot know whether a
+    // skipped row is unresolved or deliberately skipped, so it states the fact
+    // it can prove — the row is a matching exception — instead of asserting
+    // that a decision is still outstanding.
+    expect(IMPORT_PREVIEW_FILTER_LABEL.decisions).toBe("חריגי התאמה");
     expect(IMPORT_PREVIEW_FILTER_LABEL.all).toBe("הכול");
   });
 });

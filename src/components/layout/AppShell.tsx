@@ -7,6 +7,8 @@ import { useUx } from "@/lib/ux-store";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
 import { useWorkspace } from "@/lib/workspace-context";
+import { useBusinessScope } from "@/lib/business-scope-hooks";
+import { accountIdentity } from "@/lib/account-identity";
 import { supabase } from "@/integrations/supabase/client";
 import {
   type AppRole, navItemsByGroup, navLabel, type NavItem, NAV_ITEMS,
@@ -371,9 +373,19 @@ function initialsOf(name: string | null | undefined, email: string | null | unde
   return src.slice(0, 2).toUpperCase();
 }
 
-function ProfileDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function ProfileDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
   const { user, profile, roles } = useAuth();
-  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל צוות" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
+  // Technical permission and business title are two different facts — the
+  // dialog states both separately instead of printing the role as if it were
+  // the title (see account-identity.ts).
+  const { scope } = useBusinessScope();
+  const identity = accountIdentity({ roles, scope });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent dir="rtl" className="sm:max-w-md">
@@ -392,9 +404,21 @@ function ProfileDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
             <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
           </div>
         </div>
-        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm border-t pt-3">
-          <span className="text-muted-foreground">תפקיד</span>
-          <span className="font-medium">{roleLabel}</span>
+        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t pt-3 text-sm">
+          <span className="text-muted-foreground">הרשאת מערכת</span>
+          <span className="font-medium">{identity.technicalLabel}</span>
+          {identity.businessLabel && (
+            <>
+              <span className="text-muted-foreground">תפקיד עסקי</span>
+              <span className="font-medium">{identity.businessLabel}</span>
+            </>
+          )}
+          {identity.isPendingBusinessTitle && (
+            <>
+              <span className="text-muted-foreground">תפקיד עסקי</span>
+              <span className="text-muted-foreground">טוען היקף ניהול…</span>
+            </>
+          )}
           <span className="text-muted-foreground">סטטוס</span>
           <span className="font-medium">{profile?.active === false ? "לא פעיל" : "פעיל"}</span>
         </div>
@@ -428,13 +452,22 @@ function UserMenu() {
   const [aboutOpen, setAboutOpen] = useState(false);
   if (!user) return null;
   const name = profile?.full_name || user.email || "משתמש";
-  const roleLabel = roles.includes("admin") ? "מנהל מערכת" : roles.includes("manager") ? "מנהל צוות" : roles.includes("representative") ? "נציג" : "ללא תפקיד";
+  // The identity line is the BUSINESS level (מנהל מוקד / מנהל פעילות /
+  // סמנכ"ל…), resolved from the business scope — never the technical role,
+  // which used to announce every scoped manager at the team level.
+  const { scope } = useBusinessScope();
+  const identity = accountIdentity({ roles, scope });
   const initials = initialsOf(profile?.full_name, user.email);
 
   const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
-      try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        /* ignore */
+      }
       toast.success("התנתקת בהצלחה");
       await navigate({ to: "/auth" });
     } catch {
@@ -459,7 +492,9 @@ function UserMenu() {
             </Avatar>
             <div className="hidden md:flex flex-col items-end leading-tight min-w-0">
               <span className="text-sm font-medium truncate max-w-32">{name}</span>
-              <span className="text-[11px] text-muted-foreground truncate max-w-32">{roleLabel}</span>
+              <span className="max-w-32 truncate text-[11px] text-muted-foreground">
+                {identity.compact}
+              </span>
             </div>
           </button>
         </DropdownMenuTrigger>
@@ -472,7 +507,9 @@ function UserMenu() {
             </Avatar>
             <div className="flex flex-col min-w-0">
               <span className="truncate font-semibold">{name}</span>
-              <span className="text-xs font-normal text-muted-foreground truncate">{roleLabel}</span>
+              <span className="truncate text-xs font-normal text-muted-foreground">
+                {identity.full}
+              </span>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -493,7 +530,10 @@ function UserMenu() {
             אודות {APP_NAME}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void handleSignOut()} className="text-destructive focus:text-destructive">
+          <DropdownMenuItem
+            onSelect={() => void handleSignOut()}
+            className="text-destructive focus:text-destructive"
+          >
             <LogOut className="h-4 w-4 me-2" />
             התנתק
           </DropdownMenuItem>

@@ -79,8 +79,11 @@ describe("mapping grouping — core for all teams, renewals as optional add-on",
   it("the mapping dropdown renders the groups (same keys, same disable rules)", () => {
     expect(dataImportSrc).toContain("{FIELD_GROUPS.map((group) => (");
     expect(dataImportSrc).toContain("<SelectLabel>{group.label}</SelectLabel>");
-    expect(dataImportSrc).toContain(
-      "disabled={(f !== mapping[h] && usedFields.has(f)) || UNSUPPORTED_FIELDS.includes(f)}",
+    // Whitespace-normalized: Phase 5 reflowed the mapping control onto its own
+    // lines when the table became one surface per column. The disable RULE
+    // pinned here — already-used field, or an unsupported one — is unchanged.
+    expect(dataImportSrc.replace(/\s+/g, " ")).toContain(
+      "disabled={ (f !== mapping[h] && usedFields.has(f)) || UNSUPPORTED_FIELDS.includes(f) }",
     );
   });
 });
