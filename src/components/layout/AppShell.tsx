@@ -565,7 +565,7 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
   );
 }
 
-const BARE_ROUTES = ["/auth", "/reset-password", "/access-denied"];
+/* BARE_ROUTES + the hydration-stable branch live in @/lib/shell-mode. */
 
 /** Routes with no entry in navigation-config.ts (not part of any role's nav). */
 const EXTRA_PAGE_TITLES: Record<string, string> = {
