@@ -22,6 +22,7 @@ import { AppModeProvider } from "@/lib/app-mode";
 import { AdminViewProvider } from "@/lib/admin-view";
 import { IdeasProvider } from "@/lib/ideas-store";
 import { AuthProvider } from "@/lib/auth";
+import { QueryIdentityBoundary } from "@/lib/query-identity";
 import { WorkspaceProvider } from "@/lib/workspace-context";
 
 import { RepWorkspace } from "@/components/RepWorkspace";
@@ -163,6 +164,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <QueryIdentityBoundary>
         <AppModeProvider>
           <AdminViewProvider>
             <WorkspaceProvider>
@@ -191,6 +193,7 @@ function RootComponent() {
             </WorkspaceProvider>
           </AdminViewProvider>
         </AppModeProvider>
+        </QueryIdentityBoundary>
       </AuthProvider>
     </QueryClientProvider>
   );
