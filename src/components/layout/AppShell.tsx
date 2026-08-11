@@ -450,14 +450,18 @@ function UserMenu() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-  if (!user) return null;
-  const name = profile?.full_name || user.email || "משתמש";
   // The identity line is the BUSINESS level (מנהל מוקד / מנהל פעילות /
   // סמנכ"ל…), resolved from the business scope — never the technical role,
   // which used to announce every scoped manager at the team level.
+  // Hooks must run unconditionally: this used to sit after `if (!user) return null`,
+  // so the render right after sign-in added a hook and React threw
+  // "Rendered more hooks than during the previous render".
   const { scope } = useBusinessScope();
+  if (!user) return null;
+  const name = profile?.full_name || user.email || "משתמש";
   const identity = accountIdentity({ roles, scope });
   const initials = initialsOf(profile?.full_name, user.email);
+
 
   const handleSignOut = async () => {
     try {
