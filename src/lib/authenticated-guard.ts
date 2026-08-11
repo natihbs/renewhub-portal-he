@@ -10,7 +10,10 @@
  * /auth instead.
  */
 
-export type GuardProfile = { must_change_password?: boolean | null; active?: boolean | null } | null;
+export type GuardProfile = {
+  must_change_password?: boolean | null;
+  active?: boolean | null;
+} | null;
 
 export type GuardDeps<U> = {
   getUser: () => Promise<{ user: U | null; error: unknown }>;

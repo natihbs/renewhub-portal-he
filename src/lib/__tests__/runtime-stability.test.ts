@@ -23,12 +23,16 @@ describe("_authenticated guard", () => {
   });
 
   it("redirects to /auth when there is no user", async () => {
-    const out = await resolveAuthenticatedGuard(deps({ getUser: async () => ({ user: null, error: null }) }));
+    const out = await resolveAuthenticatedGuard(
+      deps({ getUser: async () => ({ user: null, error: null }) }),
+    );
     expect(out).toEqual({ kind: "redirect", to: "/auth" });
   });
 
   it("redirects to /auth when getUser reports an auth error", async () => {
-    const out = await resolveAuthenticatedGuard(deps({ getUser: async () => ({ user: USER, error: new Error("bad jwt") }) }));
+    const out = await resolveAuthenticatedGuard(
+      deps({ getUser: async () => ({ user: USER, error: new Error("bad jwt") }) }),
+    );
     expect(out).toEqual({ kind: "redirect", to: "/auth" });
   });
 
@@ -50,14 +54,22 @@ describe("_authenticated guard", () => {
 
   it("does not let a thrown session failure escape (lock timeout / network)", async () => {
     const out = await resolveAuthenticatedGuard(
-      deps({ getUser: async () => { throw new Error("NavigatorLockAcquireTimeoutError"); } }),
+      deps({
+        getUser: async () => {
+          throw new Error("NavigatorLockAcquireTimeoutError");
+        },
+      }),
     );
     expect(out).toEqual({ kind: "redirect", to: "/auth" });
   });
 
   it("does not let a thrown profile-query failure escape", async () => {
     const out = await resolveAuthenticatedGuard(
-      deps({ getProfile: async () => { throw new Error("Failed to fetch"); } }),
+      deps({
+        getProfile: async () => {
+          throw new Error("Failed to fetch");
+        },
+      }),
     );
     expect(out).toEqual({ kind: "redirect", to: "/auth" });
   });
@@ -66,7 +78,9 @@ describe("_authenticated guard", () => {
     const out = await resolveAuthenticatedGuard(
       deps({
         getProfile: async () => ({ active: false }),
-        signOut: async () => { throw new Error("offline"); },
+        signOut: async () => {
+          throw new Error("offline");
+        },
       }),
     );
     expect(out).toEqual({ kind: "redirect", to: "/auth" });
@@ -86,7 +100,10 @@ describe("role resolution", () => {
   });
 
   it("denies a verified user without the role", async () => {
-    const res = await getCurrentRoles({ ...ok, fetchRoles: async () => ["representative" as const] });
+    const res = await getCurrentRoles({
+      ...ok,
+      fetchRoles: async () => ["representative" as const],
+    });
     expect(roleDecision(res, ["admin"])).toBe("/access-denied");
   });
 
@@ -97,26 +114,41 @@ describe("role resolution", () => {
   });
 
   it("does NOT treat a failed roles query as an empty role set", async () => {
-    const res = await getCurrentRoles({ ...ok, fetchRoles: async () => { throw new Error("network"); } });
+    const res = await getCurrentRoles({
+      ...ok,
+      fetchRoles: async () => {
+        throw new Error("network");
+      },
+    });
     expect(res.status).toBe("unavailable");
     expect(roleDecision(res, ["admin"])).not.toBe("/access-denied");
     expect(roleDecision(res, ["admin"])).toBe("/auth");
   });
 
   it("does NOT treat a thrown getUser as an empty role set", async () => {
-    const res = await getCurrentRoles({ ...ok, getUserId: async () => { throw new Error("lock timeout"); } });
+    const res = await getCurrentRoles({
+      ...ok,
+      getUserId: async () => {
+        throw new Error("lock timeout");
+      },
+    });
     expect(res.status).toBe("unavailable");
     expect(roleDecision(res, ["admin"])).toBe("/auth");
   });
 
   it("never grants access on uncertainty", async () => {
-    const res = await getCurrentRoles({ ...ok, fetchRoles: async () => { throw new Error("x"); } });
+    const res = await getCurrentRoles({
+      ...ok,
+      fetchRoles: async () => {
+        throw new Error("x");
+      },
+    });
     expect(roleDecision(res, ["admin", "manager", "representative"])).not.toBeNull();
   });
 
   it("does not cache a failed roles query", async () => {
     const fetchRoles = vi
-      .fn(async (_userId: string): Promise<("admin")[]> => ["admin"])
+      .fn(async (_userId: string): Promise<"admin"[]> => ["admin"])
       .mockRejectedValueOnce(new Error("network"));
     expect((await getCurrentRoles({ ...ok, fetchRoles })).status).toBe("unavailable");
 
@@ -157,7 +189,16 @@ describe("shell mode", () => {
 
 describe("internal link resolution", () => {
   it("accepts every destination the notifications and morning routine use", () => {
-    for (const p of ["/", "/performance", "/data-import", "/feedback", "/competitions", "/admin", "/targets", "/knowledge"]) {
+    for (const p of [
+      "/",
+      "/performance",
+      "/data-import",
+      "/feedback",
+      "/competitions",
+      "/admin",
+      "/targets",
+      "/knowledge",
+    ]) {
       expect(resolveInternalLink(p)).toEqual({ to: p });
       expect(isKnownInternalPath(p)).toBe(true);
     }
@@ -173,7 +214,19 @@ describe("internal link resolution", () => {
   });
 
   it("rejects unknown, external and malformed hrefs", () => {
-    for (const p of ["/nope", "/performance/extra", "https://evil.test", "//evil.test", "performance", "", "   ", "#", "/feedback?id=1", null, undefined]) {
+    for (const p of [
+      "/nope",
+      "/performance/extra",
+      "https://evil.test",
+      "//evil.test",
+      "performance",
+      "",
+      "   ",
+      "#",
+      "/feedback?id=1",
+      null,
+      undefined,
+    ]) {
       expect(resolveInternalLink(p as string | null | undefined)).toBeNull();
     }
   });
