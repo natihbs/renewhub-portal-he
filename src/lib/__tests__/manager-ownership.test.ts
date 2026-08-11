@@ -107,7 +107,14 @@ describe("manager assignment path (source-pinned)", () => {
   });
 
   it("the Teams page labels ownership as מנהל הצוות and offers the explicit assignment control", () => {
-    expect(teamsPage).toContain("<TableHead>מנהל הצוות</TableHead>");
+    // Phase 4 replaced the teams table with management cards, so the column
+    // header this used to pin no longer exists. The RULE is unchanged and is
+    // what's pinned here: every surface that shows ownership labels it
+    // "מנהל הצוות" (the team card and the details sheet), the unmanaged state
+    // is stated explicitly, and the ambiguous "מנהל משויך" wording — which
+    // blurred managerial ownership with profile membership — stays absent.
+    const ownershipLabels = teamsPage.match(/>מנהל הצוות</g) ?? [];
+    expect(ownershipLabels.length).toBeGreaterThanOrEqual(2);
     expect(teamsPage).toContain("<Label>מנהל הצוות</Label>");
     expect(teamsPage).toContain("ללא מנהל צוות");
     expect(teamsPage).not.toContain("מנהל משויך");
