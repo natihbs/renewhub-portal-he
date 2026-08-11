@@ -1,4 +1,5 @@
-import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate, useHydrated } from "@tanstack/react-router";
+import { resolveShellMode } from "@/lib/shell-mode";
 import { Menu, Search, Star, LogOut, User as UserIcon, KeyRound, Info, UsersRound, Settings, Eye } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -565,7 +566,7 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
   );
 }
 
-const BARE_ROUTES = ["/auth", "/reset-password", "/access-denied"];
+/* BARE_ROUTES + the hydration-stable branch live in @/lib/shell-mode. */
 
 /** Routes with no entry in navigation-config.ts (not part of any role's nav). */
 const EXTRA_PAGE_TITLES: Record<string, string> = {
@@ -641,8 +642,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const cmd = useCommandPalette();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const hydrated = useHydrated();
   const role = useResolvedRole();
-  if (BARE_ROUTES.includes(pathname)) {
+  // Bare until hydration completes: the server cannot know whether the auth
+  // gate is about to redirect, so both sides must render the same wrapper.
+  if (resolveShellMode(pathname, hydrated) === "bare") {
     return <div className="min-h-dvh bg-background">{children}</div>;
   }
 
@@ -651,6 +655,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh flex bg-background">
+
       <CloudRepsSync />
       {/* Sidebar - desktop */}
       <aside className="hidden lg:flex w-64 shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground">

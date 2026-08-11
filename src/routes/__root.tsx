@@ -52,11 +52,14 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
   const router = useRouter();
   useEffect(() => {
+    // One controlled log per distinct error, so Lovable runtime capture retains
+    // the real object/stack while the user still only sees the Hebrew notice.
+    console.error("[Pulse] root error boundary", error);
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
+
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4" dir="rtl">

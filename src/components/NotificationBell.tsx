@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useUx } from "@/lib/ux-store";
+import { resolveInternalLink } from "@/lib/internal-route";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<string, string> = {
@@ -60,11 +61,19 @@ export function NotificationBell() {
                     {!n.read && <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-primary" />}
                   </div>
                 );
+                const target = resolveInternalLink(n.href);
                 return (
                   <li key={n.id}>
-                    {n.href ? <Link to={n.href}>{Item}</Link> : Item}
+                    {target ? (
+                      <Link to={target.to} hash={target.hash}>
+                        {Item}
+                      </Link>
+                    ) : (
+                      Item
+                    )}
                   </li>
                 );
+
               })}
             </ul>
           )}

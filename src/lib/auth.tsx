@@ -46,29 +46,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (mounted) { setProfile(null); setRoles([]); setLoading(false); }
         return;
       }
-      const [{ data: prof }, { data: rs }] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email, manager_id, team_id, active").eq("id", u.id).maybeSingle(),
-        supabase.from("user_roles").select("role").eq("user_id", u.id),
-      ]);
-      if (!mounted) return;
-      setProfile((prof as Profile) ?? null);
-      setRoles(((rs ?? []) as { role: AppRole }[]).map((r) => r.role));
-      setLoading(false);
+      try {
+        const [{ data: prof }, { data: rs }] = await Promise.all([
+          supabase.from("profiles").select("id, full_name, email, manager_id, team_id, active").eq("id", u.id).maybeSingle(),
+          supabase.from("user_roles").select("role").eq("user_id", u.id),
+        ]);
+        if (!mounted) return;
+        setProfile((prof as Profile) ?? null);
+        setRoles(((rs ?? []) as { role: AppRole }[]).map((r) => r.role));
+        setLoading(false);
+      } catch (error) {
+        // A thrown (not returned) failure here used to leave `loading` stuck
+        // true and produce an unhandled rejection during the hydration window.
+        console.error("[Pulse] auth profile load failed", error);
+        if (mounted) setLoading(false);
+      }
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      const u = data.session?.user ?? null;
-      setUser(u);
-      loadForUser(u);
-    });
+    supabase.auth.getSession().then(
+      ({ data }) => {
+        if (!mounted) return;
+        const u = data.session?.user ?? null;
+        setUser(u);
+        loadForUser(u);
+      },
+      (error) => {
+        console.error("[Pulse] auth session load failed", error);
+        if (mounted) setLoading(false);
+      },
+    );
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
       const u = session?.user ?? null;
       setUser(u);
       if (event === "SIGNED_IN" || event === "USER_UPDATED" || event === "INITIAL_SESSION") {
         loadForUser(u);
         if (event === "SIGNED_IN") {
-          supabase.rpc("touch_last_login").then(() => {});
+          supabase.rpc("touch_last_login").then(
+            () => {},
+            (error) => console.error("[Pulse] touch_last_login failed", error),
+          );
         }
       }
       if (event === "SIGNED_OUT") {
@@ -77,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     });
+
 
     return () => {
       mounted = false;
