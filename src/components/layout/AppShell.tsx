@@ -1,4 +1,5 @@
-import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate, useHydrated } from "@tanstack/react-router";
+import { resolveShellMode } from "@/lib/shell-mode";
 import { Menu, Search, Star, LogOut, User as UserIcon, KeyRound, Info, UsersRound, Settings, Eye } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
