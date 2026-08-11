@@ -606,11 +606,17 @@ function QualityCheckCard({ reps, repsMissingData, staleReps, goalsByRepId }: {
                 <span className="flex-1">{w.text}</span>
               </div>
             );
+            const target = resolveInternalLink(w.href);
             return (
               <li key={i}>
-                {w.href ? <Link to={w.href}>{content}</Link> : <button type="button" onClick={w.onClick} className="w-full text-start">{content}</button>}
+                {target ? (
+                  <Link to={target.to} hash={target.hash}>{content}</Link>
+                ) : (
+                  <button type="button" onClick={w.onClick} className="w-full text-start">{content}</button>
+                )}
               </li>
             );
+
           })}
         </ul>
       )}
