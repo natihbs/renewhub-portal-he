@@ -23,9 +23,17 @@ export function QueryIdentityBoundary({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (shouldResetUserScopedCache(previous.current, identity)) {
-      for (const prefix of USER_SCOPED_QUERY_PREFIXES) {
-        qc.removeQueries({ queryKey: [prefix] });
-      }
+      // Cancel first so an old account's in-flight request cannot repopulate
+      // the cache after the identity-transition purge has completed.
+      void Promise.all(
+        USER_SCOPED_QUERY_PREFIXES.map((prefix) =>
+          qc.cancelQueries({ queryKey: [prefix] }),
+        ),
+      ).then(() => {
+        for (const prefix of USER_SCOPED_QUERY_PREFIXES) {
+          qc.removeQueries({ queryKey: [prefix] });
+        }
+      });
     }
     previous.current = identity;
   }, [identity, qc]);

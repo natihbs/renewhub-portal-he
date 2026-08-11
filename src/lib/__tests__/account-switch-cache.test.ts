@@ -30,7 +30,7 @@ describe("business-scope query key is account-scoped", () => {
   });
 
   it("signed-out is its own identity, not a shared bucket with any user", () => {
-    expect(businessScopeQueryKey(null)).toEqual(["business-scope", ANONYMOUS_QUERY_IDENTITY]);
+    expect(businessScopeQueryKey(null)).toEqual(["business-scope", null]);
     expect(businessScopeQueryKey(null)).not.toEqual(businessScopeQueryKey(USER_A));
     expect(queryIdentity(undefined)).toBe(ANONYMOUS_QUERY_IDENTITY);
   });
@@ -40,7 +40,7 @@ describe("business-scope query key is account-scoped", () => {
   });
 
   it("the hook builds its key from the signed-in user, not a static string", () => {
-    expect(hooks).toContain("businessScopeQueryKey(userId)");
+    expect(hooks).toContain('queryKey: ["business-scope", userId] as const');
     expect(hooks).not.toContain('queryKey: ["business-scope"]');
     // A sign-out mid-flight cannot associate a payload with the new key.
     expect(hooks).toContain("userId ? await load() : null");
