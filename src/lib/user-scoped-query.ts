@@ -29,7 +29,7 @@ export function queryIdentity(userId: string | null | undefined): string {
  * and appends the account identity so no two accounts share an entry.
  */
 export function businessScopeQueryKey(userId: string | null | undefined) {
-  return ["business-scope", queryIdentity(userId)] as const;
+  return ["business-scope", userId] as const;
 }
 
 /**

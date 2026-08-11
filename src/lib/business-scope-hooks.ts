@@ -3,7 +3,6 @@ import { useServerFn } from "@tanstack/react-start";
 import { useAppMode } from "@/lib/app-mode";
 import { useAuth } from "@/lib/auth";
 import { getBusinessScope, type BusinessScopePayload } from "@/lib/business-scope.functions";
-import { businessScopeQueryKey } from "@/lib/user-scoped-query";
 
 /**
  * The caller's resolved business scope (see business-scope.ts for the rule
@@ -18,10 +17,10 @@ export function useBusinessScope() {
   const { isDemo } = useAppMode();
   const { user } = useAuth();
   const load = useServerFn(getBusinessScope);
-  const userId = user?.id ?? null;
+  const userId = user?.id;
 
   const query = useQuery({
-    queryKey: businessScopeQueryKey(userId),
+    queryKey: ["business-scope", userId] as const,
     // Guarded so a race (sign-out mid-flight) can never associate a payload
     // with an account that is no longer signed in.
     queryFn: async () => (userId ? await load() : null),
