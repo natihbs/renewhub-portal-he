@@ -45,6 +45,11 @@ export const SCOPE_TEAMS_TITLE = "צוותים בהיקף הניהול";
 export const CENTER_TEAMS_TITLE = "מצב הצוותים";
 /** An activity manager manages CENTERS — their primary board says so. */
 export const ACTIVITY_CENTERS_TITLE = "מצב המוקדים";
+/** An executive manages ACTIVITIES — their primary board says so. */
+export const EXECUTIVE_ACTIVITIES_TITLE = "מבט על הפעילויות";
+/** Honest structural empty state for a business with no activity units yet. */
+export const EXECUTIVE_NO_ACTIVITIES_MESSAGE =
+  "לא הוגדרו פעילויות בהיררכיה העסקית. הגדרת פעילויות ומוקדים מתבצעת בעמוד הצוותים.";
 /** Honest structural empty state for a center unit with no teams attached. */
 export const CENTER_NO_TEAMS_MESSAGE = "אין צוותים משויכים למוקד";
 export const ACTIVITY_NO_CENTERS_MESSAGE = "אין מוקדים משויכים לפעילות.";
@@ -219,6 +224,14 @@ const withTypeWord = (name: string, typeWord: string) =>
  * Every covered row appears in EXACTLY one group — nothing in scope may
  * disappear from the grouped view while still being counted in aggregates.
  * Empty groups are dropped — a header over nothing is noise, not structure.
+ *
+ * SCOPE OF USE: only the CENTER level still renders from this function. The
+ * activity and executive screens render from buildActivityCenterBoard and
+ * buildExecutiveActivityBoard, which start from the hierarchy UNITS instead of
+ * from the rows — so an empty center or an empty activity survives, and a team
+ * under a center that hangs off no activity lands in the unattached bucket
+ * rather than being silently dropped, which is exactly what the executive
+ * branch below does to it.
  */
 export function groupScopeRows(params: {
   kind: ScopedManagerKind;
@@ -350,6 +363,25 @@ export type ActivityCenterBoard = {
  * resolved unit) yields no centers — every covered row is then unattached,
  * which is the truthful reading of "we don't know this manager's activity".
  */
+/**
+ * One center UNIT summarised from the rows attached to it BY ID. Shared by the
+ * activity board and the executive board so a center can never be summarised
+ * two different ways depending on who is looking at it.
+ */
+function summarizeCenter(center: BusinessUnit, rows: ScopeTeamRow[]): ActivityCenterSummary {
+  const teams = rows.filter((r) => r.businessUnitId === center.id);
+  return {
+    centerId: center.id,
+    centerName: withTypeWord(center.name, BUSINESS_UNIT_TYPE_LABEL.center),
+    teamCount: teams.length,
+    repCount: teams.reduce((a, t) => a + t.repCount, 0),
+    hasTeams: teams.length > 0,
+    teams,
+    profileAggregates: aggregateByProfile(teams),
+    missingRepresentativeTargets: teams.reduce((a, t) => a + t.missingTargets, 0),
+  };
+}
+
 export function buildActivityCenterBoard(params: {
   units: BusinessUnit[];
   rows: ScopeTeamRow[];
@@ -361,19 +393,7 @@ export function buildActivityCenterBoard(params: {
     .filter(
       (u) => u.unitType === "center" && activityUnitId !== null && u.parentId === activityUnitId,
     )
-    .map((center): ActivityCenterSummary => {
-      const teams = rows.filter((r) => r.businessUnitId === center.id);
-      return {
-        centerId: center.id,
-        centerName: withTypeWord(center.name, BUSINESS_UNIT_TYPE_LABEL.center),
-        teamCount: teams.length,
-        repCount: teams.reduce((a, t) => a + t.repCount, 0),
-        hasTeams: teams.length > 0,
-        teams,
-        profileAggregates: aggregateByProfile(teams),
-        missingRepresentativeTargets: teams.reduce((a, t) => a + t.missingTargets, 0),
-      };
-    })
+    .map((center) => summarizeCenter(center, rows))
     .sort((a, b) => a.centerName.localeCompare(b.centerName, "he"));
   // Direct attachments count only for THIS activity — a team hanging off some
   // other activity unit is not "directly attached" from this manager's point
@@ -413,6 +433,146 @@ export function activityStructureSummary(board: ActivityCenterBoard): ActivitySt
     teamCount: allRows.length,
     repCount: allRows.reduce((a, r) => a + r.repCount, 0),
     centersWithoutTeams: board.centers.filter((c) => !c.hasTeams).length,
+  };
+}
+
+// ---------------------------------------------- executive activity board
+
+/**
+ * One ACTIVITY of the business, summarised at the level an executive actually
+ * manages from. Derived from the hierarchy UNITS first, so an activity with no
+ * centers — and a center with no teams — is a first-class entry rather than a
+ * rendering accident.
+ *
+ * `hasTeams === false` means every performance figure below this activity is
+ * meaningless and the UI must render a structural empty state, never 0 / 0%.
+ * `profileAggregates` stays PER KPI PROFILE for exactly the reason the rest of
+ * this module does: a renewals book and a generic sales target are different
+ * units and are never summed into one activity-wide number.
+ */
+export type ExecutiveActivitySummary = {
+  activityId: string;
+  /** Display name with the "פעילות" type word ("פעילות אלמנטרי"). */
+  activityName: string;
+  /** Every center UNIT whose parentId is this activity — including empty ones. */
+  centers: ActivityCenterSummary[];
+  /** Teams attached straight to the activity unit (legacy attachments). */
+  directRows: ScopeTeamRow[];
+  centerCount: number;
+  centersWithoutTeams: number;
+  /** Teams anywhere under this activity (its centers + directly attached). */
+  teamCount: number;
+  repCount: number;
+  hasTeams: boolean;
+  profileAggregates: ScopeProfileAggregate[];
+  missingRepresentativeTargets: number;
+};
+
+export type ExecutiveActivityBoard = {
+  /** Every activity UNIT of the business — including empty ones. */
+  activities: ExecutiveActivitySummary[];
+  /**
+   * Covered teams that hang off no activity subtree: no unit at all, an
+   * unknown unit, or a center whose parent is missing / is not an activity.
+   * They stay visible here rather than vanishing from the board while still
+   * being counted in every aggregate.
+   */
+  unattachedRows: ScopeTeamRow[];
+};
+
+/**
+ * The executive's primary board: ACTIVITIES first, each carrying its own
+ * centers, each center carrying its own teams — the hierarchy as it is built,
+ * before how it performs.
+ *
+ * Placement is by ID and parent only; a name is never used to infer a
+ * relationship. Every covered row lands in EXACTLY one bucket:
+ *   * a row whose unit is a center with `parentId === activity.id` → that
+ *     center, inside that activity;
+ *   * a row whose unit IS an activity unit → that activity's `directRows`;
+ *   * anything else (no unit, unknown unit, or a center orphaned from every
+ *     activity) → `unattachedRows`.
+ * The third bucket is the one the old grouped view silently dropped: a team
+ * under a parentless center was neither placed nor unattached, so it
+ * disappeared from the board while still inflating the totals beside it.
+ *
+ * An executive covers the whole business, so `units` is used in full — there
+ * is no subtree to narrow to, and nothing is filtered out for being empty.
+ */
+export function buildExecutiveActivityBoard(params: {
+  units: BusinessUnit[];
+  rows: ScopeTeamRow[];
+}): ExecutiveActivityBoard {
+  const { units, rows } = params;
+  const placed = new Set<string>();
+  const activities = units
+    .filter((u) => u.unitType === "activity")
+    .map((activity): ExecutiveActivitySummary => {
+      const centers = units
+        .filter((u) => u.unitType === "center" && u.parentId === activity.id)
+        .map((center) => summarizeCenter(center, rows))
+        .sort((a, b) => a.centerName.localeCompare(b.centerName, "he"));
+      const directRows = rows.filter((r) => r.businessUnitId === activity.id);
+      for (const c of centers) for (const t of c.teams) placed.add(t.id);
+      for (const r of directRows) placed.add(r.id);
+      const allRows = [...centers.flatMap((c) => c.teams), ...directRows];
+      return {
+        activityId: activity.id,
+        activityName: withTypeWord(activity.name, BUSINESS_UNIT_TYPE_LABEL.activity),
+        centers,
+        directRows,
+        centerCount: centers.length,
+        centersWithoutTeams: centers.filter((c) => !c.hasTeams).length,
+        teamCount: allRows.length,
+        repCount: allRows.reduce((a, r) => a + r.repCount, 0),
+        hasTeams: allRows.length > 0,
+        profileAggregates: aggregateByProfile(allRows),
+        missingRepresentativeTargets: allRows.reduce((a, r) => a + r.missingTargets, 0),
+      };
+    })
+    .sort((a, b) => a.activityName.localeCompare(b.activityName, "he"));
+  return { activities, unattachedRows: rows.filter((r) => !placed.has(r.id)) };
+}
+
+/**
+ * The structural figures an executive leads with — how the BUSINESS is built,
+ * before how it performs. There is deliberately no combined achievement
+ * percentage and no combined target here: the activities below may mix KPI
+ * profiles, and no truthful single number spans them.
+ *
+ * Counts cover the full covered population (activity teams + unattached), so
+ * the headline can never disagree with the board underneath it. `repCount`
+ * counts ACTIVE representatives — the store's roster is filtered to active
+ * rows before it ever reaches these derivations.
+ */
+export type ExecutiveStructureSummary = {
+  activityCount: number;
+  centerCount: number;
+  teamCount: number;
+  repCount: number;
+  /** Activities carrying no center unit at all. */
+  activitiesWithoutCenters: number;
+  /** Center units carrying no team, across every activity. */
+  centersWithoutTeams: number;
+  /** Covered teams outside every activity subtree. */
+  unattachedTeamCount: number;
+};
+
+export function executiveStructureSummary(
+  board: ExecutiveActivityBoard,
+): ExecutiveStructureSummary {
+  const allRows = [
+    ...board.activities.flatMap((a) => [...a.centers.flatMap((c) => c.teams), ...a.directRows]),
+    ...board.unattachedRows,
+  ];
+  return {
+    activityCount: board.activities.length,
+    centerCount: board.activities.reduce((a, x) => a + x.centerCount, 0),
+    teamCount: allRows.length,
+    repCount: allRows.reduce((a, r) => a + r.repCount, 0),
+    activitiesWithoutCenters: board.activities.filter((a) => a.centerCount === 0).length,
+    centersWithoutTeams: board.activities.reduce((a, x) => a + x.centersWithoutTeams, 0),
+    unattachedTeamCount: board.unattachedRows.length,
   };
 }
 

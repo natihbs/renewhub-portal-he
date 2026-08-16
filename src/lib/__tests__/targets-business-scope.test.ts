@@ -19,6 +19,7 @@ import {
 
 const read = (rel: string) => readFileSync(resolve(__dirname, rel), "utf8");
 const targetsSrc = read("../../routes/_authenticated/targets.tsx");
+const boardsSrc = read("../../components/TargetScopeBoards.tsx");
 const goalsFnsSrc = read("../goals.functions.ts");
 
 // ---------------------------------------------------------------- fixtures
@@ -172,16 +173,23 @@ describe("direct team manager (חן) — unchanged flow", () => {
 });
 
 describe("scope-aware UX on /targets", () => {
-  it('scoped managers get the plural "יעדים בהיקף" overview before team selection', () => {
-    expect(targetsSrc).toContain("יעדים בהיקף");
+  it("every scoped level opens with its OWN hierarchy board before team selection", () => {
     expect(targetsSrc).toContain("function ScopeTargetsOverview");
-    // The overview reuses the scope-home domain — one implementation of
-    // grouping/missing-targets shared with ManagerHome.
+    // One board per management level — center → teams, activity → centers,
+    // executive → activities. The board is the same component the level's
+    // home dashboard drives, so the two screens cannot diverge.
+    expect(targetsSrc).toContain("<CenterTargetsBoard");
+    expect(targetsSrc).toContain("<ActivityTargetsBoard");
+    expect(targetsSrc).toContain("<ExecutiveTargetsBoard");
+    // …and every one of them is fed from the shared scope-home derivations.
     expect(targetsSrc).toContain("buildScopeTeamRows({");
-    expect(targetsSrc).toContain("groupScopeRows({ kind: scope.kind as ScopedManagerKind");
-    expect(targetsSrc).toContain("missingTargetsByTeam(rows)");
-    // Selecting a team from the overview goes through the workspace switcher.
-    expect(targetsSrc).toContain("onSelectTeam(row.id)");
+    expect(targetsSrc).toContain("buildActivityCenterBoard({");
+    expect(targetsSrc).toContain("buildExecutiveActivityBoard({");
+    // Selecting a team from any board still goes through the workspace
+    // switcher — the boards raise the team id, the page hands it to
+    // setWorkspaceTeam, and reach stays exactly what the switcher allows.
+    expect(boardsSrc).toContain("onSelectTeam(row.id)");
+    expect(targetsSrc).toContain("onSelectTeam={setWorkspaceTeam}");
   });
 });
 
@@ -210,8 +218,27 @@ describe("KPI-profile wording on the edit panel", () => {
   });
 
   it("the overview never mixes profiles — each row carries its own labels", () => {
-    expect(targetsSrc).toContain("SCOPE_METRIC_LABELS[row.kpiProfile]");
-    expect(targetsSrc).toContain("KPI_PROFILE_LABEL[row.kpiProfile]");
+    // Row rendering moved into the shared level boards; the per-row rule is
+    // unchanged and now applies identically to all three of them.
+    expect(boardsSrc).toContain("SCOPE_METRIC_LABELS[row.kpiProfile]");
+    expect(boardsSrc).toContain("KPI_PROFILE_LABEL[row.kpiProfile]");
+    // …and the rows themselves really do carry different profiles, so there
+    // is something for the per-row labeling to keep apart.
+    const mixed = buildScopeTeamRows({
+      teams: [
+        ...scopeTeamInputs,
+        {
+          id: "t-generic",
+          name: "מכירות",
+          kpiProfile: "generic_sales" as const,
+          businessUnitId: "cen-dira",
+        },
+      ],
+      reps: [],
+      goalsByTeamId: new Map(),
+      goalsByRepId: new Map(),
+    });
+    expect(new Set(mixed.map((r) => SCOPE_METRIC_LABELS[r.kpiProfile].target)).size).toBe(2);
   });
 });
 

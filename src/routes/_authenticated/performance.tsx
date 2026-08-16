@@ -43,6 +43,7 @@ import {
   STALE_DATA_HINT,
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
   PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL,
+  kpiProfileMix, MIXED_PROFILE_AGGREGATE_LABEL, MIXED_PROFILE_AGGREGATE_NOTICE,
   type KpiProfile, type Tone, type PaceInfo,
 } from "@/lib/performance-domain";
 import {
@@ -425,6 +426,27 @@ function ManagerPerformancePage() {
 
   const missingTargetCount = useMemo(() => enriched.filter((e) => e.status === "no_target").length, [enriched]);
 
+  // §Truthfulness: the analytics band below sums personal targets and averages
+  // achievement percentages across the MEASURED population. For one KPI
+  // profile both figures are real. Across profiles they are not: the sum adds
+  // מיועדות חודשיות to a sales יעד, and the average mixes אחוז חידוש with אחוז
+  // עמידה. This is what a business-wide view (an executive, an admin scoped to
+  // the whole organization) actually sees, so the mix is measured from the
+  // population itself rather than from anyone's role — a single-profile view
+  // is completely unchanged.
+  //
+  // A representative with no team contributes `null`: their team's profile is
+  // genuinely unknown, so they neither prove nor disprove a mix.
+  const measuredMix = useMemo(
+    () =>
+      kpiProfileMix(
+        enriched
+          .filter((e) => e.status !== "no_target")
+          .map((e) => (e.rep.teamId ? (profileByTeamId.get(e.rep.teamId) ?? null) : null)),
+      ),
+    [enriched, profileByTeamId],
+  );
+
   const filtered = useMemo(() => {
     let arr = enriched;
     if (teamFilter !== "all") arr = arr.filter((e) => e.rep.teamId === teamFilter);
@@ -641,35 +663,65 @@ function ManagerPerformancePage() {
           derivations, no fabricated trends. */}
       {isManager && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="surface-tile flex items-center justify-center gap-6 p-5">
-            <ProgressRing value={summary.avgPct} caption="ממוצע עמידה" size={132} />
-            <div className="min-w-0 space-y-2.5 text-sm">
-              <div>
-                <div className="text-xs text-muted-foreground">נציגים עם יעד</div>
-                <div className="num font-display text-lg font-bold">
-                  {formatNum(summary.targetedCount)} מתוך {formatNum(summary.total)}
+          <div className="surface-tile flex flex-col justify-center gap-3 p-5">
+            <div className="flex items-center justify-center gap-6">
+              {/* Across mixed KPI profiles there is no combined percentage and
+                  no combined target to show — the ring goes empty and the
+                  figures say so, rather than reporting a number in no unit.
+                  The measurable coverage ("נציגים עם יעד") is a count and
+                  stays true either way. */}
+              <ProgressRing
+                value={measuredMix.mixed ? null : summary.avgPct}
+                caption="ממוצע עמידה"
+                size={132}
+              />
+              <div className="min-w-0 space-y-2.5 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">נציגים עם יעד</div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(summary.targetedCount)} מתוך {formatNum(summary.total)}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">סך יעדים חודשי</div>
-                <div className="num font-display text-lg font-bold">{formatNum(summary.teamTarget)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">תחזית סוף חודש</div>
-                <div
-                  className={cn(
-                    "num font-display text-lg font-bold",
-                    summary.forecastPct !== null && summary.forecastPct >= 100 && "text-success-foreground",
-                    summary.forecastPct !== null && summary.forecastPct < 90 && "text-primary",
-                  )}
-                >
-                  {summary.forecastPct === null ? "—" : formatNum(summary.teamForecast)}
-                  {summary.forecastPct !== null && (
-                    <span className="ms-1 text-xs font-semibold">({formatPct(summary.forecastPct)})</span>
-                  )}
+                <div>
+                  <div className="text-xs text-muted-foreground">סך יעדים חודשי</div>
+                  <div className="num font-display text-lg font-bold">
+                    {measuredMix.mixed
+                      ? MIXED_PROFILE_AGGREGATE_LABEL
+                      : formatNum(summary.teamTarget)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">תחזית סוף חודש</div>
+                  <div
+                    className={cn(
+                      "num font-display text-lg font-bold",
+                      !measuredMix.mixed &&
+                        summary.forecastPct !== null &&
+                        summary.forecastPct >= 100 &&
+                        "text-success-foreground",
+                      !measuredMix.mixed &&
+                        summary.forecastPct !== null &&
+                        summary.forecastPct < 90 &&
+                        "text-primary",
+                    )}
+                  >
+                    {measuredMix.mixed
+                      ? MIXED_PROFILE_AGGREGATE_LABEL
+                      : summary.forecastPct === null
+                        ? "—"
+                        : formatNum(summary.teamForecast)}
+                    {!measuredMix.mixed && summary.forecastPct !== null && (
+                      <span className="ms-1 text-xs font-semibold">({formatPct(summary.forecastPct)})</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
+            {measuredMix.mixed && (
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                {MIXED_PROFILE_AGGREGATE_NOTICE}
+              </p>
+            )}
           </div>
 
           <Card>

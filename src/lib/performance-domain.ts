@@ -193,6 +193,37 @@ export const KPI_PROFILE_BADGE_CLASS: Record<KpiProfile, string> = {
   renewals: "bg-primary/10 text-primary",
 };
 
+// ------------------------------------------------- cross-profile aggregation
+
+/**
+ * Which KPI profiles a visible population actually spans, renewals first.
+ *
+ * A renewals target is an assigned monthly book (מיועדות חודשיות) and its
+ * result is closed renewals; a generic target is a sales figure. Summing the
+ * two produces a number in no unit, and averaging their percentages averages
+ * אחוז חידוש with אחוז עמידה. Any screen that would render ONE combined total
+ * or ONE combined percentage over a population has to ask this first — and,
+ * when `mixed` is true, state the split instead of inventing the total.
+ *
+ * A single-profile population is unaffected: `mixed` is false and the
+ * combined figure stays exactly as truthful as it always was.
+ */
+export type KpiProfileMix = { profiles: KpiProfile[]; mixed: boolean };
+
+export function kpiProfileMix(profiles: (KpiProfile | null | undefined)[]): KpiProfileMix {
+  const order: KpiProfile[] = ["renewals", "generic_sales"];
+  const present = order.filter((p) => profiles.some((x) => x === p));
+  return { profiles: present, mixed: present.length > 1 };
+}
+
+/**
+ * What a combined aggregate says when the population spans more than one KPI
+ * profile — the honest statement that replaces the fabricated total.
+ */
+export const MIXED_PROFILE_AGGREGATE_LABEL = "לא זמין";
+export const MIXED_PROFILE_AGGREGATE_NOTICE =
+  "פרופילים מעורבים — חידושים ומכירות נמדדים ביחידות שונות ואינם מסוכמים לנתון אחד. הפירוט לפי צוות בטבלה שלמטה.";
+
 // ---------------------------------------------------------------------------
 // Manual performance entry — "עדכון ביצועים ידני"
 //

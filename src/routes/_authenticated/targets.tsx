@@ -35,18 +35,20 @@ import { useResolvedRole } from "@/lib/use-resolved-role";
 import { useBusinessScope } from "@/lib/business-scope-hooks";
 import {
   buildActivityCenterBoard,
+  buildExecutiveActivityBoard,
   buildScopeTeamRows,
-  groupScopeRows,
+  EXECUTIVE_NO_ACTIVITIES_MESSAGE,
   isScopedManagerKind,
-  missingTargetsByTeam,
   SCOPE_DIRECT_ACTIVITY_GROUP_LABEL,
   SCOPE_METRIC_LABELS,
   SCOPE_UNATTACHED_GROUP_LABEL,
-  type ScopedManagerKind,
   type ScopeHomeTeamInput,
-  type ScopeTeamRow,
 } from "@/lib/scope-home";
-import { ActivityTargetsBoard, CenterTargetsBoard } from "@/components/TargetScopeBoards";
+import {
+  ActivityTargetsBoard,
+  CenterTargetsBoard,
+  ExecutiveTargetsBoard,
+} from "@/components/TargetScopeBoards";
 import { InitialsAvatar, MetricCard } from "@/components/dashboard/Surfaces";
 import {
   useTeamGoal,
@@ -308,8 +310,8 @@ function ManagerAdminTargetsView() {
   const { scope } = useBusinessScope();
   const scopedManager = isScopedManagerKind(scope?.kind);
   // The management level decides the board, exactly as on ManagerHome:
-  // center → teams; activity → centers (teams one drill down); executive keeps
-  // the existing grouped overview unchanged.
+  // center → teams; activity → centers (teams one drill down); executive →
+  // activities (centers, then teams, one drill level each).
   const centerManager = scope?.kind === "center";
   const activityManager = scope?.kind === "activity";
 
@@ -385,11 +387,13 @@ function ManagerAdminTargetsView() {
 
 /**
  * Scope-level target status for a business-scope manager, for the selected
- * month: every covered team, grouped by the manager's hierarchy level (center
- * → flat; activity → by center + "משויכים ישירות לפעילות" + "ללא שיוך
- * להיררכיה"; executive → activity → centers), each row labeled by its OWN
- * kpi_profile. Reuses the scope-home domain, so this page and ManagerHome
- * cannot disagree about who is missing targets.
+ * month, presented at the level they actually manage from: center → flat
+ * teams; activity → its centers, then teams; executive → ACTIVITIES, then
+ * centers, then teams. Empty units stay on the board and covered teams outside
+ * the hierarchy keep their honest group, so nothing in scope disappears. Every
+ * row is labeled by its OWN kpi_profile and a missing target reads "לא הוגדר",
+ * never 0. Reuses the scope-home domain, so this page and ManagerHome cannot
+ * disagree about who is missing targets.
  */
 function ScopeTargetsOverview({
   scope,
@@ -441,11 +445,6 @@ function ScopeTargetsOverview({
       }),
     [teamInputs, scopeReps, teamGoals.goalsByTeamId, repGoals.goalsByRepId],
   );
-  const groups = useMemo(
-    () => groupScopeRows({ kind: scope.kind as ScopedManagerKind, rows, units: scope.units }),
-    [scope, rows],
-  );
-  const missingByTeam = useMemo(() => new Map(missingTargetsByTeam(rows).map((m) => [m.teamId, m])), [rows]);
   const loading = teamGoals.isLoading || repGoals.isLoading || state.repsLoading;
 
   // ACTIVITY manager: the SAME subtree-filtered center board the Activity
@@ -460,6 +459,16 @@ function ScopeTargetsOverview({
             rows,
             activityUnitId: scope.unitId,
           })
+        : null,
+    [level, scope, rows],
+  );
+  // EXECUTIVE: the SAME activity board the Executive Home uses — ACTIVITIES
+  // first, empty activities and empty centers preserved, and nothing covered
+  // dropped from the board while still counted.
+  const executiveBoard = useMemo(
+    () =>
+      level === "executive"
+        ? buildExecutiveActivityBoard({ units: scope.units, rows })
         : null,
     [level, scope, rows],
   );
@@ -488,82 +497,20 @@ function ScopeTargetsOverview({
     );
   }
 
-  const rowView = (row: ScopeTeamRow) => {
-    const labels = SCOPE_METRIC_LABELS[row.kpiProfile];
-    const missing = missingByTeam.get(row.id);
+  if (level === "executive" && executiveBoard) {
     return (
-      <div
-        key={row.id}
-        className={cn(
-          "flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2.5",
-          selectedTeamId === row.id && "border-primary/50 bg-primary/5",
-        )}
-      >
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-          <span className="font-medium">{row.name}</span>
-          <Badge
-            variant="secondary"
-            className={cn("shrink-0", KPI_PROFILE_BADGE_CLASS[row.kpiProfile])}
-          >
-            {KPI_PROFILE_LABEL[row.kpiProfile]}
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            {row.target != null
-              ? `${labels.target}: ${formatNum(row.target)}`
-              : `לא הוגדר ${labels.target}`}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge
-            variant={row.missingTargets > 0 ? "secondary" : "outline"}
-            className={cn(row.missingTargets > 0 && "bg-primary/10 text-primary")}
-          >
-            {missing?.line ?? `${row.missingTargets} נציגים ללא יעד`}
-          </Badge>
-          <Button size="sm" variant="outline" className="h-7" onClick={() => onSelectTeam(row.id)}>
-            ניהול יעדים
-          </Button>
-        </div>
-      </div>
+      <ExecutiveTargetsBoard
+        board={executiveBoard}
+        selectedTeamId={selectedTeamId}
+        onSelectTeam={onSelectTeam}
+        isLoading={loading}
+        unattachedLabel={SCOPE_UNATTACHED_GROUP_LABEL}
+        emptyMessage={EXECUTIVE_NO_ACTIVITIES_MESSAGE}
+      />
     );
-  };
+  }
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Target className="h-4 w-4 text-primary" />
-          יעדים בהיקף · {monthLabel(month)}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {loading ? (
-          <div className="space-y-2">
-            {[0, 1].map((i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
-          </div>
-        ) : groups.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
-            אין צוותים משויכים להיקף הניהול. שיוך צוותים למוקד מתבצע בעמוד הצוותים.
-          </div>
-        ) : (
-          groups.map((group) => (
-            <div key={group.key} className="space-y-2">
-              {group.label && <div className="text-sm font-semibold">{group.label}</div>}
-              {group.rows.map(rowView)}
-              {(group.subgroups ?? []).map((sub) => (
-                <div key={sub.key} className="space-y-2 ps-3">
-                  <div className="text-sm font-medium text-muted-foreground">{sub.label}</div>
-                  {sub.rows.map(rowView)}
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-      </CardContent>
-    </Card>
-  );
+  return null;
 }
 
 function TargetWorkspacePanel({ teamId, month, kpiProfile = DEFAULT_KPI_PROFILE }: { teamId: string; month: string; kpiProfile?: KpiProfile }) {
