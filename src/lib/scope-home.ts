@@ -65,6 +65,25 @@ export const SCOPE_SELECT_TEAM_HINT = "בחרו צוות בבורר שבסרגל
 export const TEAM_TARGETS_ACTION_LABEL = "יעדי הצוות";
 export const SCOPE_TARGETS_ACTION_LABEL = "יעדי צוותים";
 
+// ------------------------------------------------------------ count labels
+
+/**
+ * "9 ללא יעד" was ambiguous (whose target? which kind?) and "1 מוקדים" is
+ * ungrammatical. These say exactly what the number counts, with the correct
+ * Hebrew singular/plural. Wording only — the counts and their semantics are
+ * untouched.
+ */
+
+/** Representatives missing a PERSONAL monthly target. */
+export function repsMissingPersonalTargetLabel(count: number): string {
+  return `${count} ${count === 1 ? "נציג" : "נציגים"} ללא יעד אישי`;
+}
+
+/** Center units with no team attached. */
+export function centersWithoutTeamsLabel(count: number): string {
+  return `${count} ${count === 1 ? "מוקד" : "מוקדים"} ללא צוותים`;
+}
+
 export const SCOPED_MANAGER_KINDS = ["center", "activity", "executive"] as const;
 export type ScopedManagerKind = (typeof SCOPED_MANAGER_KINDS)[number];
 

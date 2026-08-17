@@ -819,7 +819,10 @@ function ManagerHome() {
           pace, and what do I do next (header quick actions). Everything else
           stays one click away in collapsed sections below; nothing was
           removed. */}
-      <DataFreshnessBar teamId={workspaceTeamId} />
+      {/* A business-scope manager's Home is SCOPE-WIDE, so its freshness is
+          too — the null query reads through the caller's own client and RLS
+          stays the boundary. A plain team manager keeps the selected team. */}
+      <DataFreshnessBar teamId={scopedManager ? null : workspaceTeamId} />
 
       {/* Primary KPI row. An activity manager leads with STRUCTURE (their
           unit of management is centers, and mixed KPI profiles must never be
@@ -1096,7 +1099,8 @@ function ManagerHome() {
                 isLoading={scopeCardsLoading}
                 isError={scopeCardsError}
               />
-              <RecentActivityCard />
+              {/* structureFirst is always a scoped manager — scope-wide feed. */}
+              <RecentActivityCard teamId={null} />
             </>
           ) : (
             <>
@@ -1113,7 +1117,9 @@ function ManagerHome() {
                 isLoading={state.repsLoading || repGoals.isLoading}
                 isError={!!state.repsError || repGoals.isError}
               />
-              <RecentActivityCard />
+              {/* The center manager's Home is scope-wide too; a plain team
+                  manager keeps the workspace-driven feed (undefined). */}
+              <RecentActivityCard teamId={scopedManager ? null : undefined} />
             </>
           )}
         </aside>
@@ -1686,8 +1692,19 @@ export function buildInsights(
  * about representatives or teams they manage), and projects a whitelisted set
  * of actions. Every kind rendered has a real producer, the count is real, and
  * loading/error/empty are distinct.
+ *
+ * `teamId` prop semantics — three deliberate states:
+ *   undefined (omitted) → follow the current workspace, exactly as before;
+ *   null                → SCOPE-WIDE feed, ignoring any selected team. Used by
+ *                         a business-scope manager's Home, whose primary
+ *                         surface is the whole resolved scope — the feed must
+ *                         not silently narrow to a drill-down team the page
+ *                         doesn't present as its scope;
+ *   a team id           → that team explicitly.
+ * Authorization is unchanged either way: listDashboardActivity reads through
+ * the caller's own client and RLS scopes the rows.
  */
-function RecentActivityCard() {
+function RecentActivityCard({ teamId: teamIdOverride }: { teamId?: string | null } = {}) {
   const { workspace } = useWorkspace();
   const { isDemo } = useAppMode();
   const load = useServerFn(listDashboardActivity);
@@ -1696,7 +1713,12 @@ function RecentActivityCard() {
   const [error, setError] = useState<string | null>(null);
   // Bumped by the retry button so the effect re-runs a real fetch.
   const [retryToken, setRetryToken] = useState(0);
-  const teamId = workspace.type === "team" ? workspace.teamId : null;
+  const teamId =
+    teamIdOverride !== undefined
+      ? teamIdOverride
+      : workspace.type === "team"
+        ? workspace.teamId
+        : null;
 
   useEffect(() => {
     if (isDemo) return;

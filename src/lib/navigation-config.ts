@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { isScopedManagerKind } from "@/lib/scope-home";
 import {
   Home, BarChart3, Trophy, BookOpen, Headphones, Settings, Upload, MessageSquare,
   Users2, UsersRound, Target, Sparkles, FileText,
@@ -198,20 +199,32 @@ export function applyAdminView(realRole: AppRole, viewMode: AdminViewMode): AppR
 
 /**
  * How the top-bar workspace selector should behave for a given real role,
- * view mode and route. One pure rule so the switcher and its tests cannot
- * drift apart.
+ * view mode, route and resolved business scope. One pure rule so the
+ * switcher and its tests cannot drift apart.
  *
  * - "existing":  render exactly as before this rule existed. This is the
- *   unconditional answer for every non-admin — a real manager's or
- *   representative's selector behavior never changes.
+ *   answer for every non-admin except the one case below — a real team
+ *   manager's or representative's selector behavior never changes.
  * - "hidden":    the selector is meaningless here, render nothing. Admin's
  *   system console ("/") ignores workspace entirely — a visible selector
  *   would imply the page changes by team when it does not. Representative
  *   view has no scope concept at all (a real representative never has a
- *   selector), so admin-as-representative hides it too.
+ *   selector), so admin-as-representative hides it too. And a business-scope
+ *   manager's HOME (center / activity / executive) is the complete resolved
+ *   scope — its hero says "כלל הפעילות העסקית" and its boards show every
+ *   covered unit, so a selector naming one team would caption a scope-wide
+ *   page with a single-team scope. Hidden is presentation only: the
+ *   workspace still holds the drill-down selected team, and every
+ *   operational route (/performance, /targets, /teams, …) keeps the
+ *   selector exactly as it is.
  * - "teams-only": admin-as-manager. A manager inspects one team; "כלל
  *   הארגון" is not a scope any real manager has, and offering it would
  *   render a fake manager view. Only team options are offered.
+ *
+ * `businessScopeKind` is the SERVER-resolved scope of the REAL account
+ * (useBusinessScope), consulted only on the non-admin branch — an admin in a
+ * presentation view mode keeps realRole "admin" and never reaches it, so a
+ * view mode can never borrow a business scope it does not hold.
  *
  * Admin's OTHER system pages (e.g. /users, /representatives) keep the full
  * selector — those pages genuinely narrow by workspace and that narrowing is
@@ -223,9 +236,13 @@ export function workspaceSelectorBehavior(params: {
   realRole: AppRole;
   viewRole: AppRole;
   pathname: string;
+  /** Resolved business-scope kind of the real account, when known. */
+  businessScopeKind?: string | null;
 }): WorkspaceSelectorBehavior {
-  const { realRole, viewRole, pathname } = params;
-  if (realRole !== "admin") return "existing";
+  const { realRole, viewRole, pathname, businessScopeKind } = params;
+  if (realRole !== "admin") {
+    return pathname === "/" && isScopedManagerKind(businessScopeKind) ? "hidden" : "existing";
+  }
   if (viewRole === "representative") return "hidden";
   if (viewRole === "manager") return "teams-only";
   return pathname === "/" ? "hidden" : "existing";
