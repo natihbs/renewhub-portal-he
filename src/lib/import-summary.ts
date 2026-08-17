@@ -99,6 +99,47 @@ export function summarizeProcessedRows(processed: ProcessedRow[]): ImportPreview
   };
 }
 
+// -------------------------------------------------------- bulk create marks
+
+/**
+ * The ONE bulk action the preview offers: mark every NEW representative for
+ * creation. It is a shortcut over the existing per-row "יצירת נציג חדש", not
+ * a new semantic — nothing is written until the final import confirmation,
+ * and creation semantics stay createRepresentative's: a representatives row
+ * with user_id null, no auth account, no invitation, no role.
+ *
+ * A row qualifies ONLY when every one of these holds:
+ *   * it matched NO existing representative (an unmatched new person);
+ *   * it did not match an INACTIVE representative — reactivate-vs-duplicate
+ *     is a deliberate per-row decision, never bulk-defaulted;
+ *   * it carries no error-severity issue (an error row needs a file fix);
+ *   * it has a name to create;
+ *   * its action is still the default "skip" — a row someone already resolved
+ *     to anything else is their decision and is left exactly as they set it.
+ */
+export function isBulkCreateCandidate(r: ProcessedRow): boolean {
+  if (r.issues.some((i) => i.severity === "error")) return false;
+  if (r.matchRepId) return false;
+  if (r.matchedInactive) return false;
+  if (!r.name) return false;
+  return r.action === "skip";
+}
+
+export function bulkCreateCandidates(processed: ProcessedRow[]): ProcessedRow[] {
+  return processed.filter(isBulkCreateCandidate);
+}
+
+export const BULK_CREATE_ACTION_LABEL = "סמן את כל הנציגים החדשים ליצירה";
+
+/**
+ * The confirmation line — states the count AND the boundary: representative
+ * records only, never login accounts.
+ */
+export function bulkCreateConfirmMessage(count: number): string {
+  const who = count === 1 ? "נציג חדש אחד יסומן" : `${count} נציגים חדשים יסומנו`;
+  return `${who} ליצירה. לא ייווצרו עבורם חשבונות משתמש. הייבוא יתבצע רק לאחר אישור סופי.`;
+}
+
 // ------------------------------------------------------- confirmation view
 
 /**

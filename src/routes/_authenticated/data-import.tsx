@@ -19,6 +19,17 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useIsManager, useApp, teamsFromReps } from "@/lib/store";
@@ -51,12 +62,16 @@ import {
   type TargetGoalSnapshotEntry,
 } from "@/lib/import-store";
 import {
+  BULK_CREATE_ACTION_LABEL,
+  bulkCreateCandidates,
+  bulkCreateConfirmMessage,
   countImportActions,
   deriveStoredImportOutcome,
   hasImportableRows,
   importOutcomeView,
   importStatusLabel,
   importTargetPlan,
+  isBulkCreateCandidate,
   MATCH_EXCEPTIONS_SKIPPED_LABEL,
   summarizeProcessedRows,
 } from "@/lib/import-summary";
@@ -818,6 +833,21 @@ function DataImportPage() {
                   ),
                 )
               }
+              onBulkMarkCreate={() => {
+                // Same state transition as choosing "יצירת נציג חדש" per row,
+                // applied only to rows the pure predicate deems safe. Nothing
+                // is written here — the final Confirm step still gates the
+                // import, with its counts recomputed from these actions.
+                let marked = 0;
+                setProcessed((p) =>
+                  p.map((r) => {
+                    if (!isBulkCreateCandidate(r)) return r;
+                    marked += 1;
+                    return { ...r, action: "create" as ResolvedAction };
+                  }),
+                );
+                toast.success(`${marked} שורות סומנו ליצירת נציג חדש`);
+              }}
               onBack={() => setStep(1)}
               onNext={() => setStep(3)}
               criticalCount={criticalCount}
@@ -1369,6 +1399,7 @@ function PreviewStep({
   reps,
   matchNames,
   onChangeAction,
+  onBulkMarkCreate,
   onBack,
   onNext,
   criticalCount,
@@ -1384,6 +1415,8 @@ function PreviewStep({
    */
   matchNames: Map<string, string>;
   onChangeAction: (idx: number, action: ResolvedAction, matchId?: string) => void;
+  /** Marks every safe unmatched NEW row for creation (see isBulkCreateCandidate). */
+  onBulkMarkCreate: () => void;
   onBack: () => void;
   onNext: () => void;
   criticalCount: number;
@@ -1413,6 +1446,9 @@ function PreviewStep({
   // Counts over the FULL processed array — pure, unit-tested, and deliberately
   // free of any quality score or success percentage (import-summary.ts).
   const summary = useMemo(() => summarizeProcessedRows(processed), [processed]);
+  // Safe candidates for the one bulk action — recomputed from the live rows,
+  // so the banner disappears the moment nothing is left to mark.
+  const bulkCandidates = useMemo(() => bulkCreateCandidates(processed), [processed]);
   const showRenewalColumns = processed.some(
     (p) => p.renewalOpportunities != null || p.completedRenewals != null || p.renewalFieldsSkipped,
   );
@@ -1479,6 +1515,46 @@ function PreviewStep({
         <span>ללא התאמה: {summary.unmatched}</span>
         <span>תואמות נציג מושבת: {summary.matchedInactive}</span>
       </div>
+
+      {/* ONE bulk shortcut over the existing per-row "יצירת נציג חדש" — only
+          for rows that are unmatched, error-free, not an inactive match, and
+          still on the default skip. It appears only while such rows exist,
+          confirms its exact scope, and writes nothing: the final Confirm step
+          still gates the import with recomputed counts. */}
+      {bulkCandidates.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed p-3">
+          <div className="min-w-0 flex-1 text-sm">
+            <span className="font-medium">
+              {bulkCandidates.length === 1
+                ? "שורה אחת ללא התאמה יכולה להפוך לנציג חדש."
+                : `${bulkCandidates.length} שורות ללא התאמה יכולות להפוך לנציגים חדשים.`}
+            </span>{" "}
+            <span className="text-xs text-muted-foreground">
+              שורות שכבר נקבעה להן פעולה, התאמות לנציג מושבת ושורות עם שגיאות לא יושפעו.
+            </span>
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" variant="outline">
+                <UserPlus className="ms-1 h-4 w-4" />
+                {BULK_CREATE_ACTION_LABEL}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{BULK_CREATE_ACTION_LABEL}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {bulkCreateConfirmMessage(bulkCandidates.length)}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>ביטול</AlertDialogCancel>
+                <AlertDialogAction onClick={onBulkMarkCreate}>אישור הסימון</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
 
       {warnCount > 0 && (
         <Alert>

@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useApp, competitionLeaderboard, useIsManager } from "@/lib/store";
+import { useAppMode } from "@/lib/app-mode";
+import { getCompetitionStandings } from "@/lib/competitions.functions";
 import type { Competition } from "@/lib/seed";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,8 +69,68 @@ function CompetitionStatusBadge({ comp }: { comp: Competition }) {
   return <Badge variant="outline">הסתיימה</Badge>;
 }
 
+/**
+ * The competition leaderboard, complete for EVERY viewer.
+ *
+ * A manager keeps the original client-side path: their representatives
+ * mirror already covers every competitor, so names resolve locally and
+ * nothing about their view changes. A representative cannot read other
+ * representatives rows (their RLS is self-only — deliberately unchanged), so
+ * their board is fetched from getCompetitionStandings: a narrow authenticated
+ * projection carrying only { representativeId, displayName, total, rank } for
+ * the competitors of THIS competition. Same canonical scoring either way.
+ */
 function Leaderboard({ comp, nameOf }: { comp: Competition; nameOf: (id: string) => string }) {
+  const isManager = useIsManager();
+  const { isDemo } = useAppMode();
+  const loadStandings = useServerFn(getCompetitionStandings);
+  // Demo mode has a fully local roster; the server projection is live-only.
+  const useServerBoard = !isManager && !isDemo;
+  const serverBoard = useQuery({
+    queryKey: ["competition-standings", comp.id] as const,
+    queryFn: () => loadStandings({ data: { competition_id: comp.id } }),
+    enabled: useServerBoard,
+    staleTime: 30_000,
+  });
+
   const leaderboard = useMemo(() => competitionLeaderboard(comp), [comp]);
+
+  if (useServerBoard) {
+    if (serverBoard.isLoading) {
+      return (
+        <div className="space-y-2" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-14 animate-pulse rounded-xl bg-muted" />
+          ))}
+        </div>
+      );
+    }
+    if (!serverBoard.isError) {
+      const rows = serverBoard.data ?? [];
+      if (rows.length === 0) return <EmptyState icon={Medal} title="אין ניקוד עדיין" compact />;
+      return (
+        <div className="space-y-2">
+          {rows.map((row) => (
+            <div
+              key={row.representativeId}
+              className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-surface-subtle"
+            >
+              <MedalIcon place={row.rank} />
+              <InitialsAvatar name={row.displayName} className="h-8 w-8" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold truncate">{row.displayName}</div>
+                <div className="text-xs text-muted-foreground">מקום {row.rank}</div>
+              </div>
+              <div className="num text-lg font-extrabold text-primary">{formatNum(row.total)}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    // Server error → fall through to the local render below: the viewer still
+    // sees the board (their own row at minimum) instead of a dead card.
+  }
+
   if (leaderboard.length === 0) return <EmptyState icon={Medal} title="אין ניקוד עדיין" compact />;
   return (
     <div className="space-y-2">

@@ -176,7 +176,13 @@ export type StandingRow = { repId: string; total: number; rank: number };
  * than counted as zero points: the category was deleted, so we do not know what
  * that count was worth.
  */
-export function competitionStandings(comp: CompetitionLike): StandingRow[] {
+export function competitionStandings(
+  // Only the scoring inputs are required — the server-side standings
+  // projection computes over raw category/score rows without a full
+  // competition object. Every existing caller passes a CompetitionLike,
+  // which satisfies this by subtyping.
+  comp: Pick<CompetitionLike, "categories" | "scores">,
+): StandingRow[] {
   const pointsByCategory = new Map(comp.categories.map((c) => [c.id, c.points]));
   const byRep = new Map<string, number>();
   for (const s of comp.scores) {
