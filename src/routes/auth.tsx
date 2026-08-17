@@ -74,10 +74,15 @@ function RhythmVisual() {
 function AuthPage() {
   const navigate = useNavigate();
   const { next } = Route.useSearch();
+  // This route is ssr:false, so the server emits the Suspense fallback (null).
+  // Rendering the form on the very first client pass would therefore always be
+  // reported as a hydration mismatch; wait one pass so both sides agree.
+  const hydrated = useHydrated();
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
 
   function goAfterAuth() {
     if (next) {
