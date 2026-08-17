@@ -224,6 +224,120 @@ export const MIXED_PROFILE_AGGREGATE_LABEL = "לא זמין";
 export const MIXED_PROFILE_AGGREGATE_NOTICE =
   "פרופילים מעורבים — חידושים ומכירות נמדדים ביחידות שונות ואינם מסוכמים לנתון אחד. הפירוט לפי צוות בטבלה שלמטה.";
 
+/**
+ * What a RANKING says when the population spans more than one KPI profile.
+ *
+ * Suppressing the aggregate was only half the rule. Ordering people by pct
+ * across profiles is the same error wearing a different hat: an אחוז חידוש of
+ * 92% placed above an אחוז עמידה of 90% asserts that the first person did
+ * better, which the two numbers cannot establish. The comparison is not
+ * removed — it moves into the per-profile listing, which this line points at.
+ */
+export const MIXED_PROFILE_RANKING_NOTICE = "השוואת ביצועים מוצגת בנפרד לפי פרופיל KPI";
+
+/** A representative whose team — and therefore KPI profile — is unknown. */
+export const UNKNOWN_PROFILE_GROUP_LABEL = "ללא פרופיל KPI";
+
+export type ProfileRowGroup<T> = {
+  /** Stable key for rendering; "unknown" for the null-profile group. */
+  key: string;
+  kpiProfile: KpiProfile | null;
+  label: string;
+  rows: T[];
+};
+
+/**
+ * Partition rows into comparison-safe buckets: renewals, generic sales, and —
+ * last, and never merged into either — the rows whose profile is unknown.
+ *
+ * Relative order INSIDE a bucket is the incoming order, so a caller sorts as
+ * it always did and then partitions: within one profile the result is exactly
+ * today's ranking, and a single-profile population comes back as one group
+ * holding the original array order. Empty buckets are dropped.
+ *
+ * An unknown profile is never guessed into a real one. It cannot make a
+ * single-profile population look mixed (see kpiProfileMix) and it cannot be
+ * ranked against one either — it gets its own honest group.
+ */
+export function groupRowsByProfile<T>(
+  rows: T[],
+  profileOf: (row: T) => KpiProfile | null,
+): ProfileRowGroup<T>[] {
+  const buckets: ProfileRowGroup<T>[] = [
+    { key: "renewals", kpiProfile: "renewals", label: KPI_PROFILE_LABEL.renewals, rows: [] },
+    {
+      key: "generic_sales",
+      kpiProfile: "generic_sales",
+      label: KPI_PROFILE_LABEL.generic_sales,
+      rows: [],
+    },
+    { key: "unknown", kpiProfile: null, label: UNKNOWN_PROFILE_GROUP_LABEL, rows: [] },
+  ];
+  for (const row of rows) {
+    const profile = profileOf(row);
+    const bucket = buckets.find((b) => b.kpiProfile === profile) ?? buckets[2];
+    bucket.rows.push(row);
+  }
+  return buckets.filter((b) => b.rows.length > 0);
+}
+
+// ------------------------------------------------ comparative insight guards
+//
+// Both helpers return null rather than a comparison the data cannot support.
+// They deal in structured facts, not sentences, so this module stays
+// dependency-free and the caller keeps ownership of the wording.
+
+export type PctComparable = {
+  name: string;
+  teamId: string | null;
+  teamName: string;
+  pct: number;
+  kpiProfile: KpiProfile | null;
+};
+
+/**
+ * The month's leading representative — ONLY when everyone measured shares one
+ * KPI profile. Across profiles there is no single leader to name: "מוביל את
+ * החודש" would be awarded by comparing an אחוז חידוש with an אחוז עמידה.
+ */
+export function leaderByPct(items: PctComparable[]): { name: string; pct: number } | null {
+  if (items.length === 0) return null;
+  if (kpiProfileMix(items.map((i) => i.kpiProfile)).mixed) return null;
+  const leader = [...items].sort((a, b) => b.pct - a.pct)[0];
+  return { name: leader.name, pct: leader.pct };
+}
+
+/**
+ * The gap between the leading and trailing TEAM by average pct — again only
+ * within one KPI profile. "מוקד א' מקדים את מוקד ב' ב-12%" across a renewals
+ * team and a sales team subtracts two different units and reports the
+ * remainder as a business fact.
+ */
+export function teamGapByPct(
+  items: PctComparable[],
+  minDiff = 3,
+): { top: string; bottom: string; diff: number } | null {
+  if (kpiProfileMix(items.map((i) => i.kpiProfile)).mixed) return null;
+  const byTeam = new Map<string, { name: string; pcts: number[] }>();
+  for (const item of items) {
+    if (!item.teamId) continue;
+    const bucket = byTeam.get(item.teamId) ?? { name: item.teamName, pcts: [] };
+    bucket.pcts.push(item.pct);
+    byTeam.set(item.teamId, bucket);
+  }
+  const averages = [...byTeam.values()].map((b) => ({
+    name: b.name,
+    avgPct: b.pcts.reduce((s, p) => s + p, 0) / b.pcts.length,
+  }));
+  if (averages.length < 2) return null;
+  averages.sort((a, b) => b.avgPct - a.avgPct);
+  const top = averages[0];
+  const bottom = averages[averages.length - 1];
+  const diff = top.avgPct - bottom.avgPct;
+  if (diff < minDiff) return null;
+  return { top: top.name, bottom: bottom.name, diff };
+}
+
 // ---------------------------------------------------------------------------
 // Manual performance entry — "עדכון ביצועים ידני"
 //

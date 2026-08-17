@@ -387,7 +387,13 @@ function ExecutiveActivitySurface({
           )}
         </span>
       </button>
-      {expandable && (
+      {/* The body renders only when it actually HAS content. An activity that
+          holds centers but no teams anywhere is expandable and, while
+          collapsed, has nothing to show — rendering the padded container for
+          it left an unexplained gap under the header that reads as a broken
+          card. The activity itself, and its empty centers, stay fully visible:
+          the header keeps its counts and the drill-down still opens. */}
+      {expandable && (activity.hasTeams || expanded) && (
         <div className="space-y-2 p-3">
           {/* Per-profile performance is always visible for an activity that
               has teams; the centers are the drill-down layer behind it. */}

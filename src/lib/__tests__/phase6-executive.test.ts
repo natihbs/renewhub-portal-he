@@ -20,7 +20,15 @@ import { resolve } from "node:path";
 import type { BusinessUnit } from "../business-scope";
 import { BUSINESS_ROLE_LABEL, resolveBusinessScope, type ScopeTeam } from "../business-scope";
 import { accountIdentity, TECHNICAL_ROLE_LABEL } from "../account-identity";
-import { kpiProfileMix, MIXED_PROFILE_AGGREGATE_LABEL } from "../performance-domain";
+import {
+  groupRowsByProfile,
+  kpiProfileMix,
+  leaderByPct,
+  teamGapByPct,
+  MIXED_PROFILE_AGGREGATE_LABEL,
+  MIXED_PROFILE_RANKING_NOTICE,
+  UNKNOWN_PROFILE_GROUP_LABEL,
+} from "../performance-domain";
 import {
   activityStructureSummary,
   buildActivityCenterBoard,
@@ -47,7 +55,10 @@ const scopeCardsSrc = read("../../components/ScopeHomeCards.tsx");
 //   פעילות בריאות   → no centers at all (EMPTY activity)
 //   מוקד יתום       → a center whose parentId points at NO activity, carrying
 //                     a real team — the case the old grouped view dropped
-//   plus one team attached straight to an activity, and one with no unit.
+//   מוקד רעוע       → a center whose parentId names an activity that is NOT in
+//                     the units list at all, also carrying a real team
+//   plus one team attached straight to an activity, one with no unit, and one
+//   whose businessUnitId names a unit that does not exist.
 
 const ACT_ELEM: BusinessUnit = {
   id: "act-1",
@@ -69,15 +80,37 @@ const CEN_FULL: BusinessUnit = {
 };
 const CEN_EMPTY: BusinessUnit = { id: "cen-2", name: "רכב", unitType: "center", parentId: "act-1" };
 const CEN_ORPHAN: BusinessUnit = { id: "cen-3", name: "יתום", unitType: "center", parentId: null };
+/** T-2: parent names an activity id that appears nowhere in UNITS. */
+const CEN_LOST_PARENT: BusinessUnit = {
+  id: "cen-4",
+  name: "רעוע",
+  unitType: "center",
+  parentId: "act-does-not-exist",
+};
 
-const UNITS: BusinessUnit[] = [ACT_ELEM, ACT_HEALTH, CEN_FULL, CEN_EMPTY, CEN_ORPHAN];
+const UNITS: BusinessUnit[] = [
+  ACT_ELEM,
+  ACT_HEALTH,
+  CEN_FULL,
+  CEN_EMPTY,
+  CEN_ORPHAN,
+  CEN_LOST_PARENT,
+];
 
 const TEAM_INPUTS: ScopeHomeTeamInput[] = [
   { id: "t-ren", name: "חידושי דירה", kpiProfile: "renewals", businessUnitId: "cen-1" },
   { id: "t-sales", name: "מכירות דירה", kpiProfile: "generic_sales", businessUnitId: "cen-1" },
   { id: "t-orphan", name: "צוות יתום", kpiProfile: "renewals", businessUnitId: "cen-3" },
+  { id: "t-lost-parent", name: "צוות רעוע", kpiProfile: "renewals", businessUnitId: "cen-4" },
   { id: "t-direct", name: "צוות ישיר", kpiProfile: "generic_sales", businessUnitId: "act-1" },
   { id: "t-loose", name: "צוות ללא יחידה", kpiProfile: "renewals", businessUnitId: null },
+  /** T-1: points at a unit id that is absent from UNITS entirely. */
+  {
+    id: "t-ghost-unit",
+    name: "צוות ליחידה חסרה",
+    kpiProfile: "generic_sales",
+    businessUnitId: "unit-does-not-exist",
+  },
 ];
 
 const REPS = [
@@ -92,8 +125,11 @@ const REPS = [
     currentResult: 5,
   })),
   { id: "r-orp-0", teamId: "t-orphan", currentResult: 7 },
+  { id: "r-lost-0", teamId: "t-lost-parent", currentResult: 6 },
+  { id: "r-lost-1", teamId: "t-lost-parent", currentResult: 6 },
   { id: "r-dir-0", teamId: "t-direct", currentResult: 9 },
   { id: "r-loo-0", teamId: "t-loose", currentResult: 3 },
+  { id: "r-ghost-0", teamId: "t-ghost-unit", currentResult: 2 },
 ];
 
 // t-ren has an assigned book of 100; t-sales a sales target of 20; t-orphan,
@@ -152,15 +188,50 @@ describe("executive board — the business as it is BUILT", () => {
     // known unit, so the row was neither placed under an activity nor counted
     // as unattached — it vanished from the board while still inflating the
     // totals printed beside it.
-    expect(
-      board()
-        .unattachedRows.map((r) => r.id)
-        .sort(),
-    ).toEqual(["t-loose", "t-orphan"]);
+    expect(board().unattachedRows.map((r) => r.id)).toContain("t-orphan");
     const dropped = groupScopeRows({ kind: "executive", rows: rows(), units: UNITS })
       .flatMap((g) => [...g.rows, ...(g.subgroups ?? []).flatMap((s) => s.rows)])
       .map((r) => r.id);
     expect(dropped).not.toContain("t-orphan");
+  });
+
+  // T-1
+  it("a team whose businessUnitId names a MISSING unit stays visible and unattached", () => {
+    const b = board();
+    const ids = b.unattachedRows.map((r) => r.id);
+    expect(ids).toContain("t-ghost-unit");
+    // It is not quietly adopted by an activity, and it is not duplicated.
+    for (const a of b.activities) {
+      expect(
+        [...a.centers.flatMap((c) => c.teams), ...a.directRows].map((r) => r.id),
+      ).not.toContain("t-ghost-unit");
+    }
+    expect(ids.filter((id) => id === "t-ghost-unit")).toHaveLength(1);
+    // …and it is still counted in the reconciliation.
+    expect(executiveStructureSummary(b).teamCount).toBe(TEAM_INPUTS.length);
+  });
+
+  // T-2
+  it("a team under a center whose PARENT ACTIVITY is missing stays visible and unattached", () => {
+    const b = board();
+    expect(b.unattachedRows.map((r) => r.id)).toContain("t-lost-parent");
+    // The broken center is never adopted by some other activity, and neither
+    // is its team.
+    for (const a of b.activities) {
+      expect(a.centers.map((c) => c.centerId)).not.toContain("cen-4");
+      expect(
+        [...a.centers.flatMap((c) => c.teams), ...a.directRows].map((r) => r.id),
+      ).not.toContain("t-lost-parent");
+    }
+    expect(b.unattachedRows.filter((r) => r.id === "t-lost-parent")).toHaveLength(1);
+  });
+
+  it("every structurally broken attachment lands in the SAME honest bucket", () => {
+    expect(
+      board()
+        .unattachedRows.map((r) => r.id)
+        .sort(),
+    ).toEqual(["t-ghost-unit", "t-loose", "t-lost-parent", "t-orphan"].sort());
   });
 
   it("places every covered team in EXACTLY one bucket", () => {
@@ -218,7 +289,28 @@ describe("executive structure summary — the hero figures", () => {
     const s = executiveStructureSummary(board());
     expect(s.activitiesWithoutCenters).toBe(1);
     expect(s.centersWithoutTeams).toBe(1);
-    expect(s.unattachedTeamCount).toBe(2);
+    expect(s.unattachedTeamCount).toBe(4);
+  });
+
+  // T-3
+  it("representative counts reconcile EXACTLY across the whole board", () => {
+    const b = board();
+    const s = executiveStructureSummary(b);
+    const repsInActivities = b.activities.reduce((a, x) => a + x.repCount, 0);
+    const repsUnattached = b.unattachedRows.reduce((a, r) => a + r.repCount, 0);
+    expect(repsInActivities + repsUnattached).toBe(s.repCount);
+    expect(s.repCount).toBe(REPS.length);
+    // Each activity's own repCount is the sum of its centers' and its direct
+    // teams' — so no level of the drill-down can contradict the level above.
+    for (const a of b.activities) {
+      const own =
+        a.centers.reduce((sum, c) => sum + c.repCount, 0) +
+        a.directRows.reduce((sum, r) => sum + r.repCount, 0);
+      expect(a.repCount).toBe(own);
+    }
+    // The same reconciliation for teams.
+    const teamsInActivities = b.activities.reduce((a, x) => a + x.teamCount, 0);
+    expect(teamsInActivities + b.unattachedRows.length).toBe(s.teamCount);
   });
 
   it("carries no combined percentage and no combined target", () => {
@@ -280,6 +372,50 @@ describe("executive Home wiring", () => {
   it("keeps the management-level attention rail instead of ranking reps across activities", () => {
     expect(homeSrc).toContain("{structureFirst ? (");
     expect(homeSrc).toContain('<SectionHeading title="תשומת לב ניהולית" />');
+  });
+
+  /**
+   * The surface's body is `expandable && (hasTeams || expanded)`. An activity
+   * that holds centers but no teams anywhere is expandable and, collapsed, has
+   * nothing to put in that body — it used to render an empty padded container,
+   * an unexplained gap that reads as a broken card. The state table below is
+   * the render condition; the activity and its empty centers stay visible
+   * either way, which is what the two `expandable` assertions pin.
+   */
+  it("an activity with centers but no teams renders no empty body while collapsed", () => {
+    const bodyShows = (
+      a: { centerCount: number; directRows: unknown[]; hasTeams: boolean },
+      expanded: boolean,
+    ) => {
+      const expandable = a.centerCount > 0 || a.directRows.length > 0;
+      return expandable && (a.hasTeams || expanded);
+    };
+    // Centers, but nothing under any of them.
+    const hollow = { centerCount: 2, directRows: [], hasTeams: false };
+    expect(bodyShows(hollow, false)).toBe(false); // collapsed → no empty padded block
+    expect(bodyShows(hollow, true)).toBe(true); // expanded → the empty centers show
+    // An activity WITH teams is unchanged in both states.
+    const populated = { centerCount: 1, directRows: [], hasTeams: true };
+    expect(bodyShows(populated, false)).toBe(true);
+    expect(bodyShows(populated, true)).toBe(true);
+    // Nothing at all → not expandable, header-only with its structural badge.
+    const barren = { centerCount: 0, directRows: [], hasTeams: false };
+    expect(bodyShows(barren, false)).toBe(false);
+    expect(bodyShows(barren, true)).toBe(false);
+    expect(scopeCardsSrc).toContain("{expandable && (activity.hasTeams || expanded) && (");
+    // The hollow activity really is reachable from the domain, and it is still
+    // on the board with its centers intact.
+    const hollowBoard = buildExecutiveActivityBoard({
+      units: [
+        { id: "a", name: "ריקה", unitType: "activity", parentId: null },
+        { id: "c", name: "ריק", unitType: "center", parentId: "a" },
+      ],
+      rows: [],
+    });
+    const only = hollowBoard.activities[0];
+    expect(only.centerCount).toBe(1);
+    expect(only.hasTeams).toBe(false);
+    expect(only.centers[0].hasTeams).toBe(false);
   });
 });
 
@@ -362,6 +498,123 @@ describe("/performance never reports a cross-profile total", () => {
   });
 });
 
+// ------------------------------------------- cross-profile ranking isolation
+//
+// Suppressing the combined aggregate was only half the rule: ORDERING people
+// by pct across profiles asserts the same thing the sum did — that the two
+// numbers live on one scale. These tests hold the comparison boundary itself.
+
+/** Minimal shapes matching what /performance feeds the guards. */
+const rep = (
+  name: string,
+  pct: number,
+  kpiProfile: "renewals" | "generic_sales" | null,
+  teamId: string | null = "team-1",
+  teamName = "צוות",
+) => ({ name, pct, kpiProfile, teamId, teamName });
+
+describe("cross-profile ranking is never produced", () => {
+  // A
+  it("a renewals + generic_sales population is detected as mixed", () => {
+    const population = [rep("א", 90, "renewals"), rep("ב", 95, "generic_sales", "team-2")];
+    expect(kpiProfileMix(population.map((r) => r.kpiProfile)).mixed).toBe(true);
+  });
+
+  // B — single renewals population keeps every ranking behavior
+  it("a single renewals population still names a leader and a team gap", () => {
+    const population = [
+      rep("א", 95, "renewals", "team-1", "צוות א"),
+      rep("ב", 80, "renewals", "team-1", "צוות א"),
+      rep("ג", 60, "renewals", "team-2", "צוות ב"),
+    ];
+    expect(leaderByPct(population)).toEqual({ name: "א", pct: 95 });
+    const gap = teamGapByPct(population);
+    expect(gap).not.toBeNull();
+    expect(gap!.top).toBe("צוות א");
+    expect(gap!.bottom).toBe("צוות ב");
+    expect(gap!.diff).toBeCloseTo(27.5);
+  });
+
+  // C — and so does a single generic_sales population
+  it("a single generic_sales population still names a leader and a team gap", () => {
+    const population = [
+      rep("א", 95, "generic_sales", "team-1", "צוות א"),
+      rep("ב", 60, "generic_sales", "team-2", "צוות ב"),
+    ];
+    expect(leaderByPct(population)).toEqual({ name: "א", pct: 95 });
+    expect(teamGapByPct(population)?.diff).toBeCloseTo(35);
+  });
+
+  // D — the mixed case produces neither comparative statement
+  it("a mixed population yields NO leader and NO team-gap statement", () => {
+    const population = [
+      rep("חידושים-א", 99, "renewals", "team-1", "צוות חידושים"),
+      rep("מכירות-ב", 40, "generic_sales", "team-2", "צוות מכירות"),
+    ];
+    expect(leaderByPct(population)).toBeNull();
+    expect(teamGapByPct(population)).toBeNull();
+  });
+
+  it("a mixed population is partitioned before it can be read as a ranking", () => {
+    const population = [
+      rep("מכירות-גבוה", 99, "generic_sales"),
+      rep("חידושים-בינוני", 80, "renewals"),
+      rep("חידושים-גבוה", 90, "renewals"),
+    ];
+    // The caller sorts globally exactly as before…
+    const sorted = [...population].sort((a, b) => b.pct - a.pct);
+    const groups = groupRowsByProfile(sorted, (r) => r.kpiProfile);
+    // …and the partition prevents the interleaved league table: no group holds
+    // two different profiles, and renewals is never ranked against sales.
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.kpiProfile)).toEqual(["renewals", "generic_sales"]);
+    for (const g of groups) {
+      expect(new Set(g.rows.map((r) => r.kpiProfile)).size).toBe(1);
+    }
+    // Order WITHIN a profile is preserved from the caller's sort.
+    expect(groups[0].rows.map((r) => r.name)).toEqual(["חידושים-גבוה", "חידושים-בינוני"]);
+    // The top of the global sort is a sales rep, but it never becomes "the"
+    // leader — it only leads its own group.
+    expect(sorted[0].name).toBe("מכירות-גבוה");
+    expect(groups[0].rows[0].name).not.toBe("מכירות-גבוה");
+  });
+
+  it("a single-profile population is one group holding the original order", () => {
+    const population = [rep("א", 95, "renewals"), rep("ב", 80, "renewals")];
+    const groups = groupRowsByProfile(population, (r) => r.kpiProfile);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rows).toEqual(population);
+    expect(groups[0].kpiProfile).toBe("renewals");
+  });
+
+  // E — unknown profile
+  it("a rep with no resolvable team is never guessed into a profile", () => {
+    const population = [rep("א", 95, "renewals"), rep("ללא-צוות", 99, null, null, "")];
+    // It does not manufacture a mix…
+    expect(kpiProfileMix(population.map((r) => r.kpiProfile)).mixed).toBe(false);
+    // …so the single-profile comparison remains available and correct.
+    expect(leaderByPct(population)).toEqual({ name: "ללא-צוות", pct: 99 });
+    // …but it still gets its own group rather than joining renewals.
+    const groups = groupRowsByProfile(population, (r) => r.kpiProfile);
+    expect(groups.map((g) => g.key)).toEqual(["renewals", "unknown"]);
+    expect(groups[1].label).toBe(UNKNOWN_PROFILE_GROUP_LABEL);
+    expect(groups[1].rows.map((r) => r.name)).toEqual(["ללא-צוות"]);
+    // A team-less rep is excluded from the team-gap population outright.
+    expect(teamGapByPct([rep("א", 95, "renewals"), rep("ללא", 10, null, null, "")])).toBeNull();
+  });
+
+  it("the ranking cards and the list are wired to the mix, not to a role", () => {
+    // Whitespace-normalised: prettier reflows this expression, and the claim
+    // is "the ranking collapses to nothing when mixed", not its line breaks.
+    const flat = performanceSrc.replace(/\s+/g, " ");
+    expect(flat).toContain("measuredMix.mixed ? [] :");
+    expect(performanceSrc).toContain("groupRowsByProfile(filtered, profileOfRep)");
+    expect(performanceSrc).toContain("MIXED_PROFILE_RANKING_NOTICE");
+    expect(performanceSrc).toContain("buildInsights(targetedEnriched, profileOfRep)");
+    expect(MIXED_PROFILE_RANKING_NOTICE).toBe("השוואת ביצועים מוצגת בנפרד לפי פרופיל KPI");
+  });
+});
+
 // ============================================================== regressions
 
 describe("regression — team manager keeps TEAM → REPRESENTATIVES", () => {
@@ -406,7 +659,11 @@ describe("regression — activity home stays center-centric", () => {
     // The orphan center is NOT this activity's, so its team stays unattached
     // rather than being adopted.
     expect(b.centers.some((c) => c.centerId === "cen-3")).toBe(false);
-    expect(b.unattachedRows.map((r) => r.id).sort()).toEqual(["t-loose", "t-orphan"]);
+    // Everything covered but outside THIS activity's subtree — including the
+    // broken attachments — stays in the honest bucket rather than vanishing.
+    expect(b.unattachedRows.map((r) => r.id).sort()).toEqual(
+      ["t-ghost-unit", "t-loose", "t-lost-parent", "t-orphan"].sort(),
+    );
     expect(b.directRows.map((r) => r.id)).toEqual(["t-direct"]);
   });
 
