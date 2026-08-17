@@ -293,13 +293,22 @@ function WorkspaceSwitcher() {
   const { workspace, options, setWorkspaceTeam, setWorkspaceOrg, ready } = useWorkspace();
   const realRole = useRealAppRole();
   const viewRole = useResolvedRole();
+  // The REAL account's server-resolved business scope — a business-scope
+  // manager's Home is scope-wide, so the rule hides the selector there. The
+  // workspace itself keeps holding the drill-down selected team.
+  const { scope } = useBusinessScope();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   if (isDemo || !ready || options.length === 0) return null;
 
   // Admin-view-aware behavior (pure rule, see workspaceSelectorBehavior).
   // "existing" falls through to the original rendering below, so a real
-  // manager's or representative's selector is untouched by construction.
-  const behavior = workspaceSelectorBehavior({ realRole, viewRole, pathname });
+  // team manager's or representative's selector is untouched by construction.
+  const behavior = workspaceSelectorBehavior({
+    realRole,
+    viewRole,
+    pathname,
+    businessScopeKind: scope?.kind ?? null,
+  });
   if (behavior === "hidden") return null;
   if (behavior === "teams-only") {
     const teamOptions = options.filter((o) => o.type === "team");

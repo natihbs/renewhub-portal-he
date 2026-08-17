@@ -17,8 +17,10 @@ import {
   ACTIVITY_CENTERS_TITLE,
   ACTIVITY_NO_CENTERS_MESSAGE,
   CENTER_NO_TEAMS_MESSAGE,
+  centersWithoutTeamsLabel,
   EXECUTIVE_ACTIVITIES_TITLE,
   EXECUTIVE_NO_ACTIVITIES_MESSAGE,
+  repsMissingPersonalTargetLabel,
   SCOPE_DIRECT_ACTIVITY_GROUP_LABEL,
   SCOPE_METRIC_LABELS,
   SCOPE_MISSING_TARGETS_TITLE,
@@ -75,7 +77,7 @@ function ScopeTeamRowView({ row, onSelect }: { row: ScopeTeamRow; onSelect?: () 
         <div className="flex items-center gap-2">
           {row.missingTargets > 0 && (
             <Badge variant="secondary" className="bg-primary/10 text-primary">
-              {row.missingTargets} ללא יעד
+              {repsMissingPersonalTargetLabel(row.missingTargets)}
             </Badge>
           )}
           {onSelect && (
@@ -188,7 +190,7 @@ function ActivityCenterSurface({
               <Badge variant="outline">{center.repCount} נציגים</Badge>
               {center.missingRepresentativeTargets > 0 && (
                 <Badge variant="secondary" className="bg-primary/10 text-primary">
-                  {center.missingRepresentativeTargets} ללא יעד
+                  {repsMissingPersonalTargetLabel(center.missingRepresentativeTargets)}
                 </Badge>
               )}
               <ChevronDown
@@ -364,12 +366,12 @@ function ExecutiveActivitySurface({
               variant="secondary"
               className="bg-[color:var(--warning)]/15 text-warning-foreground"
             >
-              {activity.centersWithoutTeams} מוקדים ללא צוותים
+              {centersWithoutTeamsLabel(activity.centersWithoutTeams)}
             </Badge>
           )}
           {activity.missingRepresentativeTargets > 0 && (
             <Badge variant="secondary" className="bg-primary/10 text-primary">
-              {activity.missingRepresentativeTargets} ללא יעד
+              {repsMissingPersonalTargetLabel(activity.missingRepresentativeTargets)}
             </Badge>
           )}
           {expandable ? (
