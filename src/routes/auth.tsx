@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useHydrated, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { hebrewAuthError } from "@/lib/auth";
@@ -74,10 +74,15 @@ function RhythmVisual() {
 function AuthPage() {
   const navigate = useNavigate();
   const { next } = Route.useSearch();
+  // This route is ssr:false, so the server emits the Suspense fallback (null).
+  // Rendering the form on the very first client pass would therefore always be
+  // reported as a hydration mismatch; wait one pass so both sides agree.
+  const hydrated = useHydrated();
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
 
   function goAfterAuth() {
     if (next) {
@@ -122,7 +127,10 @@ function AuthPage() {
     setMode("login");
   }
 
+  if (!hydrated) return null;
+
   return (
+
     <div dir="rtl" className="min-h-dvh grid lg:grid-cols-2 bg-background">
       {/* Branded visual panel — desktop only */}
       <div className="hidden lg:flex flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground">
