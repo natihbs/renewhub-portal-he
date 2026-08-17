@@ -5,7 +5,7 @@
 // their home is the unchanged single-team layout.
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Building2, ChevronDown, Target } from "lucide-react";
+import { Building2, ChevronDown, Network, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import {
   ACTIVITY_CENTERS_TITLE,
   ACTIVITY_NO_CENTERS_MESSAGE,
   CENTER_NO_TEAMS_MESSAGE,
+  EXECUTIVE_ACTIVITIES_TITLE,
+  EXECUTIVE_NO_ACTIVITIES_MESSAGE,
   SCOPE_DIRECT_ACTIVITY_GROUP_LABEL,
   SCOPE_METRIC_LABELS,
   SCOPE_MISSING_TARGETS_TITLE,
@@ -25,6 +27,8 @@ import {
   SCOPE_UNATTACHED_GROUP_LABEL,
   type ActivityCenterBoard,
   type ActivityCenterSummary,
+  type ExecutiveActivityBoard,
+  type ExecutiveActivitySummary,
   type MissingTargetsRow,
   type ScopeGroup,
   type ScopeProfileAggregate,
@@ -283,6 +287,206 @@ export function ActivityCenterBoardCard({
                     onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
                   />
                 ))}
+              </div>
+            )}
+            {board.unattachedRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-semibold">{SCOPE_UNATTACHED_GROUP_LABEL}</div>
+                {board.unattachedRows.map((row) => (
+                  <ScopeTeamRowView
+                    key={row.id}
+                    row={row}
+                    onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * One ACTIVITY surface on the executive's board — the level they manage from.
+ * Collapsed it states how the activity is BUILT (centers / teams / active
+ * representatives) plus its per-profile performance; expanded it reveals the
+ * activity's own centers, each of which drills to its teams. An activity with
+ * nothing under it renders the structural empty state and stays on the board:
+ * an empty activity is a real fact about the business, never a poor performer.
+ */
+function ExecutiveActivitySurface({
+  activity,
+  expanded,
+  onToggle,
+  expandedCenterId,
+  onToggleCenter,
+  onSelectTeam,
+}: {
+  activity: ExecutiveActivitySummary;
+  expanded: boolean;
+  onToggle: () => void;
+  expandedCenterId: string | null;
+  onToggleCenter: (centerId: string) => void;
+  onSelectTeam?: (teamId: string) => void;
+}) {
+  const expandable = activity.centerCount > 0 || activity.directRows.length > 0;
+  return (
+    <div className="surface-tile overflow-hidden p-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        disabled={!expandable}
+        className={cn(
+          "flex w-full flex-wrap items-center justify-between gap-2 p-3 text-start",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          expandable && "transition-colors hover:bg-surface-subtle",
+          expanded && "border-b",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+            <Network className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate font-semibold">{activity.activityName}</span>
+            <span className="block text-xs text-muted-foreground">
+              {activity.centerCount} מוקדים · {activity.teamCount} צוותים · {activity.repCount}{" "}
+              נציגים
+            </span>
+          </span>
+        </span>
+        <span className="flex flex-wrap items-center gap-2">
+          {activity.centersWithoutTeams > 0 && (
+            <Badge
+              variant="secondary"
+              className="bg-[color:var(--warning)]/15 text-warning-foreground"
+            >
+              {activity.centersWithoutTeams} מוקדים ללא צוותים
+            </Badge>
+          )}
+          {activity.missingRepresentativeTargets > 0 && (
+            <Badge variant="secondary" className="bg-primary/10 text-primary">
+              {activity.missingRepresentativeTargets} ללא יעד
+            </Badge>
+          )}
+          {expandable ? (
+            <ChevronDown
+              aria-hidden
+              className={cn(
+                "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150",
+                expanded && "rotate-180",
+              )}
+            />
+          ) : (
+            <Badge variant="outline" className="text-muted-foreground">
+              {ACTIVITY_NO_CENTERS_MESSAGE}
+            </Badge>
+          )}
+        </span>
+      </button>
+      {/* The body renders only when it actually HAS content. An activity that
+          holds centers but no teams anywhere is expandable and, while
+          collapsed, has nothing to show — rendering the padded container for
+          it left an unexplained gap under the header that reads as a broken
+          card. The activity itself, and its empty centers, stay fully visible:
+          the header keeps its counts and the drill-down still opens. */}
+      {expandable && (activity.hasTeams || expanded) && (
+        <div className="space-y-2 p-3">
+          {/* Per-profile performance is always visible for an activity that
+              has teams; the centers are the drill-down layer behind it. */}
+          {activity.hasTeams && <ProfileAggregates aggregates={activity.profileAggregates} />}
+          {expanded && (
+            <>
+              {activity.centers.map((center) => (
+                <ActivityCenterSurface
+                  key={center.centerId}
+                  center={center}
+                  expanded={expandedCenterId === center.centerId}
+                  onToggle={() => onToggleCenter(center.centerId)}
+                  onSelectTeam={onSelectTeam}
+                />
+              ))}
+              {activity.directRows.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-semibold">{SCOPE_DIRECT_ACTIVITY_GROUP_LABEL}</div>
+                  {activity.directRows.map((row) => (
+                    <ScopeTeamRowView
+                      key={row.id}
+                      row={row}
+                      onSelect={onSelectTeam ? () => onSelectTeam(row.id) : undefined}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The EXECUTIVE's primary board — one surface per ACTIVITY of the business,
+ * empty activities included, drilling ACTIVITY → CENTERS → TEAMS (and from a
+ * team into its representatives, via the selected-team panel). There is no
+ * board-level percentage and no board-level target: activities mix KPI
+ * profiles, and no honest single number spans them.
+ */
+export function ExecutiveActivityBoardCard({
+  board,
+  isLoading,
+  isError,
+  onSelectTeam,
+}: {
+  board: ExecutiveActivityBoard;
+  isLoading: boolean;
+  isError: boolean;
+  onSelectTeam?: (teamId: string) => void;
+}) {
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
+  const [expandedCenterId, setExpandedCenterId] = useState<string | null>(null);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Network className="h-4 w-4 text-primary" /> {EXECUTIVE_ACTIVITIES_TITLE}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <ScopeCardSkeleton />
+        ) : isError ? (
+          <ScopeErrorState message="לא ניתן לטעון את נתוני ההיקף." />
+        ) : board.activities.length === 0 && board.unattachedRows.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+            {EXECUTIVE_NO_ACTIVITIES_MESSAGE}
+          </div>
+        ) : (
+          <>
+            {board.activities.map((activity) => (
+              <ExecutiveActivitySurface
+                key={activity.activityId}
+                activity={activity}
+                expanded={expandedActivityId === activity.activityId}
+                onToggle={() =>
+                  setExpandedActivityId((cur) =>
+                    cur === activity.activityId ? null : activity.activityId,
+                  )
+                }
+                expandedCenterId={expandedCenterId}
+                onToggleCenter={(centerId) =>
+                  setExpandedCenterId((cur) => (cur === centerId ? null : centerId))
+                }
+                onSelectTeam={onSelectTeam}
+              />
+            ))}
+            {board.activities.length === 0 && (
+              <div className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+                {EXECUTIVE_NO_ACTIVITIES_MESSAGE}
               </div>
             )}
             {board.unattachedRows.length > 0 && (

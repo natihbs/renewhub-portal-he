@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useApp, useIsManager, teamsFromReps } from "@/lib/store";
@@ -43,7 +43,15 @@ import {
   STALE_DATA_HINT,
   calculateAchievement, calculateGap, paceStatus, paceInfo as sharedPaceInfo, computeRisk as sharedComputeRisk,
   PACE_STATUS_LABEL, DEFAULT_KPI_PROFILE, KPI_PROFILE_LABEL, NO_TIME_REMAINING_LABEL,
-  type KpiProfile, type Tone, type PaceInfo,
+  kpiProfileMix, MIXED_PROFILE_AGGREGATE_LABEL, MIXED_PROFILE_AGGREGATE_NOTICE,
+  MIXED_PROFILE_RANKING_NOTICE,
+  groupRowsByProfile,
+  leaderByPct,
+  teamGapByPct,
+  type KpiProfile,
+  type Tone,
+  type PaceInfo,
+  type PctComparable,
 } from "@/lib/performance-domain";
 import {
   calculateAssignedRenewalRate,
@@ -425,6 +433,27 @@ function ManagerPerformancePage() {
 
   const missingTargetCount = useMemo(() => enriched.filter((e) => e.status === "no_target").length, [enriched]);
 
+  // §Truthfulness: the analytics band below sums personal targets and averages
+  // achievement percentages across the MEASURED population. For one KPI
+  // profile both figures are real. Across profiles they are not: the sum adds
+  // מיועדות חודשיות to a sales יעד, and the average mixes אחוז חידוש with אחוז
+  // עמידה. This is what a business-wide view (an executive, an admin scoped to
+  // the whole organization) actually sees, so the mix is measured from the
+  // population itself rather than from anyone's role — a single-profile view
+  // is completely unchanged.
+  //
+  // A representative with no team contributes `null`: their team's profile is
+  // genuinely unknown, so they neither prove nor disprove a mix.
+  const profileOfRep = useCallback(
+    (e: EnrichedRep): KpiProfile | null =>
+      e.rep.teamId ? (profileByTeamId.get(e.rep.teamId) ?? null) : null,
+    [profileByTeamId],
+  );
+  const measuredMix = useMemo(
+    () => kpiProfileMix(enriched.filter((e) => e.status !== "no_target").map(profileOfRep)),
+    [enriched, profileOfRep],
+  );
+
   const filtered = useMemo(() => {
     let arr = enriched;
     if (teamFilter !== "all") arr = arr.filter((e) => e.rep.teamId === teamFilter);
@@ -452,6 +481,18 @@ function ManagerPerformancePage() {
     });
     return sorted;
   }, [enriched, teamFilter, statusFilter, query, sortKey]);
+
+  // The representative list is PARTITIONED by KPI profile before it can be
+  // read as a ranking. `filtered` keeps the sort it always had; grouping
+  // preserves the order inside each bucket, so a renewals rep is now ranked
+  // only against renewals reps and a sales rep only against sales reps — the
+  // same numbers, never interleaved into one league table. A single-profile
+  // population comes back as ONE group holding the original array, so nothing
+  // about today's view changes for it.
+  const filteredGroups = useMemo(
+    () => groupRowsByProfile(filtered, profileOfRep),
+    [filtered, profileOfRep],
+  );
 
   const summary = useMemo(() => {
     const targeted = enriched.filter((e) => e.status !== "no_target");
@@ -510,20 +551,31 @@ function ManagerPerformancePage() {
   // measure — a rep with no official target yet is surfaced separately via
   // missingTargetCount, never silently ranked by a fabricated 0%.
   const targetedEnriched = useMemo(() => enriched.filter(hasTarget), [enriched]);
-  const insights = useMemo(() => buildInsights(targetedEnriched), [targetedEnriched]);
+  const insights = useMemo(
+    () => buildInsights(targetedEnriched, profileOfRep),
+    [targetedEnriched, profileOfRep],
+  );
+  // The two people cards below are RANKINGS by pct. Across KPI profiles one
+  // ordered list is not a ranking of performance — it interleaves two
+  // incomparable measurements — so it is not produced at all: the cards say
+  // the comparison lives per profile, and the list below delivers it. Within
+  // one profile these are the exact lists they have always been.
   const coaching = useMemo(
     () =>
-      [...targetedEnriched]
-        .filter((e) => e.status !== "above")
-        .sort((a, b) => a.pct - b.pct)
-        .slice(0, 5),
-    [targetedEnriched]
+      measuredMix.mixed
+        ? []
+        : [...targetedEnriched]
+            .filter((e) => e.status !== "above")
+            .sort((a, b) => a.pct - b.pct)
+            .slice(0, 5),
+    [targetedEnriched, measuredMix.mixed],
   );
   // Same population and math as the table/insights — just the top of the
   // ranking, for the people card in the analytics band.
   const topPerformers = useMemo(
-    () => [...targetedEnriched].sort((a, b) => b.pct - a.pct).slice(0, 3),
-    [targetedEnriched]
+    () =>
+      measuredMix.mixed ? [] : [...targetedEnriched].sort((a, b) => b.pct - a.pct).slice(0, 3),
+    [targetedEnriched, measuredMix.mixed],
   );
 
   const exportCsv = () => {
@@ -641,35 +693,65 @@ function ManagerPerformancePage() {
           derivations, no fabricated trends. */}
       {isManager && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="surface-tile flex items-center justify-center gap-6 p-5">
-            <ProgressRing value={summary.avgPct} caption="ממוצע עמידה" size={132} />
-            <div className="min-w-0 space-y-2.5 text-sm">
-              <div>
-                <div className="text-xs text-muted-foreground">נציגים עם יעד</div>
-                <div className="num font-display text-lg font-bold">
-                  {formatNum(summary.targetedCount)} מתוך {formatNum(summary.total)}
+          <div className="surface-tile flex flex-col justify-center gap-3 p-5">
+            <div className="flex items-center justify-center gap-6">
+              {/* Across mixed KPI profiles there is no combined percentage and
+                  no combined target to show — the ring goes empty and the
+                  figures say so, rather than reporting a number in no unit.
+                  The measurable coverage ("נציגים עם יעד") is a count and
+                  stays true either way. */}
+              <ProgressRing
+                value={measuredMix.mixed ? null : summary.avgPct}
+                caption="ממוצע עמידה"
+                size={132}
+              />
+              <div className="min-w-0 space-y-2.5 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">נציגים עם יעד</div>
+                  <div className="num font-display text-lg font-bold">
+                    {formatNum(summary.targetedCount)} מתוך {formatNum(summary.total)}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">סך יעדים חודשי</div>
-                <div className="num font-display text-lg font-bold">{formatNum(summary.teamTarget)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">תחזית סוף חודש</div>
-                <div
-                  className={cn(
-                    "num font-display text-lg font-bold",
-                    summary.forecastPct !== null && summary.forecastPct >= 100 && "text-success-foreground",
-                    summary.forecastPct !== null && summary.forecastPct < 90 && "text-primary",
-                  )}
-                >
-                  {summary.forecastPct === null ? "—" : formatNum(summary.teamForecast)}
-                  {summary.forecastPct !== null && (
-                    <span className="ms-1 text-xs font-semibold">({formatPct(summary.forecastPct)})</span>
-                  )}
+                <div>
+                  <div className="text-xs text-muted-foreground">סך יעדים חודשי</div>
+                  <div className="num font-display text-lg font-bold">
+                    {measuredMix.mixed
+                      ? MIXED_PROFILE_AGGREGATE_LABEL
+                      : formatNum(summary.teamTarget)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">תחזית סוף חודש</div>
+                  <div
+                    className={cn(
+                      "num font-display text-lg font-bold",
+                      !measuredMix.mixed &&
+                        summary.forecastPct !== null &&
+                        summary.forecastPct >= 100 &&
+                        "text-success-foreground",
+                      !measuredMix.mixed &&
+                        summary.forecastPct !== null &&
+                        summary.forecastPct < 90 &&
+                        "text-primary",
+                    )}
+                  >
+                    {measuredMix.mixed
+                      ? MIXED_PROFILE_AGGREGATE_LABEL
+                      : summary.forecastPct === null
+                        ? "—"
+                        : formatNum(summary.teamForecast)}
+                    {!measuredMix.mixed && summary.forecastPct !== null && (
+                      <span className="ms-1 text-xs font-semibold">({formatPct(summary.forecastPct)})</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
+            {measuredMix.mixed && (
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                {MIXED_PROFILE_AGGREGATE_NOTICE}
+              </p>
+            )}
           </div>
 
           <Card>
@@ -704,7 +786,16 @@ function ManagerPerformancePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {topPerformers.length === 0 ? (
+              {measuredMix.mixed ? (
+                /* Not a missing ranking — a ranking that would not have meant
+                   anything. It lives per profile in the list below. */
+                <EmptyState
+                  icon={Award}
+                  title={MIXED_PROFILE_RANKING_NOTICE}
+                  description="חידושים ומכירות נמדדים ביחידות שונות, ולכן אינם מדורגים באותה רשימה."
+                  compact
+                />
+              ) : topPerformers.length === 0 ? (
                 <EmptyState
                   icon={Award}
                   title="אין נציגים עם יעד מוגדר"
@@ -833,7 +924,16 @@ function ManagerPerformancePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {coaching.length === 0 ? (
+                  {measuredMix.mixed ? (
+                    /* Ordering "who needs help most" by pct across profiles is
+                       the same invalid comparison as ordering the leaders. */
+                    <EmptyState
+                      icon={Lightbulb}
+                      title={MIXED_PROFILE_RANKING_NOTICE}
+                      description="סדר העדיפות מוגדר לפי דירוג באחוזים, ולכן מוצג בנפרד לכל פרופיל ברשימת הנציגים."
+                      compact
+                    />
+                  ) : coaching.length === 0 ? (
                   <EmptyState icon={CheckCircle2} title="כל הנציגים בקצב או מעליו" description="אין כרגע נציגים הזקוקים לליווי מיוחד." compact />
                 ) : (
                   coaching.map((e, i) => {
@@ -924,68 +1024,87 @@ function ManagerPerformancePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filtered.map((e, i) => (
-                      <TableRow
-                        key={e.rep.id}
-                        onClick={() => openWorkspace(e.rep.id)}
-                        className={cn(
-                          "cursor-pointer transition-colors",
-                          i % 2 === 1 && "bg-muted/25",
-                          "hover:bg-accent/40"
+                    {filteredGroups.map((group) => (
+                      <Fragment key={group.key}>
+                        {/* The header appears ONLY when more than one profile is
+                            present — a single-profile table is unchanged. */}
+                        {filteredGroups.length > 1 && (
+                          <TableRow className="hover:bg-transparent">
+                            <TableCell
+                              colSpan={10}
+                              className="bg-muted/60 py-2 text-xs font-semibold"
+                            >
+                              {group.label} · {group.rows.length} נציגים —{" "}
+                              <span className="font-normal text-muted-foreground">
+                                דירוג בתוך הפרופיל בלבד
+                              </span>
+                            </TableCell>
+                          </TableRow>
                         )}
-                      >
-                        <TableCell className="font-semibold">
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
-                            <span className="min-w-0 truncate">{e.rep.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="font-normal">{e.rep.teamName}</Badge>
-                        </TableCell>
-                        <TableCell className="text-end tabular-nums">{e.target === null ? <span className="text-xs text-muted-foreground">לא הוגדר</span> : formatNum(e.target)}</TableCell>
-                        <TableCell className="text-end tabular-nums font-medium">{formatNum(e.rep.currentResult)}</TableCell>
-                        <TableCell>
-                          {e.pct === null ? (
-                            <span className="text-xs text-muted-foreground">לא הוגדר יעד אישי</span>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <ColoredBar pct={e.pct} status={e.status} className="flex-1 min-w-[120px]" />
-                              <span className="text-xs font-semibold w-10 text-end tabular-nums">{formatPct(e.pct)}</span>
-                            </div>
-                          )}
-                        </TableCell>
-                        {/* §P3: perDay is null once no working days remain —
-                            never a rate computed against a synthetic 1 day. */}
-                        <TableCell className="text-end tabular-nums text-sm">
-                          {e.pace?.perDay != null ? formatNum(e.pace.perDay) : "—"}
-                        </TableCell>
-                        <TableCell className="text-end">
-                          {e.gap === null || e.remaining === null ? (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          ) : e.gap >= 0 ? (
-                            <span className="inline-flex flex-col items-end">
-                              <span className="text-success-foreground font-medium tabular-nums">+{formatNum(e.gap)}</span>
-                              <span className="text-[10px] text-muted-foreground">מעל היעד</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex flex-col items-end">
-                              <span className="text-primary font-medium tabular-nums">{formatNum(e.remaining)}</span>
-                              <span className="text-[10px] text-muted-foreground">נותרו</span>
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium", statusBadgeClass(e.status))}>
-                            <StatusDot status={e.status} />
-                            {STATUS_LABEL[e.status]}
-                          </span>
-                        </TableCell>
-                        <TableCell><RiskBadge level={e.risk.level} /></TableCell>
-                        <TableCell className="text-end" onClick={(ev) => ev.stopPropagation()}>
-                          <RowQuickActions rep={e.rep} onOpen={() => openWorkspace(e.rep.id)} />
-                        </TableCell>
-                      </TableRow>
+                        {group.rows.map((e, i) => (
+                          <TableRow
+                            key={e.rep.id}
+                            onClick={() => openWorkspace(e.rep.id)}
+                            className={cn(
+                              "cursor-pointer transition-colors",
+                              i % 2 === 1 && "bg-muted/25",
+                              "hover:bg-accent/40"
+                            )}
+                          >
+                            <TableCell className="font-semibold">
+                              <div className="flex min-w-0 items-center gap-2.5">
+                                <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
+                                <span className="min-w-0 truncate">{e.rep.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="font-normal">{e.rep.teamName}</Badge>
+                            </TableCell>
+                            <TableCell className="text-end tabular-nums">{e.target === null ? <span className="text-xs text-muted-foreground">לא הוגדר</span> : formatNum(e.target)}</TableCell>
+                            <TableCell className="text-end tabular-nums font-medium">{formatNum(e.rep.currentResult)}</TableCell>
+                            <TableCell>
+                              {e.pct === null ? (
+                                <span className="text-xs text-muted-foreground">לא הוגדר יעד אישי</span>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <ColoredBar pct={e.pct} status={e.status} className="flex-1 min-w-[120px]" />
+                                  <span className="text-xs font-semibold w-10 text-end tabular-nums">{formatPct(e.pct)}</span>
+                                </div>
+                              )}
+                            </TableCell>
+                            {/* §P3: perDay is null once no working days remain —
+                                never a rate computed against a synthetic 1 day. */}
+                            <TableCell className="text-end tabular-nums text-sm">
+                              {e.pace?.perDay != null ? formatNum(e.pace.perDay) : "—"}
+                            </TableCell>
+                            <TableCell className="text-end">
+                              {e.gap === null || e.remaining === null ? (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              ) : e.gap >= 0 ? (
+                                <span className="inline-flex flex-col items-end">
+                                  <span className="text-success-foreground font-medium tabular-nums">+{formatNum(e.gap)}</span>
+                                  <span className="text-[10px] text-muted-foreground">מעל היעד</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex flex-col items-end">
+                                  <span className="text-primary font-medium tabular-nums">{formatNum(e.remaining)}</span>
+                                  <span className="text-[10px] text-muted-foreground">נותרו</span>
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium", statusBadgeClass(e.status))}>
+                                <StatusDot status={e.status} />
+                                {STATUS_LABEL[e.status]}
+                              </span>
+                            </TableCell>
+                            <TableCell><RiskBadge level={e.risk.level} /></TableCell>
+                            <TableCell className="text-end" onClick={(ev) => ev.stopPropagation()}>
+                              <RowQuickActions rep={e.rep} onOpen={() => openWorkspace(e.rep.id)} />
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>
@@ -993,60 +1112,72 @@ function ManagerPerformancePage() {
 
               {/* Mobile / tablet cards */}
               <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-3">
-                {filtered.map((e) => (
-                  <button
-                    key={e.rep.id}
-                    onClick={() => openWorkspace(e.rep.id)}
-                    className="text-start rounded-xl border p-4 bg-card hover:bg-accent/30 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
-                        <div className="min-w-0">
-                          <div className="font-semibold truncate">{e.rep.name}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {e.rep.teamName}
+                {filteredGroups.map((group) => (
+                  <Fragment key={group.key}>
+                    {filteredGroups.length > 1 && (
+                      <div className="md:col-span-2 rounded-lg bg-muted/60 px-3 py-2 text-xs font-semibold">
+                        {group.label} · {group.rows.length} נציגים —{" "}
+                        <span className="font-normal text-muted-foreground">
+                          דירוג בתוך הפרופיל בלבד
+                        </span>
+                      </div>
+                    )}
+                    {group.rows.map((e) => (
+                      <button
+                        key={e.rep.id}
+                        onClick={() => openWorkspace(e.rep.id)}
+                        className="text-start rounded-xl border p-4 bg-card hover:bg-accent/30 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <InitialsAvatar name={e.rep.name} className="h-8 w-8" />
+                            <div className="min-w-0">
+                              <div className="font-semibold truncate">{e.rep.name}</div>
+                              <div className="text-xs text-muted-foreground mt-0.5">
+                                {e.rep.teamName}
+                              </div>
+                            </div>
                           </div>
+                          <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium shrink-0", statusBadgeClass(e.status))}>
+                            <StatusDot status={e.status} />
+                            {STATUS_LABEL[e.status]}
+                          </span>
                         </div>
-                      </div>
-                      <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium shrink-0", statusBadgeClass(e.status))}>
-                        <StatusDot status={e.status} />
-                        {STATUS_LABEL[e.status]}
-                      </span>
-                    </div>
-                    {e.pct === null ? (
-                      <div className="mt-3 text-xs text-muted-foreground">לא הוגדר יעד אישי לחודש זה — לא ניתן לחשב עמידה, קצב או תחזית.</div>
-                    ) : (
-                      <div className="mt-3 flex items-center gap-2">
-                        <ColoredBar pct={e.pct} status={e.status} className="flex-1" />
-                        <span className="text-sm font-bold tabular-nums w-12 text-end">{formatPct(e.pct)}</span>
-                      </div>
-                    )}
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                      <MobileStat label="יעד אישי" value={e.target === null ? "לא הוגדר" : formatNum(e.target)} />
-                      <MobileStat label="ביצוע" value={formatNum(e.rep.currentResult)} />
-                      <MobileStat
-                        label={e.gap === null ? "—" : e.gap >= 0 ? "מעל היעד" : "נותרו"}
-                        value={e.gap === null || e.remaining === null ? "—" : e.gap >= 0 ? `+${formatNum(e.gap)}` : formatNum(e.remaining)}
-                        tone={e.gap === null ? undefined : e.gap >= 0 ? "success" : "danger"}
-                      />
-                    </div>
-                    <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
-                      <RiskBadge level={e.risk.level} />
-                    </div>
-                    {/* §P3: three genuinely distinct end states — target met,
-                        no working days left to act (no rate can be offered),
-                        or a real achievable daily rate. */}
-                    {e.pace && e.remaining !== null && (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {e.remaining <= 0
-                          ? "היעד הושלם"
-                          : e.pace.periodState === "no_time_remaining"
-                          ? NO_TIME_REMAINING_LABEL
-                          : `${formatNum(e.pace.perDay as number)}/יום כדי לעמוד ביעד`}
-                      </div>
-                    )}
-                  </button>
+                        {e.pct === null ? (
+                          <div className="mt-3 text-xs text-muted-foreground">לא הוגדר יעד אישי לחודש זה — לא ניתן לחשב עמידה, קצב או תחזית.</div>
+                        ) : (
+                          <div className="mt-3 flex items-center gap-2">
+                            <ColoredBar pct={e.pct} status={e.status} className="flex-1" />
+                            <span className="text-sm font-bold tabular-nums w-12 text-end">{formatPct(e.pct)}</span>
+                          </div>
+                        )}
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                          <MobileStat label="יעד אישי" value={e.target === null ? "לא הוגדר" : formatNum(e.target)} />
+                          <MobileStat label="ביצוע" value={formatNum(e.rep.currentResult)} />
+                          <MobileStat
+                            label={e.gap === null ? "—" : e.gap >= 0 ? "מעל היעד" : "נותרו"}
+                            value={e.gap === null || e.remaining === null ? "—" : e.gap >= 0 ? `+${formatNum(e.gap)}` : formatNum(e.remaining)}
+                            tone={e.gap === null ? undefined : e.gap >= 0 ? "success" : "danger"}
+                          />
+                        </div>
+                        <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
+                          <RiskBadge level={e.risk.level} />
+                        </div>
+                        {/* §P3: three genuinely distinct end states — target met,
+                            no working days left to act (no rate can be offered),
+                            or a real achievable daily rate. */}
+                        {e.pace && e.remaining !== null && (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {e.remaining <= 0
+                              ? "היעד הושלם"
+                              : e.pace.periodState === "no_time_remaining"
+                              ? NO_TIME_REMAINING_LABEL
+                              : `${formatNum(e.pace.perDay as number)}/יום כדי לעמוד ביעד`}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </Fragment>
                 ))}
               </div>
             </>
@@ -1215,32 +1346,36 @@ function MobileStat({ label, value, tone }: { label: string; value: string; tone
 
 // Callers only ever pass targeted reps (pct/target already confirmed
 // non-null via the TargetedRep type) — see targetedEnriched at the call site.
-function buildInsights(items: TargetedRep[]) {
+/**
+ * The management insight lines.
+ *
+ * Two of the four are COMPARATIVE — they rank one representative above the
+ * rest, or one team ahead of another, by pct. Those are delegated to
+ * leaderByPct / teamGapByPct, which withhold the statement entirely when the
+ * measured population spans more than one KPI profile: an אחוז חידוש and an
+ * אחוז עמידה cannot establish who is ahead. The other two are COUNTS of pace
+ * status — each person measured against their own official target — which
+ * stay true whatever profiles are present, so they are untouched. Within a
+ * single profile every line is exactly what it was before.
+ */
+function buildInsights(items: TargetedRep[], profileOf: (e: TargetedRep) => KpiProfile | null) {
   if (items.length === 0) return [];
   const out: string[] = [];
-  const sorted = [...items].sort((a, b) => b.pct - a.pct);
-  const leader = sorted[0];
-  if (leader) out.push(`${leader.rep.name} מוביל את החודש עם ${formatPct(leader.pct)} עמידה ביעד.`);
+  const comparable: PctComparable[] = items.map((e) => ({
+    name: e.rep.name,
+    teamId: e.rep.teamId,
+    teamName: e.rep.teamName,
+    pct: e.pct,
+    kpiProfile: profileOf(e),
+  }));
+
+  const leader = leaderByPct(comparable);
+  if (leader) out.push(`${leader.name} מוביל את החודש עם ${formatPct(leader.pct)} עמידה ביעד.`);
 
   // Compare the leading vs. trailing team by average pct — generalizes the old
   // fixed car-vs-home comparison to any number of teams.
-  const avg = (arr: typeof items) => (arr.length ? arr.reduce((s, e) => s + e.pct, 0) / arr.length : 0);
-  const byTeam = new Map<string, { name: string; items: typeof items }>();
-  for (const e of items) {
-    if (!e.rep.teamId) continue;
-    const bucket = byTeam.get(e.rep.teamId) ?? { name: e.rep.teamName, items: [] };
-    bucket.items.push(e);
-    byTeam.set(e.rep.teamId, bucket);
-  }
-  const teamAverages = Array.from(byTeam.values(), (b) => ({ name: b.name, avgPct: avg(b.items) }));
-  if (teamAverages.length >= 2) {
-    teamAverages.sort((a, b) => b.avgPct - a.avgPct);
-    const [top, bottom] = [teamAverages[0], teamAverages[teamAverages.length - 1]];
-    const diff = top.avgPct - bottom.avgPct;
-    if (diff >= 3) {
-      out.push(`${top.name} מקדים את ${bottom.name} ב-${formatPct(diff)}.`);
-    }
-  }
+  const gap = teamGapByPct(comparable);
+  if (gap) out.push(`${gap.top} מקדים את ${gap.bottom} ב-${formatPct(gap.diff)}.`);
 
   const needCoaching = items.filter((e) => e.status === "attention").length;
   if (needCoaching > 0) out.push(`${needCoaching === 1 ? "נציג אחד דורש" : `${needCoaching} נציגים דורשים`} ליווי צמוד השבוע.`);

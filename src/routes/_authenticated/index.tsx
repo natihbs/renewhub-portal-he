@@ -36,8 +36,10 @@ import {
   activityStructureSummary,
   aggregateByProfile,
   buildActivityCenterBoard,
+  buildExecutiveActivityBoard,
   buildScopeTeamRows,
   CENTER_TEAMS_TITLE,
+  executiveStructureSummary,
   groupScopeRows,
   isScopedManagerKind,
   managerHeaderPrimaryLine,
@@ -52,6 +54,7 @@ import {
 } from "@/lib/scope-home";
 import {
   ActivityCenterBoardCard,
+  ExecutiveActivityBoardCard,
   ScopeMissingTargetsCard,
   ScopeOverviewCard,
 } from "@/components/ScopeHomeCards";
@@ -74,7 +77,7 @@ import {
   Users2, TrendingUp, TrendingDown, Award, Trophy, Headphones, BookOpen, Megaphone,
   Target, Gauge, CalendarClock, Lightbulb, Sparkles, Users, Activity, BarChart3, FileText, MessageSquare,
   UsersRound, AlertTriangle, ShieldCheck, RefreshCw, ArrowLeft, Database, Upload, Settings,
-  Building2,
+  Building2, Network,
 } from "lucide-react";
 import { MorningRoutine } from "@/components/MorningRoutine";
 import { ManualPerformanceDialog } from "@/components/ManualPerformanceDialog";
@@ -670,9 +673,15 @@ function ManagerHome() {
   // Hierarchy level differentiation: the scope kind decides not only WHAT the
   // manager sees but WHAT LEVEL they manage from. A center manager manages
   // teams (team board); an activity manager manages centers (center board,
-  // structure-first hero); the executive keeps the existing grouped view.
+  // structure-first hero); an executive manages ACTIVITIES (activity board,
+  // structure-first hero) and drills ACTIVITY → CENTERS → TEAMS → נציגים.
   const centerManager = scope?.kind === "center";
   const activityManager = scope?.kind === "activity";
+  const executiveManager = scope?.kind === "executive";
+  // Both the activity manager and the executive lead with STRUCTURE rather
+  // than one headline percentage — at those levels the covered teams may mix
+  // KPI profiles, and a single ring over מיועדות + יעד is a fabricated unit.
+  const structureFirst = activityManager || executiveManager;
   const activityBoard = useMemo(
     () =>
       activityManager && scope
@@ -690,13 +699,40 @@ function ManagerHome() {
     () => (activityBoard ? activityStructureSummary(activityBoard) : null),
     [activityBoard],
   );
+  // An executive covers the whole business, so the board is built over the
+  // FULL hierarchy list — there is no subtree to narrow to, and empty
+  // activities/centers stay on the board as the structural facts they are.
+  const executiveBoard = useMemo(
+    () =>
+      executiveManager && scope
+        ? buildExecutiveActivityBoard({ units: scope.units, rows: scopeRows })
+        : null,
+    [executiveManager, scope, scopeRows],
+  );
+  const executiveStructure = useMemo(
+    () => (executiveBoard ? executiveStructureSummary(executiveBoard) : null),
+    [executiveBoard],
+  );
 
   return (
     <div className="space-y-8">
       <HomeHeader
         role="manager"
         metrics={
-          activityManager && activityStructure ? (
+          executiveManager && executiveStructure ? (
+            /* Structure-first hero: an executive commands the BUSINESS
+               STRUCTURE, so the headline figures are how it is built —
+               activities, centers, teams and active representatives. No
+               org-wide percentage and no org-wide target appear here: the
+               activities below mix KPI profiles, and no honest single number
+               spans מיועדות חודשיות and יעד. */
+            <div className="grid grid-cols-2 gap-3 lg:w-auto">
+              <HeroStat label="פעילויות" value={String(executiveStructure.activityCount)} />
+              <HeroStat label="מוקדים" value={String(executiveStructure.centerCount)} />
+              <HeroStat label="צוותים" value={String(executiveStructure.teamCount)} />
+              <HeroStat label="נציגים פעילים" value={String(executiveStructure.repCount)} />
+            </div>
+          ) : activityManager && activityStructure ? (
             /* Structure-first hero: an activity manager commands CENTERS, so
                the headline figures are how the activity is built — a single
                performance ring over mixed KPI profiles would be a fabricated
@@ -792,7 +828,55 @@ function ManagerHome() {
           already own. Nothing here is derived beyond max(0, target − result)
           and structural counts; a missing target stays a dash, never a
           fabricated number or trend. */}
-      {activityManager && activityStructure ? (
+      {executiveManager && executiveStructure ? (
+        /* The executive's primary row is the real STRUCTURAL state of the
+           business: how it is built, and where the structure is genuinely
+           incomplete. Every figure is a count of units/teams/representatives
+           that exist — an empty activity or an unattached team is reported as
+           a structural gap to close, never as poor performance. */
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <MetricCard
+            icon={Network}
+            label="פעילויות"
+            value={String(executiveStructure.activityCount)}
+            sub={
+              executiveStructure.activitiesWithoutCenters > 0
+                ? `${executiveStructure.activitiesWithoutCenters} ללא מוקדים`
+                : "לכל הפעילויות יש מוקדים"
+            }
+            tone={executiveStructure.activitiesWithoutCenters > 0 ? "warning" : "primary"}
+          />
+          <MetricCard
+            icon={Building2}
+            label="מוקדים"
+            value={String(executiveStructure.centerCount)}
+            sub={
+              executiveStructure.centersWithoutTeams > 0
+                ? `${executiveStructure.centersWithoutTeams} ללא צוותים`
+                : "לכל המוקדים יש צוותים"
+            }
+            tone={executiveStructure.centersWithoutTeams > 0 ? "warning" : "primary"}
+          />
+          <MetricCard
+            icon={UsersRound}
+            label="צוותים"
+            value={String(executiveStructure.teamCount)}
+            sub={
+              executiveStructure.unattachedTeamCount > 0
+                ? `${executiveStructure.unattachedTeamCount} ללא שיוך להיררכיה`
+                : "כל הצוותים משויכים להיררכיה"
+            }
+            tone={executiveStructure.unattachedTeamCount > 0 ? "warning" : "accent"}
+          />
+          <MetricCard
+            icon={Users2}
+            label="נציגים פעילים"
+            value={String(executiveStructure.repCount)}
+            sub="בכל צוותי העסק"
+            tone="primary"
+          />
+        </div>
+      ) : activityManager && activityStructure ? (
         <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
           <MetricCard
             icon={Building2}
@@ -881,10 +965,11 @@ function ManagerHome() {
           becomes a drill-down into the selected team below. A plain team
           manager keeps the exact single-team layout. */}
           {/* CENTER manager: team board (the center IS the scope — no
-              redundant center grouping). EXECUTIVE: unchanged grouped view.
-              ACTIVITY manager: center board — one surface per center UNIT
-              (empty centers included), teams one drill level down. */}
-          {scopedManager && !activityManager && (
+              redundant center grouping). ACTIVITY manager: center board — one
+              surface per center UNIT (empty centers included), teams one drill
+              level down. EXECUTIVE: activity board — one surface per ACTIVITY
+              UNIT, drilling ACTIVITY → CENTERS → TEAMS. */}
+          {scopedManager && !structureFirst && (
             <>
               <ScopeOverviewCard
                 groups={scopeGroups}
@@ -904,6 +989,14 @@ function ManagerHome() {
           {activityManager && activityBoard && (
             <ActivityCenterBoardCard
               board={activityBoard}
+              isLoading={scopeCardsLoading}
+              isError={scopeCardsError}
+              onSelectTeam={setWorkspaceTeam}
+            />
+          )}
+          {executiveManager && executiveBoard && (
+            <ExecutiveActivityBoardCard
+              board={executiveBoard}
               isLoading={scopeCardsLoading}
               isError={scopeCardsError}
               onSelectTeam={setWorkspaceTeam}
@@ -988,12 +1081,14 @@ function ManagerHome() {
             on desktop it is now permanently visible beside the work column.
             Same components, same data, no new derivations. */}
         <aside className="min-w-0 space-y-4">
-          {activityManager ? (
-            /* An activity manager's attention layer is MANAGEMENT-level:
-               structural gaps and missing targets per team, not a ranking of
-               individual representatives across incompatible centers —
-               rep-level rankings live deeper, inside the center/team
-               drill-down. Same data sources as before, re-prioritized. */
+          {structureFirst ? (
+            /* An activity manager's and an executive's attention layer is
+               MANAGEMENT-level: structural gaps and missing targets per team,
+               not a ranking of individual representatives across incompatible
+               centers or activities — a "top performer" list that puts an
+               אחוז חידוש beside an אחוז עמידה ranks two different units. Rep-
+               level rankings live deeper, inside the team drill-down. Same
+               data sources as before, re-prioritized. */
             <>
               <SectionHeading title="תשומת לב ניהולית" />
               <ScopeMissingTargetsCard
