@@ -127,7 +127,10 @@ function AuthPage() {
     setMode("login");
   }
 
+  if (!hydrated) return null;
+
   return (
+
     <div dir="rtl" className="min-h-dvh grid lg:grid-cols-2 bg-background">
       {/* Branded visual panel — desktop only */}
       <div className="hidden lg:flex flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground">
