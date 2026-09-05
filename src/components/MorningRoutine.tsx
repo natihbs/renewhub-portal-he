@@ -35,6 +35,12 @@ import { useServerFn } from "@tanstack/react-start";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useListening } from "@/lib/listening-store";
 import { useAppMode } from "@/lib/app-mode";
+import { useAuth } from "@/lib/auth";
+import {
+  shouldNotifyPace, notificationSourcesReady, notificationEvaluationKey,
+  shouldEvaluateNotifications, deliveryFailed, MAX_NOTIFICATION_ATTEMPTS,
+  type NotificationSources, type SourceLoadState,
+} from "@/lib/morning-notifications";
 import { renewalTotalsForRep, currentMonthStart } from "@/lib/kpi-values";
 import {
   computeCompleteness, computeListeningPlan, computeAchievementTrend, computeFreshness,
@@ -78,7 +84,10 @@ export function MorningRoutine() {
   const morning = useMorning();
   const { isDemo } = useAppMode();
 
-  const wdPassed = Math.max(1, workdaysPassed());
+  // Raw elapsed workdays drive pace decisions; the clamped value only keeps
+  // the display-side expected-progress maths from dividing by zero.
+  const wdPassedRaw = workdaysPassed();
+  const wdPassed = Math.max(1, wdPassedRaw);
   const wdTotal = workdaysInMonth();
   const wdRemaining = workdaysRemaining();
 
