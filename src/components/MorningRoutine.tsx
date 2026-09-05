@@ -35,6 +35,12 @@ import { useServerFn } from "@tanstack/react-start";
 import { useCloudCollection } from "@/lib/cloud-hooks";
 import { useListening } from "@/lib/listening-store";
 import { useAppMode } from "@/lib/app-mode";
+import { useAuth } from "@/lib/auth";
+import {
+  shouldNotifyPace, notificationSourcesReady, notificationEvaluationKey,
+  shouldEvaluateNotifications, deliveryFailed, MAX_NOTIFICATION_ATTEMPTS,
+  type NotificationSources, type SourceLoadState,
+} from "@/lib/morning-notifications";
 import { renewalTotalsForRep, currentMonthStart } from "@/lib/kpi-values";
 import {
   computeCompleteness, computeListeningPlan, computeAchievementTrend, computeFreshness,
@@ -78,7 +84,10 @@ export function MorningRoutine() {
   const morning = useMorning();
   const { isDemo } = useAppMode();
 
-  const wdPassed = Math.max(1, workdaysPassed());
+  // Raw elapsed workdays drive pace decisions; the clamped value only keeps
+  // the display-side expected-progress maths from dividing by zero.
+  const wdPassedRaw = workdaysPassed();
+  const wdPassed = Math.max(1, wdPassedRaw);
   const wdTotal = workdaysInMonth();
   const wdRemaining = workdaysRemaining();
 
@@ -240,19 +249,52 @@ export function MorningRoutine() {
    * open is idempotent inside Postgres rather than by remembering to be.
    */
   const notifyFn = useServerFn(evaluateManagerNotifications);
-  const notifiedRef = useRef(false);
-  useEffect(() => {
-    if (isDemo || !workspaceTeamId || notifiedRef.current) return;
-    if (reps.length === 0) return;
-    notifiedRef.current = true;
+  const { user } = useAuth();
+
+  // Every async source an alert is derived from. A single loading/failed
+  // source blocks evaluation, so alerts can never describe half-loaded data.
+  const notificationSources = useMemo<NotificationSources>(() => {
+    const st = (loading: boolean, error: unknown): SourceLoadState =>
+      error ? "error" : loading ? "loading" : "ready";
+    return {
+      representatives: st(state.repsLoading, state.repsError),
+      kpiValues: st(state.kpiLoading, state.kpiError),
+      goals: st(teamGoal.isLoading || repGoals.isLoading, teamGoal.isError || repGoals.isError),
+      feedback: st(state.feedbackLoading, state.feedbackError),
+      schedules: st(!!schedulesLoading, !!schedulesError),
+      underwriting: st(morning.isLoading, morning.isError),
+      competitions: st(state.competitionsLoading, state.competitionsError),
+    };
+  }, [
+    state.repsLoading, state.repsError, state.kpiLoading, state.kpiError,
+    state.feedbackLoading, state.feedbackError, state.competitionsLoading, state.competitionsError,
+    teamGoal.isLoading, teamGoal.isError, repGoals.isLoading, repGoals.isError,
+    schedulesLoading, schedulesError, morning.isLoading, morning.isError,
+  ]);
+
+  const urgentUnderwriting = useMemo(
+    () => morning.underwriting.filter((u) => u.status !== "הושלם" && u.priority === "high").length,
+    [morning.underwriting],
+  );
+  const competitionsEndingSoonKey = competitionsEndingSoon.map((c) => c.id).join(",");
+
+  const notificationEvents = useMemo<OperationalNotification[]>(() => {
     const events: OperationalNotification[] = [];
     const teamName = workspace.type === "team" ? workspace.teamName : "";
+    if (!workspaceTeamId) return events;
 
-    if (achievementPct !== null && achievementPct < PACE_NOTIFICATION_THRESHOLD_PCT) {
+    // Pace uses the canonical workday-aware primitive with RAW elapsed
+    // workdays — clamping to 1 would call day 0 of the month "behind".
+    if (shouldNotifyPace({
+      actual: totalResult,
+      target: teamGoal.targetValue,
+      workdaysTotal: wdTotal,
+      workdaysPassed: wdPassedRaw,
+    })) {
       events.push({
         userId: "", kind: "pace",
         title: "הצוות מתחת לקצב היעד",
-        body: `${teamName}: עמידה של ${Math.round(achievementPct)}% מהיעד החודשי.`,
+        body: `${teamName}: עמידה של ${Math.round(achievementPct ?? 0)}% מהיעד החודשי.`,
         href: "/performance",
         dedupeKey: `pace:${workspaceTeamId}:${today}`,
       });
@@ -275,12 +317,11 @@ export function MorningRoutine() {
         dedupeKey: `listening:${workspaceTeamId}:${today}`,
       });
     }
-    const urgentUw = morning.underwriting.filter((u) => u.status !== "הושלם" && u.priority === "high");
-    if (urgentUw.length > 0) {
+    if (urgentUnderwriting > 0) {
       events.push({
         userId: "", kind: "underwriting",
         title: "נושאי חיתום דחופים",
-        body: `${urgentUw.length} נושאי חיתום בעדיפות גבוהה ממתינים לטיפול.`,
+        body: `${urgentUnderwriting} נושאי חיתום בעדיפות גבוהה ממתינים לטיפול.`,
         href: "/",
         dedupeKey: `underwriting:${workspaceTeamId}:${today}`,
       });
@@ -294,12 +335,80 @@ export function MorningRoutine() {
         dedupeKey: `competition_end:${c.id}:${today}`,
       });
     }
-
-    if (events.length === 0) return;
-    void notifyFn({ data: { events } }).catch((e: Error) =>
-      console.error("[morning] notification evaluation failed", e.message));
+    return events;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDemo, workspaceTeamId, reps.length, achievementPct, completenessResult.missing, noRecentListening.length, today]);
+  }, [
+    workspaceTeamId, workspace, today, totalResult, teamGoal.targetValue, wdTotal, wdPassedRaw,
+    achievementPct, completenessResult.missing, noRecentListening.length, urgentUnderwriting,
+    competitionsEndingSoonKey,
+  ]);
+
+  // Delivery is remembered against a key made of identity + business date +
+  // the facts themselves, so real change re-evaluates while renders do not.
+  const evaluationKey = notificationEvaluationKey({
+    userId: user?.id ?? null,
+    teamId: workspaceTeamId,
+    businessDate: today,
+    signature: notificationEvents.map((e) => `${e.dedupeKey}#${e.body}`),
+  });
+  const deliveredKeyRef = useRef<string | null>(null);
+  const failedKeyRef = useRef<string | null>(null);
+  const failedAttemptsRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const [retryTick, setRetryTick] = useState(0);
+
+  useEffect(() => {
+    if (isDemo || !workspaceTeamId) return;
+    if (!notificationSourcesReady(notificationSources)) return;
+    if (!shouldEvaluateNotifications({
+      ready: true,
+      key: evaluationKey,
+      deliveredKey: deliveredKeyRef.current,
+      failedKey: failedKeyRef.current,
+      failedAttempts: failedAttemptsRef.current,
+      inFlight: inFlightRef.current,
+    })) return;
+    if (notificationEvents.length === 0) {
+      deliveredKeyRef.current = evaluationKey;
+      return;
+    }
+
+    const key = evaluationKey;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    inFlightRef.current = true;
+    void notifyFn({ data: { events: notificationEvents } })
+      .then(
+        (res) => ({ failed: deliveryFailed(res) }),
+        (e: Error) => {
+          console.error("[morning] notification evaluation failed", e.message);
+          return { failed: true };
+        },
+      )
+      .then(({ failed }) => {
+        inFlightRef.current = false;
+        if (cancelled) return;
+        if (!failed) {
+          deliveredKeyRef.current = key;
+          failedKeyRef.current = null;
+          failedAttemptsRef.current = 0;
+          return;
+        }
+        // A failed delivery does not consume the key: bounded delayed retry.
+        failedAttemptsRef.current = failedKeyRef.current === key ? failedAttemptsRef.current + 1 : 1;
+        failedKeyRef.current = key;
+        if (failedAttemptsRef.current < MAX_NOTIFICATION_ATTEMPTS) {
+          retryTimer = setTimeout(() => setRetryTick((t) => t + 1), 2000 * failedAttemptsRef.current);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, workspaceTeamId, evaluationKey, notificationSources, retryTick]);
+
 
   /**
    * §P0 REAL day-over-day trend.

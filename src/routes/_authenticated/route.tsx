@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect, isRedirect } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveAuthenticatedGuard } from "@/lib/authenticated-guard";
+import { AuthDataBoundary } from "@/components/AuthDataBoundary";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -34,5 +35,9 @@ export const Route = createFileRoute("/_authenticated")({
       throw redirect({ to: "/auth" });
     }
   },
-  component: () => <Outlet />,
+  component: () => (
+    <AuthDataBoundary>
+      <Outlet />
+    </AuthDataBoundary>
+  ),
 });
