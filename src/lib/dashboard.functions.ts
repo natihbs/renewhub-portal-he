@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveCallerTeamIds } from "@/lib/business-scope.functions";
+import { resolveActivityScope, queryScopedActivity } from "@/lib/activity-scope";
 
 /**
  * Server layer for the Dashboard and Morning Routine.
