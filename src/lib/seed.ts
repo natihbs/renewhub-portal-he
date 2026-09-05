@@ -93,6 +93,9 @@ export type AppState = {
   /** Async state for the dated renewal values. Same rationale as above. */
   kpiLoading: boolean;
   kpiError: string | null;
+  /** Async state for competitions (a notification source). */
+  competitionsLoading: boolean;
+  competitionsError: string | null;
   /**
    * Dated renewal-specific values (see src/lib/kpi-values.ts). Always empty in Demo
    * Mode — there is no fabricated renewal data; Demo Mode's teams have no real KPI
@@ -123,6 +126,8 @@ export const SEED: AppState = {
   repsError: null,
   kpiLoading: false,
   kpiError: null,
+  competitionsLoading: false,
+  competitionsError: null,
   kpiValues: [],
   reps: [
     { id: "r1", name: "יעל כהן", teamId: "demo-team-1", teamName: "חידושי רכב", monthlyTarget: 120, currentResult: 98 },

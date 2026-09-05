@@ -299,9 +299,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       repsError,
       kpiLoading: kpiValues.isLoading || kpiByTeam.isLoading,
       kpiError: kpiValues.isError || kpiByTeam.isError ? "שגיאה בטעינת נתוני חידושים" : null,
+      competitionsLoading: competitions.isLoading || compCategories.isLoading || compScores.isLoading,
+      competitionsError:
+        competitions.isError || compCategories.isError || compScores.isError
+          ? "שגיאה בטעינת נתוני תחרויות"
+          : null,
       kpiValues: mergedKpiValues,
     };
-  }, [live, demo, role, currentRepId, reps, repsLoading, repsError, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error, mergedKpiValues, kpiValues.isLoading, kpiValues.isError, kpiByTeam.isLoading, kpiByTeam.isError]);
+  }, [live, demo, role, currentRepId, reps, repsLoading, repsError, announcements.rows, articles.rows, competitions.rows, compCategories.rows, compScores.rows, feedback.rows, feedback.isLoading, feedback.isError, feedback.error, mergedKpiValues, kpiValues.isLoading, kpiValues.isError, kpiByTeam.isLoading, kpiByTeam.isError, competitions.isLoading, competitions.isError, compCategories.isLoading, compCategories.isError, compScores.isLoading, compScores.isError]);
 
   const value: Ctx = useMemo(() => {
     const shared = {
