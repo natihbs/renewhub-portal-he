@@ -34,5 +34,9 @@ export const Route = createFileRoute("/_authenticated")({
       throw redirect({ to: "/auth" });
     }
   },
-  component: () => <Outlet />,
+  component: () => (
+    <AuthDataBoundary>
+      <Outlet />
+    </AuthDataBoundary>
+  ),
 });
