@@ -29,6 +29,7 @@ export type NotificationSources = {
   feedback: SourceLoadState;
   schedules: SourceLoadState;
   underwriting: SourceLoadState;
+  competitions: SourceLoadState;
 };
 
 /**
@@ -111,4 +112,14 @@ export function shouldEvaluateNotifications(state: EvaluationGateState): boolean
   if (state.deliveredKey === state.key) return false;
   if (state.failedKey === state.key && state.failedAttempts >= MAX_NOTIFICATION_ATTEMPTS) return false;
   return true;
+}
+
+/**
+ * Outcome of one delivery call. `failed > 0` means the server could not write
+ * at least one notification, which is retryable; a pure dedupe skip is a
+ * SUCCESS and must consume the evaluation key.
+ */
+export function deliveryFailed(result: { delivered?: number; skipped?: number; failed?: number } | null | undefined): boolean {
+  if (!result) return true;
+  return (result.failed ?? 0) > 0;
 }
