@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCloudCollection } from "@/lib/cloud-hooks";
+import { evaluateSourceOutcome, type QuerySnapshot } from "@/lib/freshness-refetch";
 import { useAuth } from "@/lib/auth";
 import { useServerFn } from "@tanstack/react-start";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -341,14 +342,30 @@ export function MorningProvider({ children }: { children: ReactNode }) {
        * source-file freshness, which lastImportAt reports separately.
        */
       runFreshnessCheck: async (): Promise<FreshnessCheckResult> => {
+        const snapshot = (queryKey: readonly unknown[]): QuerySnapshot[] =>
+          qc
+            .getQueryCache()
+            .findAll({ queryKey })
+            .map((q) => ({
+              hash: q.queryHash,
+              status: q.state.status as QuerySnapshot["status"],
+              fetchStatus: q.state.fetchStatus as QuerySnapshot["fetchStatus"],
+              dataUpdateCount: q.state.dataUpdateCount,
+              disabled: q.getObserversCount() === 0 || q.isDisabled(),
+            }));
+
         const results = await Promise.all(
           FRESHNESS_SOURCES.map(async ({ key, queryKey }): Promise<FreshnessSourceResult> => {
+            const before = snapshot(queryKey);
+            let thrown: unknown;
             try {
-              await qc.refetchQueries({ queryKey });
-              return { key, ok: true };
+              // throwOnError: a failed fetch must reject, not resolve quietly.
+              await qc.refetchQueries({ queryKey }, { throwOnError: true });
             } catch (e) {
-              return { key, ok: false, error: (e as Error)?.message };
+              thrown = e ?? new Error("refetch failed");
             }
+            const outcome = evaluateSourceOutcome(before, snapshot(queryKey), thrown);
+            return { key, ...outcome };
           }),
         );
         const status = deriveFreshnessStatus(results);
