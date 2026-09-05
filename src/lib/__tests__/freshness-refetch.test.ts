@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
   evaluateSourceOutcome,
   REFETCH_NO_QUERY_MESSAGE,
@@ -108,8 +108,8 @@ describe("real QueryClient refetch", () => {
     let calls = 0;
     await qc.fetchQuery({ queryKey: key, queryFn: async () => ++calls });
     // Keep an active observer so the query is eligible, like a mounted screen.
-    const observer = qc.getQueryCache().find({ queryKey: key })!;
-    const unsubscribe = observer.subscribe({ onQueryUpdate: () => {} } as any);
+    const observer = new QueryObserver(qc, { queryKey: key, enabled: false });
+    const unsubscribe = observer.subscribe(() => {});
     const outcome = await run(qc, key);
     unsubscribe();
     expect(outcome).toEqual({ ok: true });
