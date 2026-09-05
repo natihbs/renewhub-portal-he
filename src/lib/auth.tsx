@@ -23,6 +23,14 @@ type AuthCtx = {
   profile: Profile | null;
   roles: AppRole[];
   loading: boolean;
+  /**
+   * A RECOVERABLE failure to load profile/roles for a signed-in user.
+   * Distinct from "no role": Supabase returns errors in the response body,
+   * so a failed read used to look exactly like an empty role list and the app
+   * silently degraded the user to the representative shell.
+   */
+  authDataError: string | null;
+  reloadAuthData: () => void;
   hasRole: (r: AppRole) => boolean;
   isAdmin: boolean;
   isManager: boolean;
@@ -37,29 +45,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authDataError, setAuthDataError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  // Monotonic request id: a late response from a PREVIOUS user or a superseded
+  // load must never overwrite the current identity's state.
+  const requestSeq = useRef(0);
+  const currentUserId = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     async function loadForUser(u: User | null) {
+      const seq = ++requestSeq.current;
+      currentUserId.current = u?.id ?? null;
       if (!u) {
-        if (mounted) { setProfile(null); setRoles([]); setLoading(false); }
+        if (mounted) { setProfile(null); setRoles([]); setAuthDataError(null); setLoading(false); }
         return;
       }
+      // Identity change resets the loading/error guard.
+      if (mounted) { setLoading(true); setAuthDataError(null); }
       try {
-        const [{ data: prof }, { data: rs }] = await Promise.all([
+        const [profRes, rolesRes] = await Promise.all([
           supabase.from("profiles").select("id, full_name, email, manager_id, team_id, active").eq("id", u.id).maybeSingle(),
           supabase.from("user_roles").select("role").eq("user_id", u.id),
         ]);
-        if (!mounted) return;
-        setProfile((prof as Profile) ?? null);
-        setRoles(((rs ?? []) as { role: AppRole }[]).map((r) => r.role));
+        if (!mounted || seq !== requestSeq.current || currentUserId.current !== u.id) return;
+        // RETURNED errors, not only rejections.
+        if (profRes.error || rolesRes.error) {
+          console.error("[Pulse] auth data load error", profRes.error ?? rolesRes.error);
+          setAuthDataError("טעינת נתוני המשתמש נכשלה");
+          setProfile(null);
+          setRoles([]);
+          setLoading(false);
+          return;
+        }
+        setProfile((profRes.data as Profile) ?? null);
+        setRoles(((rolesRes.data ?? []) as { role: AppRole }[]).map((r) => r.role));
+        setAuthDataError(null);
         setLoading(false);
       } catch (error) {
-        // A thrown (not returned) failure here used to leave `loading` stuck
-        // true and produce an unhandled rejection during the hydration window.
         console.error("[Pulse] auth profile load failed", error);
-        if (mounted) setLoading(false);
+        if (!mounted || seq !== requestSeq.current) return;
+        setAuthDataError("טעינת נתוני המשתמש נכשלה");
+        setProfile(null);
+        setRoles([]);
+        setLoading(false);
       }
     }
 
@@ -90,8 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       if (event === "SIGNED_OUT") {
+        requestSeq.current += 1;
+        currentUserId.current = null;
         setProfile(null);
         setRoles([]);
+        setAuthDataError(null);
         setLoading(false);
       }
     });
@@ -101,13 +135,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [reloadTick]);
 
   const value: AuthCtx = {
     user,
     profile,
     roles,
     loading,
+    authDataError,
+    reloadAuthData: () => setReloadTick((t) => t + 1),
     hasRole: (r) => roles.includes(r),
     isAdmin: roles.includes("admin"),
     isManager: roles.includes("manager"),
@@ -120,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
+
 
 export function useAuth() {
   const c = useContext(Ctx);
