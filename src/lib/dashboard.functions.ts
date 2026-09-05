@@ -393,9 +393,10 @@ export type DashboardActivityItem = {
  */
 export const listDashboardActivity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { team_id?: string | null; limit?: number }) => ({
+  .inputValidator((data: { team_id?: string | null; limit?: number; offset?: number }) => ({
     team_id: data?.team_id ?? null,
     limit: Math.min(Math.max(Number(data?.limit) || 8, 1), 30),
+    offset: Math.max(0, Math.round(Number(data?.offset) || 0)),
   }))
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as Ctx;
@@ -404,42 +405,36 @@ export const listDashboardActivity = createServerFn({ method: "POST" })
     const isManager = roles.includes("manager");
     if (!isAdmin && !isManager) throw new Error("אין הרשאה לצפייה בפעילות המערכת");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const actions = Object.keys(ACTIVITY_ACTIONS);
 
-    // Resolve the caller's scope from the real relationships, through their
-    // OWN client, so RLS decides what they may see rather than this function.
+    // Authorization is decided against the caller's CANONICAL business scope
+    // (direct ownership + center/activity/executive grants), never against the
+    // requested team, and before any service-role read happens.
+    const { teamIds: authorizedTeamIds } = await resolveCallerTeamIds(ctx as any);
+
     const { data: scopeReps, error: repErr } = await ctx.supabase
       .from("representatives").select("id, name, team_id");
     if (repErr) throw new Error(repErr.message);
     const repRows = (scopeReps ?? []) as { id: string; name: string; team_id: string | null }[];
 
-    // Workspace narrowing on top of the permission scope, so the feed
-    // describes the same population as the rest of the page.
     const inWorkspace = data.team_id
       ? repRows.filter((r) => r.team_id === data.team_id)
       : repRows;
     const repNameById = new Map(inWorkspace.map((r) => [r.id, r.name]));
-    const visibleRepIds = new Set(inWorkspace.map((r) => r.id));
-    const { teamIds } = await managedTeamIds(ctx);
-    const visibleTeamIds = new Set(data.team_id ? [data.team_id] : teamIds);
 
-    const { data: rows, error } = await supabaseAdmin
-      .from("audit_log")
-      .select("id, action, actor_id, actor_email, details, created_at")
-      .in("action", actions)
-      .order("created_at", { ascending: false })
-      .limit(400);
-    if (error) throw new Error(error.message);
+    const scope = resolveActivityScope({
+      isAdmin,
+      authorizedTeamIds,
+      scopedRepIds: inWorkspace.map((r) => r.id),
+      requestedTeamId: data.team_id,
+    });
 
-    const scoped = ((rows ?? []) as any[]).filter((row) => {
-      if (isAdmin && !data.team_id) return true;
-      const d = (row.details ?? {}) as Record<string, unknown>;
-      const repId = (d.representative_id ?? d.rep_id) as string | undefined;
-      const teamId = (d.team_id ?? d.to_team ?? d.from_team) as string | undefined;
-      if (repId && visibleRepIds.has(repId)) return true;
-      if (teamId && visibleTeamIds.has(teamId)) return true;
-      return false;
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { rows: scoped, total } = await queryScopedActivity(supabaseAdmin as any, {
+      scope,
+      actions,
+      limit: data.limit,
+      offset: data.offset,
     });
 
     // Actor display names, resolved in one round trip.
@@ -452,7 +447,7 @@ export const listDashboardActivity = createServerFn({ method: "POST" })
       }
     }
 
-    const items: DashboardActivityItem[] = scoped.slice(0, data.limit).map((row) => {
+    const items: DashboardActivityItem[] = scoped.map((row) => {
       const meta = ACTIVITY_ACTIONS[row.action as string];
       const d = (row.details ?? {}) as Record<string, unknown>;
       const repId = (d.representative_id ?? d.rep_id) as string | undefined;
@@ -467,8 +462,9 @@ export const listDashboardActivity = createServerFn({ method: "POST" })
       };
     });
 
-    return { items, total: scoped.length, truncated: scoped.length > data.limit };
+    return { items, total, truncated: total > data.offset + items.length };
   });
+
 
 // ============================================================ notifications
 
