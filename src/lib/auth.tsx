@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
@@ -163,6 +163,7 @@ export function useAuth() {
   if (!c) {
     return {
       user: null, profile: null, roles: [] as AppRole[], loading: true,
+      authDataError: null, reloadAuthData: () => {},
       hasRole: () => false, isAdmin: false, isManager: false, isRepresentative: false,
       signOut: async () => {},
     } satisfies AuthCtx;
