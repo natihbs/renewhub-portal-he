@@ -601,3 +601,34 @@ export const deleteBusinessUnit = createServerFn({ method: "POST" })
     });
     return { ok: true as const };
   });
+
+/**
+ * Canonical team ids the caller is authorized for — direct teams.manager_id
+ * ownership plus center/activity/executive grants. Shared read-only helper so
+ * other server functions authorize against the SAME rule set getBusinessScope
+ * uses; it grants nothing new and changes no existing authorization path.
+ */
+export async function resolveCallerTeamIds(
+  ctx: { supabase: SupabaseClient; userId: string; claims: Record<string, unknown> | null },
+): Promise<{ role: "admin" | "manager" | "representative"; teamIds: string[] }> {
+  const roles = await getRoles(ctx);
+  const role = roles.includes("admin")
+    ? ("admin" as const)
+    : roles.includes("manager")
+      ? ("manager" as const)
+      : ("representative" as const);
+  if (role === "representative") return { role, teamIds: [] };
+
+  const teams = await readScopeTeams(ctx);
+  const { units, grantRows } = await readUnitsAndGrants(ctx, { allGrants: false });
+  const grants: BusinessScopeGrant[] = grantRows.map((g) => ({
+    scopeType: (g.scope_type === "executive"
+      ? "executive"
+      : g.scope_type === "activity"
+        ? "activity"
+        : "center") as BusinessScopeGrant["scopeType"],
+    businessUnitId: g.business_unit_id,
+  }));
+  const resolved = resolveBusinessScope({ role, userId: ctx.userId, teams, units, grants });
+  return { role, teamIds: resolved.teams.map((t) => t.id) };
+}

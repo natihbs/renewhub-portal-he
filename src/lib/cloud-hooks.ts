@@ -63,7 +63,7 @@ export function useCloudCollection<T>(table: string, opts: ListOpts = {}) {
    * actually landed (task toggle, data-freshness check).
    */
   const refetch = useCallback(
-    () => qc.refetchQueries({ queryKey: ["cloud", table] }),
+    () => qc.refetchQueries({ queryKey: ["cloud", table] }, { throwOnError: true }),
     [qc, table],
   );
 

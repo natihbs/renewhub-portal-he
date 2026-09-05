@@ -131,3 +131,48 @@ export function activityPageRange(limit: number, offset: number): { from: number
   const safeOffset = Math.max(0, Math.round(Number(offset) || 0));
   return { from: safeOffset, to: safeOffset + safeLimit - 1 };
 }
+
+export type ActivityAuditRow = {
+  id: string;
+  action: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+};
+
+/** Minimal PostgREST surface used here, so this stays testable with a fake. */
+export type ActivityQueryClient = {
+  from: (table: string) => any;
+};
+
+/**
+ * Scope -> database filter -> range. The filter and the exact count are applied
+ * by Postgres BEFORE pagination, so a team's events stay visible no matter how
+ * many more recent events belong to other teams, and `total` is real.
+ */
+export async function queryScopedActivity(
+  client: ActivityQueryClient,
+  opts: { scope: ActivityScope; actions: string[]; limit: number; offset?: number },
+): Promise<{ rows: ActivityAuditRow[]; total: number }> {
+  if (opts.scope.kind === "none") return { rows: [], total: 0 };
+  const { from, to } = activityPageRange(opts.limit, opts.offset ?? 0);
+
+  let q = client
+    .from("audit_log")
+    .select("id, action, actor_id, actor_email, details, created_at", { count: "exact" })
+    .in("action", opts.actions);
+
+  const orFilter = activityScopeOrFilter(opts.scope);
+  if (opts.scope.kind === "scoped") {
+    if (!orFilter) return { rows: [], total: 0 };
+    q = q.or(orFilter);
+  }
+
+  const res = await q.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
+  if (res.error) throw new Error(res.error.message);
+  const rows = ((res.data ?? []) as ActivityAuditRow[]).filter((r) =>
+    activityRowInScope(r.details, opts.scope),
+  );
+  return { rows, total: typeof res.count === "number" ? res.count : rows.length };
+}
