@@ -506,12 +506,15 @@ export const evaluateManagerNotifications = createServerFn({ method: "POST" })
     const ctx = context as unknown as Ctx;
     const roles = await getRoles(ctx);
     if (!roles.includes("admin") && !roles.includes("manager")) {
-      return { delivered: 0, skipped: 0 };
+      return { delivered: 0, skipped: 0, failed: 0 };
     }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     let delivered = 0;
     let skipped = 0;
+    // A delivery ERROR is reported separately from a dedupe skip: the client
+    // retries the former and must never retry the latter.
+    let failed = 0;
     for (const ev of data.events) {
       // The recipient is always the caller. A client cannot address a
       // notification to anyone else through this path.
@@ -534,10 +537,10 @@ export const evaluateManagerNotifications = createServerFn({ method: "POST" })
         // A failed notification must never fail the dashboard that generated
         // it — this is advisory delivery, not business state.
         console.error("[notifications] delivery failed", ev.dedupeKey, e);
-        skipped += 1;
+        failed += 1;
       }
     }
-    return { delivered, skipped };
+    return { delivered, skipped, failed };
   });
 
 // ============================================================ freshness read
