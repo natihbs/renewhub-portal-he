@@ -18,6 +18,30 @@ type Profile = {
   active: boolean;
 };
 
+export type AuthDataResult =
+  | { kind: "ok"; profile: Profile | null; roles: AppRole[] }
+  | { kind: "error"; message: string };
+
+/**
+ * Interprets the RETURNED Supabase responses. An error in either response is a
+ * recoverable load failure — never "this user has no role".
+ */
+export function resolveAuthData(
+  profRes: { data: unknown; error: unknown },
+  rolesRes: { data: unknown; error: unknown },
+): AuthDataResult {
+  if (profRes.error || rolesRes.error) return { kind: "error", message: "טעינת נתוני המשתמש נכשלה" };
+  const roles = ((rolesRes.data ?? []) as { role: AppRole }[]).map((r) => r.role);
+  return { kind: "ok", profile: (profRes.data as Profile) ?? null, roles };
+}
+
+/** A response may be applied only when it is the newest one for the current identity. */
+export function isCurrentAuthResponse(args: {
+  seq: number; currentSeq: number; userId: string; currentUserId: string | null;
+}): boolean {
+  return args.seq === args.currentSeq && args.currentUserId === args.userId;
+}
+
 type AuthCtx = {
   user: User | null;
   profile: Profile | null;
@@ -70,18 +94,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           supabase.from("profiles").select("id, full_name, email, manager_id, team_id, active").eq("id", u.id).maybeSingle(),
           supabase.from("user_roles").select("role").eq("user_id", u.id),
         ]);
-        if (!mounted || seq !== requestSeq.current || currentUserId.current !== u.id) return;
-        // RETURNED errors, not only rejections.
-        if (profRes.error || rolesRes.error) {
+        if (!mounted) return;
+        if (!isCurrentAuthResponse({ seq, currentSeq: requestSeq.current, userId: u.id, currentUserId: currentUserId.current })) return;
+        const outcome = resolveAuthData(profRes, rolesRes);
+        if (outcome.kind === "error") {
           console.error("[Pulse] auth data load error", profRes.error ?? rolesRes.error);
-          setAuthDataError("טעינת נתוני המשתמש נכשלה");
+          setAuthDataError(outcome.message);
           setProfile(null);
           setRoles([]);
           setLoading(false);
           return;
         }
-        setProfile((profRes.data as Profile) ?? null);
-        setRoles(((rolesRes.data ?? []) as { role: AppRole }[]).map((r) => r.role));
+        setProfile(outcome.profile);
+        setRoles(outcome.roles);
         setAuthDataError(null);
         setLoading(false);
       } catch (error) {
