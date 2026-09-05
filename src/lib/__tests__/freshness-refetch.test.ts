@@ -106,9 +106,10 @@ describe("real QueryClient refetch", () => {
     const qc = new QueryClient();
     const key = ["cloud", "kpi_values"];
     let calls = 0;
-    await qc.fetchQuery({ queryKey: key, queryFn: async () => ++calls });
+    const queryFn = async () => ++calls;
+    await qc.fetchQuery({ queryKey: key, queryFn });
     // Keep an active observer so the query is eligible, like a mounted screen.
-    const observer = new QueryObserver(qc, { queryKey: key, enabled: false });
+    const observer = new QueryObserver(qc, { queryKey: key, queryFn, staleTime: Infinity });
     const unsubscribe = observer.subscribe(() => {});
     const outcome = await run(qc, key);
     unsubscribe();
