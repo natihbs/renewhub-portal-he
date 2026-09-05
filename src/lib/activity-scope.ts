@@ -69,10 +69,7 @@ export function resolveActivityScope(input: ActivityScopeInput): ActivityScope {
     if (!input.isAdmin && !authorized.has(requested)) {
       throw new Error(ACTIVITY_TEAM_FORBIDDEN_MESSAGE);
     }
-    const repIds = input.scopedRepIds.filter(isUuid);
-    return repIds.length === 0 && !isUuid(requested)
-      ? { kind: "none" }
-      : { kind: "scoped", repIds, teamIds: [requested] };
+    return { kind: "scoped", repIds: input.scopedRepIds.filter(isUuid), teamIds: [requested] };
   }
 
   if (input.isAdmin) return { kind: "all" };
